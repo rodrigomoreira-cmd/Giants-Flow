@@ -1,0 +1,256 @@
+﻿<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Salão de Mesas & Entrevistas | EventFunnel</title>
+    <!-- Google Material Symbols Outlined -->
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
+    />
+    <!-- Folha Centralizada Master Única -->
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body class="salao-body">
+    <div class="app-layout">
+      <!-- SIDEBAR GLOBAL D.CC -->
+      <aside class="app-sidebar"></aside>
+
+      <!-- ÁREA PRINCIPAL -->
+      <main class="app-main">
+        <header class="app-header">
+          <div class="header-title-block" style="display: flex; align-items: center; gap: 1.5rem">
+            <h1>Salão de Mesas & Entrevistas</h1>
+            <div class="header-select-turma-box">
+              <label for="selectTurma" class="header-select-label">Turma:</label>
+              <select id="selectTurma" class="form-control select-turma-header"></select>
+            </div>
+          </div>
+          <div class="header-actions">
+            <button class="btn-icon" id="themeToggleBtn" title="Alternar Tema">
+              <span class="material-symbols-outlined">dark_mode</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- WORKSPACE COM SUB-SIDEBAR DE PARTICIPANTES E CANVAS DO SALÃO -->
+        <div class="salao-workspace">
+          <!-- PAINEL LATERAL INTERNO DO SALÃO -->
+          <aside class="sidebar-layout">
+            <div class="sidebar-section">
+              <div class="section-title">
+                <span class="material-symbols-outlined section-icon">meeting_room</span>
+                <span>Estrutura do Salão</span>
+              </div>
+              <div class="form-group mb-sm">
+                <label for="selectOrientacaoPalco">Orientação do Palco</label>
+                <select id="selectOrientacaoPalco" class="form-control">
+                  <option value="topo">Frente (Topo Central)</option>
+                  <option value="fundo">Fundo (Base)</option>
+                  <option value="esquerda">Lateral Esquerda</option>
+                  <option value="direita">Lateral Direita</option>
+                </select>
+              </div>
+              <button type="button" class="btn btn-primary btn-add-table" id="btnAdicionarMesa">
+                <span class="material-symbols-outlined">add_circle</span>
+                <span>Adicionar Mesa Redonda</span>
+              </button>
+            </div>
+
+            <div class="sidebar-section list-section">
+              <div class="section-header-row">
+                <div class="section-title" style="margin-bottom: 0">
+                  <span class="material-symbols-outlined section-icon">groups</span>
+                  <span>Participantes</span>
+                </div>
+                <div class="filter-pills">
+                  <button type="button" class="pill-btn active" data-filter="pendentes">
+                    Pendentes
+                  </button>
+                  <button type="button" class="pill-btn" data-filter="sentados">Sentados</button>
+                  <button type="button" class="pill-btn" data-filter="todos">Todos</button>
+                </div>
+              </div>
+
+              <div class="search-box">
+                <span class="material-symbols-outlined search-icon">search</span>
+                <input
+                  type="text"
+                  id="inputBuscaParticipante"
+                  class="form-control search-input"
+                  placeholder="Procurar participante ou mesa..."
+                  autocomplete="off"
+                />
+              </div>
+
+              <div class="guest-list-container" id="guestListContainer">
+                <!-- Preenchido via entrevistas.js -->
+              </div>
+            </div>
+          </aside>
+
+          <!-- MAPA / CANVAS DO SALÃO -->
+          <div class="floor-canvas" id="floorCanvas">
+            <div class="canvas-grid-overlay"></div>
+
+            <div class="canvas-header-controls">
+              <div class="canvas-summary" id="canvasSummary">
+                0 Mesas • <span class="highlight-green">0 Lugares Livres</span>
+              </div>
+
+              <div class="quick-locator-box">
+                <span class="material-symbols-outlined locator-icon">my_location</span>
+                <select id="selectLocalizarMesa" class="form-control select-locator">
+                  <option value="">Localizar quem está na mesa...</option>
+                </select>
+              </div>
+
+              <div class="zoom-controls">
+                <button type="button" class="btn-zoom" id="btnZoomOut" title="Diminuir Zoom">
+                  <span class="material-symbols-outlined">remove</span>
+                </button>
+                <span class="zoom-indicator" id="zoomIndicator">100%</span>
+                <button type="button" class="btn-zoom" id="btnZoomIn" title="Aumentar Zoom">
+                  <span class="material-symbols-outlined">add</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn-zoom btn-zoom-reset"
+                  id="btnZoomReset"
+                  title="Restaurar visualização"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+
+            <div class="floor-stage-wrapper pos-topo" id="floorStageWrapper">
+              <div class="stage-box" id="stageBox">
+                <div class="stage-badge">
+                  <span class="material-symbols-outlined">tv</span>
+                  <span>PALCO / TELÃO</span>
+                </div>
+                <div class="stage-subtitle">Área Central de Apresentação</div>
+              </div>
+
+              <div class="tables-stage" id="tablesStage">
+                <!-- Mesas renderizadas dinamicamente via entrevistas.js -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- MODAL DE AVALIAÇÃO E PARECER DE ENTREVISTA -->
+    <div class="modal-overlay" id="modalResultadoEntrevista" aria-hidden="true">
+      <div class="modal-card modal-entrevista-card">
+        <div class="modal-header">
+          <div>
+            <h3 class="modal-title" id="modalResultadoTitulo">Parecer de Qualificação</h3>
+            <p class="modal-subtitle">
+              Avalie o fit comercial e decida o encaminhamento do participante
+            </p>
+          </div>
+          <button
+            type="button"
+            class="btn-sidebar-options"
+            id="btnFecharModalResultado"
+            title="Fechar"
+          >
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+        <div class="modal-client-meta" id="modalResultadoMeta">Participante</div>
+
+        <form id="formResultadoEntrevista">
+          <input type="hidden" id="modalResultadoAplicacaoId" />
+
+          <div class="form-group mb-sm">
+            <label class="modal-field-label">Turno da Avaliação</label>
+            <div class="modal-turno-toggle">
+              <button
+                type="button"
+                class="turno-pill-btn active"
+                id="btnTurnoAlmoco"
+                data-turno="almoco"
+              >
+                <span class="material-symbols-outlined">light_mode</span>
+                <span>Turno 1: Almoço</span>
+              </button>
+              <button type="button" class="turno-pill-btn" id="btnTurnoJantar" data-turno="jantar">
+                <span class="material-symbols-outlined">dark_mode</span>
+                <span>Turno 2: Jantar</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group mb-sm">
+            <label class="modal-field-label">Decisão da Mesa</label>
+            <div class="resultado-decisao-grid">
+              <label class="resultado-card resultado-card-aprovado" id="labelCardAprovado">
+                <input type="radio" name="decisaoEntrevista" value="aprovado" checked />
+                <div class="resultado-card-body">
+                  <div class="resultado-header-line">
+                    <span class="material-symbols-outlined resultado-icon-status">verified</span>
+                    <strong>Liberar para Proposta</strong>
+                  </div>
+                  <small>Aprovado com fit. Avança para a esteira comercial de palco.</small>
+                </div>
+              </label>
+
+              <label class="resultado-card resultado-card-reprovado" id="labelCardReprovado">
+                <input type="radio" name="decisaoEntrevista" value="reprovado" />
+                <div class="resultado-card-body">
+                  <div class="resultado-header-line">
+                    <span class="material-symbols-outlined resultado-icon-status">block</span>
+                    <strong>Recusar / Sem Fit</strong>
+                  </div>
+                  <small>Sem perfil comercial no momento. Encerra o funil do lead.</small>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div class="form-group mb-sm">
+            <label for="modalResultadoObservacoes" class="modal-field-label"
+              >Observações & Diagnóstico</label
+            >
+            <textarea
+              id="modalResultadoObservacoes"
+              rows="3"
+              class="form-control modal-textarea"
+              placeholder="Descreva as dores, faturamento citado ou histórico levantado na conversa..."
+            ></textarea>
+          </div>
+
+          <div class="modal-actions-footer">
+            <button type="button" class="btn btn-secondary" id="btnCancelarModalResultado">
+              Cancelar
+            </button>
+            <button type="submit" class="btn btn-primary" id="btnSalvarModalResultado">
+              <span class="material-symbols-outlined">check_circle</span>
+              <span>Concluir & Liberar Cadeira</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- CONTAINER DE TOASTS -->
+    <div id="toastContainer"></div>
+
+    <!-- Scripts com caminhos absolutos -->
+    <script src="/js/auth.js"></script>
+    <script src="/js/sidebar.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/theme.js"></script>
+    <script src="/js/utils.js"></script>
+    <script src="/js/entrevistas.js"></script>
+  </body>
+</html>
+
+
+
+

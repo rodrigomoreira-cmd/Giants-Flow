@@ -1,0 +1,357 @@
+﻿<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mesa de Crédito & Compliance | EventFunnel</title>
+    <!-- Google Material Symbols Outlined -->
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
+    />
+    <!-- Folha Centralizada Master Única -->
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body class="financeiro-body">
+    <div class="app-layout">
+      <!-- SIDEBAR GLOBAL D.CC -->
+      <aside class="app-sidebar"></aside>
+
+      <!-- ÁREA PRINCIPAL -->
+      <main class="app-main">
+        <header class="app-header">
+          <div class="header-title-block" style="display: flex; align-items: center; gap: 1.5rem">
+            <h1>Mesa de Compliance, Crédito & Risco</h1>
+            <div class="hotkey-legend-bar">
+              <span class="legend-item"><kbd>↑</kbd><kbd>↓</kbd> Navegar</span>
+              <span class="legend-item"><kbd>A</kbd> Aprovar</span>
+              <span class="legend-item"><kbd>R</kbd> Recusar</span>
+              <span class="legend-item"><kbd>V</kbd> Concretizar Venda</span>
+            </div>
+          </div>
+          <div class="header-actions">
+            <div class="connectivity-badge online" id="statusConectividade">
+              <span class="pulse-dot"></span> Sincronizado
+            </div>
+            <button
+              class="btn-icon"
+              id="btnAlternarSom"
+              title="Alternar Alerta Sonoro de Novas Propostas"
+            >
+              <span class="material-symbols-outlined">notifications</span>
+            </button>
+            <button class="btn-icon" id="btnAtualizarFila" title="Sincronizar Fila">
+              <span class="material-symbols-outlined">sync</span>
+            </button>
+            <button class="btn-icon" id="themeToggleBtn" title="Alternar Tema">
+              <span class="material-symbols-outlined">dark_mode</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="financeiro-workspace">
+          <!-- PAINEL ESQUERDO: FILA DE PROPOSTAS COMERCIALMENTE ENVIADAS -->
+          <aside class="sidebar-fila-financeiro">
+            <div class="sidebar-section-header">
+              <div class="section-title">
+                <span class="material-symbols-outlined section-icon">account_balance</span>
+                <span>Fila de Crédito</span>
+              </div>
+              <span class="kpi-badge-pill orange" id="countFilaPendentes">0</span>
+            </div>
+
+            <div class="filter-pills-row">
+              <button type="button" class="pill-filter active" data-filter="pendentes">
+                Em Análise (<span id="countTabPendentes">0</span>)
+              </button>
+              <button type="button" class="pill-filter" data-filter="aprovados">
+                Aprovados (<span id="countTabAprovados">0</span>)
+              </button>
+              <button type="button" class="pill-filter" data-filter="recusados">
+                Recusados (<span id="countTabRecusados">0</span>)
+              </button>
+              <button type="button" class="pill-filter" data-filter="todos">Todos</button>
+            </div>
+
+            <div class="search-box">
+              <span class="material-symbols-outlined search-icon">search</span>
+              <input
+                type="text"
+                id="inputBuscaFinanceiro"
+                class="form-control search-input"
+                placeholder="Buscar cliente, empresa ou CNPJ..."
+                autocomplete="off"
+              />
+            </div>
+
+            <div class="lista-propostas-scroll" id="containerListaPropostas">
+              <!-- Renderizado dinamicamente via financeiro.js -->
+            </div>
+          </aside>
+
+          <!-- PAINEL DIREITO: ESPELHO DE CRÉDITO, BUREAU & DESPACHO -->
+          <section class="painel-auditoria-section">
+            <div
+              class="card-glass-split dash-card"
+              id="painelDetalheProposta"
+              style="display: none"
+            >
+              <!-- Cabeçalho do Contrato -->
+              <div class="detalhe-header">
+                <div class="header-meta-left">
+                  <span class="proposal-id-badge" id="viewPropostaId">PROPOSTA #000</span>
+                  <span class="status-badge" id="viewStatusBadge">Em Análise</span>
+                </div>
+                <div class="header-meta-right">
+                  <span class="date-badge" id="viewDataEmissao">-</span>
+                </div>
+              </div>
+
+              <!-- Cartão do Participante / Empresa -->
+              <div class="client-dossier-card">
+                <div class="avatar-lg" id="viewClienteAvatar">P</div>
+                <div class="client-dossier-info">
+                  <h2 id="viewClienteNome">Nome Completo do Participante</h2>
+                  <div class="dossier-meta-grid">
+                    <div><span>Empresa:</span> <strong id="viewClienteEmpresa">-</strong></div>
+                    <div>
+                      <span>Documento:</span>
+                      <strong class="font-mono" id="viewClienteDoc">-</strong>
+                    </div>
+                    <div><span>Telefone:</span> <strong id="viewClienteTelefone">-</strong></div>
+                    <div><span>E-mail:</span> <strong id="viewClienteEmail">-</strong></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Grade de Engenharia Financeira da Oferta -->
+              <div class="financial-structure-grid">
+                <div class="structure-card">
+                  <span class="structure-label">Produto Selecionado</span>
+                  <strong class="structure-title" id="viewProdutoNome">-</strong>
+                </div>
+                <div class="structure-card">
+                  <span class="structure-label">Valor Total</span>
+                  <strong class="structure-value text-accent font-mono" id="viewValorTotal"
+                    >R$ 0,00</strong
+                  >
+                </div>
+                <div class="structure-card">
+                  <span class="structure-label">Entrada Declarada</span>
+                  <strong class="structure-value font-mono" id="viewValorEntrada">R$ 0,00</strong>
+                </div>
+                <div class="structure-card">
+                  <span class="structure-label">Cashback Aplicado</span>
+                  <strong class="structure-value font-mono" id="viewCashback">R$ 0,00</strong>
+                </div>
+                <div class="structure-card">
+                  <span class="structure-label">Método Acordado</span>
+                  <strong class="structure-value" id="viewMetodoPagamento">-</strong>
+                </div>
+                <div class="structure-card highlight-installment">
+                  <span class="structure-label">Condição de Parcelamento</span>
+                  <strong class="structure-value text-success font-mono" id="viewParcelamento"
+                    >0x de R$ 0,00</strong
+                  >
+                </div>
+              </div>
+
+              <!-- Módulo de Compliance e Bureau de Crédito (Serasa) -->
+              <div class="compliance-form-box" id="boxFormularioParecer">
+                <div class="compliance-box-header">
+                  <span class="material-symbols-outlined compliance-box-icon">verified_user</span>
+                  <h3 class="compliance-box-title">Auditoria de Bureau de Crédito & Compliance</h3>
+                </div>
+
+                <div class="form-grid-2 mb-3">
+                  <div class="form-group">
+                    <label class="form-label" for="selectScoreSerasa"
+                      >Parecer de Risco / Bureau</label
+                    >
+                    <select id="selectScoreSerasa" class="form-control">
+                      <option value="score_alto_sem_restricao">
+                        Score Alto (Aprovado sem Restrições)
+                      </option>
+                      <option value="score_medio_com_apontamento">
+                        Score Médio (Apontamento Leve / Crédito Consciente)
+                      </option>
+                      <option value="score_baixo_restricao_ativa">
+                        Score Baixo (Restrições Ativas / Atenção)
+                      </option>
+                      <option value="aprovado_excecao_diretoria">
+                        Aprovado por Exceção / Aval de Palco
+                      </option>
+                      <option value="recusado_risco_inadimplencia">
+                        Risco Inadimplência Crítico
+                      </option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="inputScoreManual"
+                      >Pontuação Estimada (0 - 1000)</label
+                    >
+                    <input
+                      type="number"
+                      min="0"
+                      max="1000"
+                      id="inputScoreManual"
+                      class="form-control font-mono"
+                      placeholder="Ex: 850"
+                      value="820"
+                    />
+                  </div>
+                </div>
+
+                <div class="form-group mb-4">
+                  <label class="form-label" for="inputParecerAuditoria"
+                    >Notas do Analista de Risco (Justificativa)</label
+                  >
+                  <textarea
+                    id="inputParecerAuditoria"
+                    rows="2"
+                    class="form-control"
+                    placeholder="Descreva os fatores de decisão ou alinhamento com a diretoria..."
+                  ></textarea>
+                </div>
+
+                <!-- Barra de Ações Rápidas -->
+                <div class="decision-actions-bar" id="barraBotoesDecisao">
+                  <button type="button" class="btn btn-danger-action btn-lg" id="btnRecusarModal">
+                    <span class="material-symbols-outlined">block</span>
+                    <span class="kbd-hint">[R]</span>
+                    <span>Recusar Proposta</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-success-action btn-lg"
+                    id="btnAprovarProposta"
+                  >
+                    <span class="material-symbols-outlined">verified</span>
+                    <span class="kbd-hint">[A]</span>
+                    <span>Aprovar Crédito</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Banner de Venda Concretizada -->
+              <div class="venda-concretizada-box" id="boxVendaConcretizada" style="display: none">
+                <div class="venda-banner-info">
+                  <div class="banner-icon-trophy">
+                    <span class="material-symbols-outlined">emoji_events</span>
+                  </div>
+                  <div>
+                    <h4>Crédito Aprovado para este Participante</h4>
+                    <p class="text-secondary">
+                      Aguardando recebimento do sinal/contrato para finalizar a conversão no salão.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-vendido-action btn-lg"
+                  id="btnConcretizarVenda"
+                >
+                  <span class="material-symbols-outlined">check_circle</span>
+                  <span class="kbd-hint">[V]</span>
+                  <span>Marcar como Vendido Oficial</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Empty State inicial -->
+            <div class="empty-state-large" id="painelEmptyStateFinanceiro">
+              <div class="empty-state-icon-circle">
+                <span class="material-symbols-outlined">shield</span>
+              </div>
+              <h3>Nenhuma proposta selecionada</h3>
+              <p>
+                Selecione um contrato na fila de crédito à esquerda para auditar as condições
+                financeiras, score de bureau e emitir o despacho.
+              </p>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <!-- MODAL DE RECUSA FINANCEIRA -->
+    <div class="modal-overlay" id="modalRecusaFinanceira" aria-hidden="true">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <h3 class="modal-title">Recusa de Análise de Risco</h3>
+            <p class="modal-subtitle" id="modalRecusaSubtitulo">Participante: -</p>
+          </div>
+          <button
+            type="button"
+            class="btn-sidebar-options"
+            id="btnFecharModalRecusa"
+            title="Fechar"
+          >
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        <form id="formRecusaFinanceira">
+          <div class="form-group mb-sm">
+            <label class="form-label" for="modalMotivoRecusa"
+              >Motivo Oficial da Inelegibilidade *</label
+            >
+            <select id="modalMotivoRecusa" class="form-control" required>
+              <option value="restricao_serasa_critica">
+                Apontamentos cadastrais impeditivos no bureau
+              </option>
+              <option value="capacidade_pagamento_insuficiente">
+                Incompatibilidade de faturamento com as parcelas
+              </option>
+              <option value="limite_cartao_insuficiente">
+                Falha na autorização de limite de cartão
+              </option>
+              <option value="desistencia_comprador">
+                Desistência formal do participante no balcão
+              </option>
+              <option value="fraude_divergencia_dados">
+                Divergência documental / Compliance de risco
+              </option>
+            </select>
+          </div>
+
+          <div class="form-group mb-sm">
+            <label class="form-label" for="modalJustificativaDetalhada">Parecer Detalhado</label>
+            <textarea
+              id="modalJustificativaDetalhada"
+              rows="3"
+              class="form-control"
+              placeholder="Detalhes confidenciais da recusa..."
+              required
+            ></textarea>
+          </div>
+
+          <div class="modal-actions-footer">
+            <button type="button" class="btn btn-secondary" id="btnCancelarModalRecusa">
+              Cancelar
+            </button>
+            <button type="submit" class="btn btn-danger-action" id="btnConfirmarRecusa">
+              <span class="material-symbols-outlined">block</span>
+              <span>Confirmar Recusa Definitiva</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- CONTAINER DE TOASTS -->
+    <div id="toastContainer"></div>
+
+    <script src="/js/auth.js"></script>
+    <script src="/js/sidebar.js"></script>
+    <script src="/js/modal.js"></script>
+    <script src="/js/theme.js"></script>
+    <script src="/js/utils.js"></script>
+    <script src="/js/financeiro.js"></script>
+  </body>
+</html>
+
+
+
+

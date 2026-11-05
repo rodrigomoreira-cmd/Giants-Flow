@@ -1,0 +1,142 @@
+services:
+  # ==========================================
+  # 1. Banco de Dados PostgreSQL (Otimizado)
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: app_postgres
+    restart: unless-stopped
+    command: >
+      postgres
+      -c shared_buffers=64MB
+      -c work_mem=2MB
+      -c maintenance_work_mem=16MB
+      -c effective_cache_size=128MB
+      -c max_connections=40
+    environment:
+      POSTGRES_DB: evento_operacao
+      POSTGRES_USER: admin_local
+      POSTGRES_PASSWORD: senha_segura_evento
+      TZ: America/Sao_Paulo
+      PGTZ: America/Sao_Paulo
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - rede_interna
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U admin_local -d evento_operacao']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 200M
+
+  # ==========================================
+  # 2. Redis (Cache e Filas)
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    container_name: app_redis
+    restart: unless-stopped
+    command: >
+      redis-server 
+      --maxmemory 64mb 
+      --maxmemory-policy allkeys-lru 
+      --save "" 
+      --appendonly no
+    networks:
+      - rede_interna
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 96M
+
+  # ==========================================
+  # 3. Backend Node.js (Aplicação)
+  # ==========================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: app_sistema
+    restart: unless-stopped
+    ports:
+      - '8080:8080'
+    volumes:
+      - ./public:/app/public
+      - ./src:/app/src
+    environment:
+      DATABASE_URL: 'postgresql://admin_local:senha_segura_evento@postgres:5432/evento_operacao'
+      REDIS_URL: 'redis://redis:6379'
+      PORT: 8080
+      NODE_ENV: production
+      NODE_OPTIONS: '--max-old-space-size=192'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - rede_interna
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ==========================================
+  # 4. n8n (Motor de Automações)
+  # ==========================================
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: app_n8n
+    restart: unless-stopped
+    environment:
+      - GENERIC_TIMEZONE=America/Sao_Paulo
+      - TZ=America/Sao_Paulo
+      - N8N_PORT=5678
+      - NODE_OPTIONS=--max-old-space-size=256
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_VERSION_NOTIFICATIONS_ENABLED=false
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=48
+      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=500
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n_db
+      - DB_POSTGRESDB_USER=admin_local
+      - DB_POSTGRESDB_PASSWORD=senha_segura_evento
+    ports:
+      - '5678:5678'
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - rede_interna
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+networks:
+  rede_interna:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
+  n8n_data:
