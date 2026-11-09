@@ -18,7 +18,6 @@ export default function Sidebar() {
     { label: 'Entrevistas', path: '/interviews', icon: 'assignment' },
     { label: 'Aprovações', path: '/approvals', icon: 'verified' },
     { label: 'Almoço', path: '/lunch', icon: 'restaurant' },
-    { label: 'Relatórios', path: '/reports', icon: 'analytics' }
   ];
 
   const menuAdmin = [

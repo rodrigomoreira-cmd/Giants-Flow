@@ -10,11 +10,11 @@ export default function CompanyDetail() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
   
-  // GestÃ£o de Cashback (perfil Financeiro)
+  // Gestão de Cashback (perfil Financeiro)
   const [cashbackInput, setCashbackInput] = useState('');
   const [salvandoCashback, setSalvandoCashback] = useState(false);
 
-  // SessÃ£o do utilizador autenticado
+  // Sessão do usuário autenticado
   const sessaoRaw = localStorage.getItem('sessao_operador');
   const sessao = sessaoRaw ? JSON.parse(sessaoRaw) : null;
   const usuario = sessao?.usuario || {};
@@ -24,7 +24,7 @@ export default function CompanyDetail() {
     try {
       setCarregando(true);
       setErro('');
-      // ObtÃ©m o catÃ¡logo de clientes/empresas da turma ativa para localizar o registo
+      // Obtém o catálogo de clientes/empresas da turma ativa para localizar o registro
       const dados = await api.get('/clientes?turmaId=1');
       const lista = Array.isArray(dados) ? dados : dados.clientes || [];
       const encontrada = lista.find(c => String(c.id || c.cliente_id || c.empId) === String(id));
@@ -37,8 +37,8 @@ export default function CompanyDetail() {
           id: id,
           empId: id,
           empresa: `Empresa SGA #${id}`,
-          nome: `EmpresÃ¡rio #${id}`,
-          cpf_cnpj: 'NÃ£o informado',
+          nome: `Empresário #${id}`,
+          cpf_cnpj: 'Não informado',
           telefone: '-',
           email: '-',
           entrevistador_nome: 'Rodrigo Moreira',
@@ -94,24 +94,24 @@ export default function CompanyDetail() {
   };;
 
   const iniciarEntrevista = () => {
-    // Encaminha diretamente para o assistente de conduÃ§Ã£o da entrevista
+    // Encaminha diretamente para o assistente de condução da entrevista
     navigate(`/interviews/${id}/edit`);
   };
 
   if (carregando) {
-    return <div style={{ padding: '2.5rem', color: '#64748b' }}>A carregar cadastro da empresa #{id}...</div>;
+    return <div style={{ padding: '2.5rem', color: '#64748b' }}>Carregando cadastro da empresa #{id}...</div>;
   }
 
   return (
     <div style={{ padding: '2rem', width: '100%', boxSizing: 'border-box' }}>
-      {/* CabeÃ§alho */}
+      {/* Cabeçalho */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
             <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#ff5722', background: '#fff7ed', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
               empId #{empresa?.empId || empresa?.id}
             </span>
-            <span style={{ fontSize: '0.85rem', color: '#64748b' }}>â€¢ Base SGA</span>
+            <span style={{ fontSize: '0.85rem', color: '#64748b' }}>• Base SGA</span>
           </div>
           <h1 style={{ fontSize: '1.75rem', fontWeight: '800', color: '#0f172a', margin: 0 }}>
             {empresa?.empresa || empresa?.razao_social || 'Empresa'}
@@ -141,9 +141,9 @@ export default function CompanyDetail() {
         </div>
       )}
 
-      {/* Grid Superior: Dados Cadastrais e AtribuiÃ§Ãµes */}
+      {/* Grid Superior: Dados Cadastrais e Atribuições */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', marginBottom: '1.5rem' }}>
-        {/* Bloco 1: InformaÃ§Ãµes da Empresa */}
+        {/* Bloco 1: Informações da Empresa */}
         <div style={{ background: '#fff', borderRadius: '14px', border: '1px solid #e2e8f0', padding: '1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
           <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: '700', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <span className="material-symbols-outlined" style={{ color: '#ff5722' }}>domain</span>
@@ -152,7 +152,7 @@ export default function CompanyDetail() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.9rem' }}>
             <div>
-              <span style={{ color: '#64748b', display: 'block', fontSize: '0.75rem', fontWeight: '600' }}>EMPRESÃRIO / SÃ“CIO</span>
+              <span style={{ color: '#64748b', display: 'block', fontSize: '0.75rem', fontWeight: '600' }}>EMPRESÁRIO / SÓCIO</span>
               <span style={{ fontWeight: '600', color: '#1e293b' }}>{empresa?.nome || empresa?.nome_completo || '-'}</span>
             </div>
             <div>
@@ -161,16 +161,16 @@ export default function CompanyDetail() {
             </div>
             <div>
               <span style={{ color: '#64748b', display: 'block', fontSize: '0.75rem', fontWeight: '600' }}>CONTACTO</span>
-              <span style={{ color: '#334155' }}>{empresa?.telefone || empresa?.whatsapp || '-'} {empresa?.email ? `â€¢ ${empresa.email}` : ''}</span>
+              <span style={{ color: '#334155' }}>{empresa?.telefone || empresa?.whatsapp || '-'} {empresa?.email ? `• ${empresa.email}` : ''}</span>
             </div>
           </div>
         </div>
 
-        {/* Bloco 2: AtribuiÃ§Ãµes da Equipa */}
+        {/* Bloco 2: Atribuições da Equipa */}
         <div style={{ background: '#fff', borderRadius: '14px', border: '1px solid #e2e8f0', padding: '1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
           <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: '700', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <span className="material-symbols-outlined" style={{ color: '#0284c7' }}>badge</span>
-            ResponsÃ¡veis AtribuÃ­dos
+            Responsáveis Atribuídos
           </h3>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.9rem' }}>
@@ -189,15 +189,15 @@ export default function CompanyDetail() {
           </div>
         </div>
 
-        {/* Bloco 3: GestÃ£o de Cashback (Financeiro) */}
+        {/* Bloco 3: Gestão de Cashback (Financeiro) */}
         <div style={{ background: '#fff', borderRadius: '14px', border: '1px solid #e2e8f0', padding: '1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
           <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: '700', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <span className="material-symbols-outlined" style={{ color: '#059669' }}>payments</span>
-            Cashback & CrÃ©ditos
+            Cashback & Créditos
           </h3>
 
           <div style={{ marginBottom: '1rem' }}>
-            <span style={{ color: '#64748b', display: 'block', fontSize: '0.75rem', fontWeight: '600' }}>ESTADO DE VALIDAÃ‡ÃƒO</span>
+            <span style={{ color: '#64748b', display: 'block', fontSize: '0.75rem', fontWeight: '600' }}>ESTADO DE VALIDAÇÃO</span>
             <span style={{
               display: 'inline-block',
               marginTop: '0.2rem',
@@ -208,7 +208,7 @@ export default function CompanyDetail() {
               background: empresa?.cashback_validado ? '#dcfce7' : '#fef3c7',
               color: empresa?.cashback_validado ? '#16a34a' : '#d97706'
             }}>
-              {empresa?.cashback_validado ? 'Confirmado pelo Financeiro' : 'Pendente de ConfirmaÃ§Ã£o'}
+              {empresa?.cashback_validado ? 'Confirmado pelo Financeiro' : 'Pendente de Confirmação'}
             </span>
           </div>
 
@@ -245,11 +245,11 @@ export default function CompanyDetail() {
         </div>
       </div>
 
-      {/* HistÃ³rico e VÃ­nculos */}
+      {/* Histórico e Vínculos */}
       <div style={{ background: '#fff', borderRadius: '14px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
         <div style={{ padding: '1rem 1.5rem', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
           <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: '700', color: '#1e293b' }}>
-            VÃ­nculos com Turmas do Evento
+            Vínculos com Turmas do Evento
           </h3>
         </div>
 
@@ -259,14 +259,14 @@ export default function CompanyDetail() {
               <th style={{ padding: '1rem' }}>Turma</th>
               <th style={{ padding: '1rem' }}>Perfil GIANTS</th>
               <th style={{ padding: '1rem' }}>Aplicou para GIANTS</th>
-              <th style={{ padding: '1rem' }}>Momento da AplicaÃ§Ã£o</th>
-              <th style={{ padding: '1rem', textAlign: 'right' }}>AÃ§Ã£o</th>
+              <th style={{ padding: '1rem' }}>Momento da Aplicação</th>
+              <th style={{ padding: '1rem', textAlign: 'right' }}>Ação</th>
             </tr>
           </thead>
           <tbody>
             <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
               <td style={{ padding: '1rem', fontWeight: '600', color: '#0f172a' }}>
-                ImersÃ£o Executiva - EdiÃ§Ã£o Oficial (EVENTO-2026-1)
+                Imersão Executiva - Edição Oficial (EVENTO-2026-1)
               </td>
               <td style={{ padding: '1rem' }}>
                 <span style={{ background: '#e0f2fe', color: '#0284c7', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '700' }}>
@@ -279,7 +279,7 @@ export default function CompanyDetail() {
                 </span>
               </td>
               <td style={{ padding: '1rem', color: '#64748b', fontSize: '0.85rem' }}>
-                PrÃ³ximo ao Almoço
+                Próximo ao Almoço
               </td>
               <td style={{ padding: '1rem', textAlign: 'right' }}>
                 <button

@@ -226,7 +226,7 @@ export default function Fichas() {
           </thead>
           <tbody>
             {carregando ? (
-              <tr><td colSpan="6" style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>A carregar fichas...</td></tr>
+              <tr><td colSpan="6" style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>Carregando fichas...</td></tr>
             ) : fichas.length === 0 ? (
               <tr><td colSpan="6" style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>Nenhuma ficha registada nesta turma.</td></tr>
             ) : (

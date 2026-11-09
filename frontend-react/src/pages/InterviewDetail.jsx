@@ -116,7 +116,7 @@ export default function InterviewDetail() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) {
-      alert('O ficheiro excede o limite máximo permitido de 10 MB.');
+      alert('O arquivo excede o limite máximo permitido de 10 MB.');
       return;
     }
     setAnexos(prev => [
@@ -135,7 +135,7 @@ export default function InterviewDetail() {
   };
 
   if (carregando) {
-    return <div style={{ padding: '2.5rem', color: '#64748b' }}>A carregar detalhes da ficha #{id}...</div>;
+    return <div style={{ padding: '2.5rem', color: '#64748b' }}>Carregando detalhes da ficha #{id}...</div>;
   }
 
   const concluida = ficha?.entrada_confirmada || ficha?.etapa === 'CONCLUIDA';
@@ -339,7 +339,7 @@ export default function InterviewDetail() {
           Comprovativos e Anexos
         </h3>
 
-        {/* Registo de CV da Entrada */}
+        {/* Registro de CV da Entrada */}
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: '240px' }}>
             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>
@@ -377,13 +377,13 @@ export default function InterviewDetail() {
 
             <label style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '0.6rem 1rem', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: '#334155' }}>
               <span className="material-symbols-outlined" style={{ fontSize: '1.1rem' }}>upload_file</span>
-              Selecionar Ficheiro (PDF/JPG até 10 MB)
+              Selecionar Arquivo (PDF/JPG até 10 MB)
               <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={anexarFicheiroSimulado} style={{ display: 'none' }} />
             </label>
           </div>
         </div>
 
-        {/* Lista de Ficheiros */}
+        {/* Lista de Arquivos */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {anexos.length === 0 ? (
             <span style={{ fontSize: '0.85rem', color: '#94a3b8', fontStyle: 'italic' }}>

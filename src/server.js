@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
-const { pool } = require('./infrastructure/database/connection');
+const { pool, rlsStorage } = require('./infrastructure/database/connection');
 const redisModule = require('./infrastructure/redis/client');
 const redisClient = redisModule?.redisClient || redisModule;
 
@@ -52,6 +52,39 @@ app.get(['/entrevistas', '/entrevistas.html'], (_req, res) => renderHtml(res, 'e
 app.get(['/pitch', '/pitch.html'], (_req, res) => renderHtml(res, 'pitch.html'));
 app.get(['/propostas', '/propostas.html'], (_req, res) => renderHtml(res, 'propostas.html'));
 app.get(['/financeiro', '/financeiro.html'], (_req, res) => renderHtml(res, 'financeiro.html'));
+
+// Middleware de Contexto RLS (Sessão de Usuário no PostgreSQL)
+app.use('/api', async (req, res, next) => {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+  let userId = null;
+  let userRole = null;
+
+  if (token) {
+    const match = token.match(/token-(?:auth|admin)-(\d+)/);
+    if (match) {
+      const parsedId = parseInt(match[1], 10);
+      try {
+        const { rows } = await pool.query(
+          'SELECT id, papel, ativo FROM usuarios WHERE id = $1 LIMIT 1',
+          [parsedId]
+        );
+        if (rows.length > 0 && rows[0].ativo) {
+          userId = rows[0].id;
+          userRole = (rows[0].papel || 'USER').toUpperCase();
+          req.usuario = rows[0];
+        }
+      } catch (e) {
+        console.warn('⚠️ Erro ao verificar token RLS:', e.message);
+      }
+    }
+  }
+
+  rlsStorage.run({ userId, userRole }, () => {
+    next();
+  });
+});
 
 // Ponto Único de Entrada para a API (/api/...)
 if (typeof apiRoutes === 'function') {

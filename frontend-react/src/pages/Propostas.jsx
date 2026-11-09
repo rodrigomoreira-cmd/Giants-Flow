@@ -51,10 +51,10 @@ export default function Propostas() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <h1 style={{ fontSize: '1.6rem', fontWeight: '800', color: '#0f172a', margin: 0 }}>
-            Mesa de Propostas & Fecho Comercial
+            Mesa de Propostas & Fechamento Comercial
           </h1>
           <p style={{ color: '#64748b', fontSize: '0.9rem', margin: '0.25rem 0 0' }}>
-            Emissão de condições, contratos e registo de pagamentos
+            Emissão de condições, contratos e registro de pagamentos
           </p>
         </div>
 
@@ -105,7 +105,7 @@ export default function Propostas() {
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {carregando ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>A carregar propostas...</div>
+              <div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>Carregando propostas...</div>
             ) : propostasFiltradas.length === 0 ? (
               <div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>Nenhuma proposta encontrada.</div>
             ) : (

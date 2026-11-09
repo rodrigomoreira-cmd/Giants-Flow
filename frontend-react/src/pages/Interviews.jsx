@@ -131,7 +131,7 @@ export default function Interviews() {
           </thead>
           <tbody>
             {carregando ? (
-              <tr><td colSpan="6" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>A carregar entrevistas...</td></tr>
+              <tr><td colSpan="6" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>Carregando entrevistas...</td></tr>
             ) : sessoesFiltradas.length === 0 ? (
               <tr><td colSpan="6" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>Nenhuma entrevista encontrada.</td></tr>
             ) : (

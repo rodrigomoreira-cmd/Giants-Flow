@@ -4,7 +4,7 @@ const router = express.Router();
 const dbModule = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
 
-// Garante a existÃªncia da tabela regras_comerciais ao carregar o mÃ³dulo
+// Garante a existência da tabela regras_comerciais ao carregar o módulo
 (async () => {
   try {
     await pool.query(`
@@ -20,10 +20,10 @@ const pool = dbModule.pool || dbModule;
       );
       INSERT INTO regras_comerciais (nome, chave, valor_numerico, descricao, ativa)
       VALUES 
-        ('Desconto Comercial MÃ¡ximo AutÃ´nomo', 'desconto_maximo_autonomo', 0.00, 'Qualquer desconto superior a R$ 0 exige aprovaÃ§Ã£o de alÃ§ada.', true),
-        ('Piso de Entrada MÃ­nima', 'entrada_minima_padrao', 10000.00, 'Entradas inferiores a este piso bloqueiam a ficha como Aguardando AprovaÃ§Ã£o.', true),
-        ('Taxa de AlmoÃ§o por Empresa', 'taxa_almoco_empresa', 1000.00, 'Valor oficial da taxa de almoÃ§o cobrado por CNPJ participante.', true),
-        ('Permitir Boleto no Saldo sem AprovaÃ§Ã£o', 'permite_boleto_saldo', 0, 'Se 0, qualquer saldo via boleto bancÃ¡rio exige autorizaÃ§Ã£o prÃ©via.', true)
+        ('Desconto Comercial Máximo AutÃ´nomo', 'desconto_maximo_autonomo', 0.00, 'Qualquer desconto superior a R$ 0 exige aprovação de alçada.', true),
+        ('Piso de Entrada Mínima', 'entrada_minima_padrao', 10000.00, 'Entradas inferiores a este piso bloqueiam a ficha como Aguardando Aprovação.', true),
+        ('Taxa de Almoço por Empresa', 'taxa_almoco_empresa', 1000.00, 'Valor oficial da taxa de almoço cobrado por CNPJ participante.', true),
+        ('Permitir Boleto no Saldo sem Aprovação', 'permite_boleto_saldo', 0, 'Se 0, qualquer saldo via boleto bancário exige autorização prévia.', true)
       ON CONFLICT (chave) DO NOTHING;
     `);
     console.log('ðŸŸ¢ [DB] Tabela regras_comerciais pronta e populada.');
@@ -99,7 +99,7 @@ router.get('/regras', async (req, res) => {
   }
 });
 
-// PUT /regras/:id - AtualizaÃ§Ã£o atÃ´mica com validaÃ§Ã£o de limites no servidor
+// PUT /regras/:id - Atualização atÃ´mica com validação de limites no servidor
 // GET /regras - Listagem completa de regras comerciais
 router.get('/regras', async (req, res) => {
   try {

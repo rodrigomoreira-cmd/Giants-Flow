@@ -24,6 +24,8 @@ export default function InterviewEdit() {
     socios: 1,
     forma_entrada: 'Pix',
     valor_entrada: 10000,
+    cashback: calc.cashback,
+    almoco_pago: false,
     parcelas: 10,
     forma_restante: 'Pix',
     desconto: 0,
@@ -98,7 +100,8 @@ export default function InterviewEdit() {
 
     const valorNegociado = Math.max(0, contrato - desconto);
     const entrada = Math.max(0, Number(ficha.valor_entrada) || 0);
-    const saldo = Math.max(0, valorNegociado - entrada);
+    const cashback = Math.max(0, Number(ficha.cashback) || 0);
+    const saldo = Math.max(0, valorNegociado - entrada - cashback);
     const parcelas = Math.max(1, Number(ficha.parcelas) || 1);
     const valorParcela = saldo > 0 ? (saldo / parcelas) : 0;
 
@@ -113,6 +116,7 @@ export default function InterviewEdit() {
       desconto,
       valorNegociado,
       entrada,
+      cashback,
       saldo,
       parcelas,
       valorParcela,
@@ -327,11 +331,7 @@ export default function InterviewEdit() {
                   <option value="Boleto">Boleto (Requer Aprovação)</option>
                 </select>
               </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Desconto (R$)</label>
-                <input type="number" min="0" value={ficha.desconto} onChange={(e) => atualizarCampo('desconto', Number(e.target.value))} style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
               </div>
-            </div>
           </div>
         )}
 
@@ -401,7 +401,7 @@ export default function InterviewEdit() {
               </div>
 
               <div style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Fecho Comercial</span>
+                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Fechamento Comercial</span>
                 <div style={{ fontWeight: '700', color: '#059669', marginTop: '0.3rem' }}>
                   {calc.valorNegociado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </div>

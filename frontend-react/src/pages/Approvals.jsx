@@ -34,7 +34,7 @@ export default function Approvals() {
       });
       carregarAprovacoes();
     } catch (err) {
-      alert(`Erro ao registar decisão: ${err.message}`);
+      alert(`Erro ao registrar decisão: ${err.message}`);
     }
   };
 
@@ -104,7 +104,7 @@ export default function Approvals() {
           </thead>
           <tbody>
             {carregando ? (
-              <tr><td colSpan="6" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>A carregar pedidos pendentes...</td></tr>
+              <tr><td colSpan="6" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>Carregando pedidos pendentes...</td></tr>
             ) : propostasFiltradas.length === 0 ? (
               <tr><td colSpan="6" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>Nenhuma proposta aguarda aprovação neste momento.</td></tr>
             ) : (

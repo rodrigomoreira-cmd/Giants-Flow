@@ -660,7 +660,7 @@ export default function Lunch() {
                           </button>
                         )}
 
-                        {!part.sentado && !part.empresaPagou && !part.isMembroGiants && (
+                        {!part.sentado && !part.empresaPagou && !part.membro_giants && !part.isMembroGiants && !part.isMembroGiants && (
                           <button
                             onClick={(e) => marcarEmpresaAlmoço(part, e)}
                             title="Registrar pagamento de R$ 1.000 para toda a empresa"

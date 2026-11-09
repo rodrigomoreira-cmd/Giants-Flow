@@ -1,0 +1,1 @@
+node "$PSScriptRoot\backup_db.js"

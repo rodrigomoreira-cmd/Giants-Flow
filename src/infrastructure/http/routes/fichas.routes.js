@@ -20,7 +20,7 @@ router.get('/', async (_req, res) => {
   }
 });
 
-// Registar nova ficha
+// Registrar nova ficha
 router.post('/', async (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   try {
@@ -49,8 +49,8 @@ router.post('/', async (req, res) => {
     const { rows } = await pool.query(query, valores);
     return res.status(201).json(rows[0]);
   } catch (err) {
-    console.error('Erro ao registar ficha:', err);
-    return res.status(500).json({ erro: 'Erro ao registar ficha: ' + err.message });
+    console.error('Erro ao registrar ficha:', err);
+    return res.status(500).json({ erro: 'Erro ao registrar ficha: ' + err.message });
   }
 });
 
