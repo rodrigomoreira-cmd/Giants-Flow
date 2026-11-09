@@ -233,8 +233,9 @@ export default function Lunch() {
   const alocarEmAssentoLivre = async (mesaId) => {
     if (!clienteSelecionadoAlocacao) return;
 
-    if (!clienteSelecionadoAlocacao) {
-      alert(`O participante ${clienteSelecionadoAlocacaome} nÃƒÆ’Ã‚Â£o possui almoÃƒÆ’Ã‚Â§o liberado.\nConceda uma cortesia ou confirme o pagamento de R$ 1.000,00 da empresa.`);
+    const almocoValido = Boolean(clienteSelecionadoAlocacao?.almoco_pago || clienteSelecionadoAlocacao?.cortesia || clienteSelecionadoAlocacao?.cortesia_almoco || clienteSelecionadoAlocacao?.almoco_liberado);
+    if (!almocoValido) {
+      alert(`O participante ${clienteSelecionadoAlocacao?.nome_cracha || clienteSelecionadoAlocacao?.nome_completo || clienteSelecionadoAlocacao?.nome || "Participante"} nÃƒÆ’Ã‚Â£o possui almoÃƒÆ’Ã‚Â§o liberado.\nConceda uma cortesia ou confirme o pagamento de R$ 1.000,00 da empresa.`);
       return;
     }
 
@@ -434,7 +435,7 @@ export default function Lunch() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.9rem', fontWeight: '700' }}>
             <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>ads_click</span>
             <span>
-              Alocação: <u>{clienteSelecionadoAlocacaome}</u> ({clienteSelecionadoAlocacao.empresa}) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â <strong>Clique em um assento livre (+ Livre) de qualquer mesa no salÃƒÆ’Ã‚Â£o</strong>
+              Alocação: <u>{clienteSelecionadoAlocacao?.nome_cracha || clienteSelecionadoAlocacao?.nome_completo || clienteSelecionadoAlocacao?.nome || "Participante"}</u> ({clienteSelecionadoAlocacao.empresa}) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â <strong>Clique em um assento livre (+ Livre) de qualquer mesa no salÃƒÆ’Ã‚Â£o</strong>
             </span>
           </div>
           <button
@@ -1020,7 +1021,7 @@ export default function Lunch() {
                                 alocarEmAssentoLivre(assento.mesaId);
                               }
                             }}
-                            title={estaAlocação ? `Clique para sentar ${clienteSelecionadoAlocacaome} aqui` : 'Assento livre'}
+                            title={estaAlocação ? `Clique para sentar ${clienteSelecionadoAlocacao?.nome_cracha || clienteSelecionadoAlocacao?.nome_completo || clienteSelecionadoAlocacao?.nome || "Participante"} aqui` : 'Assento livre'}
                             style={{
                               position: 'absolute',
                               transform: `translate(${x}px, ${y}px)`,
