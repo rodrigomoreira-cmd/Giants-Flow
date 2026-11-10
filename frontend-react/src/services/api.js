@@ -20,7 +20,7 @@ export async function request(endpoint, options = {}) {
   if (response.status === 401) {
     localStorage.removeItem('sessao_operador');
     window.location.href = '/login';
-    throw new Error('Sessão expirada. Faça login novamente.');
+    throw new Error('SessÃ£o expirada. FaÃ§a login novamente.');
   }
 
   const text = await response.text();
@@ -28,12 +28,12 @@ export async function request(endpoint, options = {}) {
   try {
     dados = text ? JSON.parse(text) : {};
   } catch (e) {
-    console.error('Resposta não-JSON recebida da API:', text);
-    throw new Error(`Erro na API (${response.status}): Servidor retornou resposta inválida.`);
+    console.error('Resposta nÃ£o-JSON recebida da API:', text);
+    throw new Error(`Erro na API (${response.status}): Servidor retornou resposta invÃ¡lida.`);
   }
 
   if (!response.ok) {
-    throw new Error(dados.erro || dados.message || `Erro HTTP ${response.status}`);
+    throw new Error(dados.error || dados.erro || dados.message || `Erro HTTP ${response.status}`);
   }
 
   return dados;

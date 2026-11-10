@@ -36,89 +36,95 @@ router.post('/clientes', async (req, res) => {
 
 // VALIDADOR DE ALMOÇO (PAGO R$ 1000, CORTESIA OU GIANTS)
 
-// ALOCAÇÃO / DESALOCAÇÃO RÁPIDA DE MESA E ASSENTO
+// ALOCAÇÃO NO SALÃO DE LUNCH (MESA E ASSENTO)
+// ALOCAÇÃO DIRETA NO SALÃO DE LUNCH (MESA E ASSENTO)
+// ALOCAÇÃO DIRETA NO SALÃO DE LUNCH (MESA E ASSENTO)
+// ALOCAÇÃO NO SALÃO DE LUNCH
+// ALOCAÇÃO NO SALÃO DE LUNCH
+﻿// ALOCAÇÃO NO SALÃO DE LUNCH
 router.patch('/clientes/:id/mesa', async (req, res) => {
+  const { id } = req.params;
+  const fichaId = parseInt(id, 10);
+  const { mesa, assento } = req.body;
+  const mesaNum = (mesa !== null && mesa !== undefined && mesa !== '') ? parseInt(mesa, 10) : null;
+  const assentoNum = (assento !== null && assento !== undefined && assento !== '') ? parseInt(assento, 10) : null;
+
+  if (isNaN(fichaId)) {
+    return res.status(400).json({ error: 'ID do participante inválido.' });
+  }
+
   const client = await pool.connect();
   try {
-    const { id } = req.params;
-    const { mesa, assento } = req.body;
-    const mesaNum = (mesa !== null && mesa !== undefined && mesa !== '') ? parseInt(mesa, 10) : null;
-    const assentoNum = (assento !== null && assento !== undefined && assento !== '') ? parseInt(assento, 10) : null;
-
     await client.query('BEGIN');
 
-    // 1. Obter dados da ficha alvo com lock de linha
+    // 1. Obter dados do participante com bloqueio pessimista FOR UPDATE
     const { rows: fichaRows } = await client.query(
-      'SELECT id, turma_id, nome_participante FROM fichas WHERE id = $1 FOR UPDATE',
-      [id]
+      'SELECT id, turma_id, nome_participante, empresa, almoco_pago, cortesia_almoco, membro_giants, etapa_funil FROM fichas WHERE id = $1::integer FOR UPDATE',
+      [fichaId]
     );
 
     if (fichaRows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Participante não encontrado.' });
+      return res.status(404).json({ error: 'Participante não encontrado no sistema.' });
     }
 
     const fichaAtual = fichaRows[0];
     const turmaId = fichaAtual.turma_id;
 
-    // 2. Se for uma ALOCAÇÃO (mesa e assento informados), validar conflitos e capacidade
+    // 2. Se for uma alocação no Lunch, validar elegibilidade e concorrência no Salão
     if (mesaNum !== null && assentoNum !== null) {
-      // 2.1 Checar se a mesa existe e validar se assento excede a capacidade
-      try {
-        const { rows: mesaRows } = await client.query(
-          'SELECT capacidade FROM mesas WHERE numero = $1 AND (turma_id = $2 OR turma_id IS NULL) LIMIT 1',
-          [mesaNum, turmaId]
-        );
-        if (mesaRows.length > 0 && assentoNum > (mesaRows[0].capacidade || 10)) {
-          await client.query('ROLLBACK');
-          return res.status(400).json({
-            error: 'O assento ' + assentoNum + ' excede a capacidade máxima da Mesa ' + mesaNum + ' (' + mesaRows[0].capacidade + ' lugares).'
-          });
-        }
-      } catch (e) {
-        // Tabela mesas opcional na checagem estrita
+      const liberadoAlmoco = Boolean(fichaAtual.membro_giants) || 
+                            Boolean(fichaAtual.almoco_pago) || 
+                            Boolean(fichaAtual.cortesia_almoco);
+
+      if (!liberadoAlmoco) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({
+          error: 'Acesso negado: participante não possui almoço liberado (Membro GIANTS, R$ 1.000 pago ou Cortesia).'
+        });
       }
 
-      // 2.2 Checar com FOR UPDATE se o assento já foi tomado por outra ficha
+      // Checa concorrência de assento no Salão de Lunch com casting tipado
       const { rows: ocupante } = await client.query(
-        `SELECT id, nome_participante FROM fichas 
-         WHERE mesa_alocada = $1 
-           AND assento_alocado = $2 
-           AND COALESCE(turma_id, 0) = COALESCE($3, 0)
-           AND id <> $4 
-         FOR UPDATE`,
-        [mesaNum, assentoNum, turmaId, id]
+        'SELECT id, nome_participante FROM fichas WHERE mesa_alocada = $1::integer AND assento_alocado = $2::integer AND COALESCE(turma_id, 0) = COALESCE($3::integer, 0) AND id <> $4::integer FOR UPDATE',
+        [mesaNum, assentoNum, turmaId, fichaId]
       );
 
       if (ocupante.length > 0) {
         await client.query('ROLLBACK');
         return res.status(409).json({
-          error: 'Assento ' + assentoNum + ' da Mesa ' + mesaNum + ' já está ocupado por ' + (ocupante[0].nome_participante || 'outro participante') + '.'
+          error: 'O assento ' + assentoNum + ' da Mesa ' + mesaNum + ' do Salão de Lunch já está ocupado por ' + (ocupante[0].nome_participante || 'outro participante') + '.'
         });
       }
     }
 
-    // 3. Executar a alocação ou liberação de assento
-    const { rows } = await client.query(
-      `UPDATE fichas 
-       SET mesa_alocada = $1,
-           assento_alocado = $2,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $3
-       RETURNING id, empresa, nome_participante, mesa_alocada, assento_alocado, almoco_pago, cortesia_almoco, membro_giants, etapa_funil`,
-      [mesaNum, assentoNum, id]
-    );
+    // 3. Atualizar alocação no Salão de Lunch com casting explícito ($1::integer)
+    const sqlUpdate = `
+      UPDATE fichas 
+      SET mesa_alocada = $1::integer, 
+          assento_alocado = $2::integer, 
+          etapa_funil = CASE 
+            WHEN $1::integer IS NOT NULL AND (etapa_funil IS NULL OR etapa_funil IN ('lead', 'novo')) THEN 'entrevista' 
+            ELSE etapa_funil 
+          END, 
+          updated_at = CURRENT_TIMESTAMP 
+      WHERE id = $3::integer 
+      RETURNING id, empresa, nome_participante, mesa_alocada, assento_alocado, almoco_pago, cortesia_almoco, membro_giants, etapa_funil
+    `;
+
+    const { rows } = await client.query(sqlUpdate, [mesaNum, assentoNum, fichaId]);
 
     await client.query('COMMIT');
     res.json(rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');
+    console.error('ERRO ALOCAÇÃO SALÃO DE LUNCH:', err);
     if (err.code === '23505') {
       return res.status(409).json({
-        error: 'Conflito de concorrência: este assento acabou de ser preenchido por outro operador.'
+        error: 'Conflito de concorrência: este assento do Salão de Lunch acabou de ser ocupado por outro operador.'
       });
     }
-    res.status(500).json({ error: 'Erro ao atualizar mesa: ' + err.message });
+    res.status(500).json({ error: 'Erro ao alocar no Salão de Lunch: ' + err.message });
   } finally {
     client.release();
   }

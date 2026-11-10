@@ -15,7 +15,7 @@ export default function Lunch() {
   const [filtroParticipantes, setFiltroParticipantes] = useState('pendentes'); // 'pendentes' | 'sentados' | 'todos'
   const [termoBuscaLateral, setTermoBuscaLateral] = useState('');
 
-  // SeleÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o para alocaÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o
+  // SeleÆ’§Æ’£o para alocaÆ’§Æ’£o
   const [clienteSelecionadoAlocacao, setClienteSelecionadoAlocacao] = useState(null);
 
   // Zoom, Foco e Glow
@@ -113,7 +113,7 @@ export default function Lunch() {
 
       setMesas(mesasFormatadas);
     } catch (err) {
-      setErro(err.message || 'Erro ao carregar salÃƒÆ’Ã‚Â£o.');
+      setErro(err.message || 'Erro ao carregar salão.');
     } finally {
       setCarregando(false);
     }
@@ -123,7 +123,7 @@ export default function Lunch() {
     carregarDados();
   }, []);
 
-  // ConsolidaÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o dos Participantes e ClassificaÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o das Regras de Almoço
+  // ConsolidaÆ’§Æ’£o dos Participantes e ClassificaÆ’§Æ’£o das Regras de Almoço
   const idsSentados = new Set();
   mesas.forEach(m => {
     m.ocupantesLista.forEach(o => {
@@ -148,7 +148,7 @@ export default function Lunch() {
       }
     }
 
-    // IdentificaÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o de Membro Giants
+    // IdentificaÆ’§Æ’£o de Membro Giants
     const isMembroGiants = (c.perfil || '').toLowerCase().includes('giants') || 
                            (c.tipo || '').toLowerCase().includes('giants') ||
                            c.perfil_giants === true;
@@ -159,8 +159,8 @@ export default function Lunch() {
     // Cortesia Administrativa Concedida
     const temCortesia = cortesiasLocais[c.id] === true || c.cortesia === true;
 
-    // CritÃƒÆ’Ã‚Â©rio Global de LiberaÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o para AlmoÃƒÆ’Ã‚Â§ar
-    const liberadoAlmoço = isMembroGiants || empresaPagou || temCortesia;
+    // Critério Global de LiberaÆ’§Æ’£o para AlmoÆ’§ar
+    const liberadoAlmoco = isMembroGiants || empresaPagou || temCortesia;
 
     let motivoLiberacao = 'Bloqueado';
     if (isMembroGiants) motivoLiberacao = 'Membro GIANTS';
@@ -175,7 +175,7 @@ export default function Lunch() {
       isMembroGiants,
       empresaPagou,
       temCortesia,
-      liberadoAlmoço,
+      liberadoAlmoco,
       motivoLiberacao,
       sentado,
       mesaNumero
@@ -193,20 +193,20 @@ export default function Lunch() {
   });
 
     // Marcar Almoço Pago R$ 1.000 para toda a empresa
-  const marcarEmpresaAlmoço = async (participante, e) => {
+  const marcarEmpresaAlmoco = async (participante, e) => {
     e.stopPropagation();
-    const cv = prompt(`Confirmar pagamento de R$ 1.000,00 de almoÃƒÂ§o para a empresa "${participante.empresa}"?\n\nInforme o cÃƒÂ³digo/comprovante (CV) ou PIX:`, 'PIX-1000');
+    const cv = prompt(`Confirmar pagamento de R$ 1.000,00 de almoço para a empresa "${participante.empresa}"?\n\nInforme o código/comprovante (CV) ou PIX:`, 'PIX-1000');
     if (cv === null) return; // cancelou
 
     try {
-      // Atualiza a empresa como almoÃƒÂ§o pago via API
+      // Atualiza a empresa como almoço pago via API
       await api.patch(`/clientes/${participante.id}`, {
         almoco_pago: true,
         cv_almoco: cv,
         valor_almoco: 1000
       });
 
-      alert(`Almoço confirmado para ${participante.empresa}! Todos os sÃƒÂ³cios e acompanhantes foram liberados.`);
+      alert(`Almoço confirmado para ${participante.empresa}! Todos os sÂ³cios e acompanhantes foram liberados.`);
       carregarDados();
     } catch (err) {
       // Fallback otimista local
@@ -229,13 +229,13 @@ export default function Lunch() {
     }));
   };
 
-  // Alocar em Assento Livre (valida elegibilidade do almoÃƒÆ’Ã‚Â§o)
+  // Alocar em Assento Livre (valida elegibilidade do almoço)
   const alocarEmAssentoLivre = async (mesaId) => {
     if (!clienteSelecionadoAlocacao) return;
 
     const almocoValido = Boolean(clienteSelecionadoAlocacao?.almoco_pago || clienteSelecionadoAlocacao?.cortesia || clienteSelecionadoAlocacao?.cortesia_almoco || clienteSelecionadoAlocacao?.almoco_liberado);
     if (!almocoValido) {
-      alert(`O participante ${clienteSelecionadoAlocacao?.nome_cracha || clienteSelecionadoAlocacao?.nome_completo || clienteSelecionadoAlocacao?.nome || "Participante"} nÃƒÆ’Ã‚Â£o possui almoÃƒÆ’Ã‚Â§o liberado.\nConceda uma cortesia ou confirme o pagamento de R$ 1.000,00 da empresa.`);
+      alert(`O participante ${clienteSelecionadoAlocacao?.nome_cracha || clienteSelecionadoAlocacao?.nome_completo || clienteSelecionadoAlocacao?.nome || "Participante"} não possui almoço liberado.\nConceda uma cortesia ou confirme o pagamento de R$ 1.000,00 da empresa.`);
       return;
     }
 
@@ -435,7 +435,7 @@ export default function Lunch() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.9rem', fontWeight: '700' }}>
             <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>ads_click</span>
             <span>
-              Alocação: <u>{clienteSelecionadoAlocacao?.nome_cracha || clienteSelecionadoAlocacao?.nome_completo || clienteSelecionadoAlocacao?.nome || "Participante"}</u> ({clienteSelecionadoAlocacao.empresa}) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â <strong>Clique em um assento livre (+ Livre) de qualquer mesa no salÃƒÆ’Ã‚Â£o</strong>
+              Alocação: <u>{clienteSelecionadoAlocacao?.nome_cracha || clienteSelecionadoAlocacao?.nome_completo || clienteSelecionadoAlocacao?.nome || "Participante"}</u> ({clienteSelecionadoAlocacao.empresa}) — <strong>Clique em um assento livre (+ Livre) de qualquer mesa no salão</strong>
             </span>
           </div>
           <button
@@ -447,7 +447,7 @@ export default function Lunch() {
         </div>
       )}
 
-      {/* ÃƒÆ’Ã‚Ârea Central: Sidebar Lateral Esquerda + Canvas do SalÃƒÆ’Ã‚Â£o */}
+      {/* Æ’rea Central: Sidebar Lateral Esquerda + Canvas do Salão */}
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         
         {/* Painel Esquerdo: Estrutura & Participantes */}
@@ -490,7 +490,7 @@ export default function Lunch() {
             </button>
           </div>
 
-          {/* SeÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o Participantes com Abas e Regras de Almoço */}
+          {/* SeÆ’§Æ’£o Participantes com Abas e Regras de Almoço */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', color: '#ea580c', flexShrink: 0 }}>
               <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>group</span>
@@ -537,7 +537,7 @@ export default function Lunch() {
               />
             </div>
 
-            {/* Lista com ValidaÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o de Almoço */}
+            {/* Lista com ValidaÆ’§Æ’£o de Almoço */}
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem', paddingRight: '0.25rem' }}>
               {participantesFiltrados.length === 0 ? (
                 <div style={{ padding: '2rem 1rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>
@@ -557,33 +557,46 @@ export default function Lunch() {
                           return;
                         }
 
-                        if (!part.liberadoAlmoço) {
-                          alert(`Almoço Bloqueado para ${part.nome}.\nCritÃƒÆ’Ã‚Â©rio: R$ 1.000 pago por empresa, Cortesia ou Membro GIANTS.`);
+                        if (!part.liberadoAlmoco) {
+                          alert(`Almoço Bloqueado para ${part.nome}.\nCritério: R$ 1.000 pago por empresa, Cortesia ou Membro GIANTS.`);
                           return;
                         }
 
                         setClienteSelecionadoAlocacao(clienteSelecionadoAlocacao?.id === part.id ? null : part);
                       }}
                       style={{
-                        background: estaSelecionado ? '#fff7ed' : '#f8fafc',
+                        background: estaSelecionado
+                          ? (part.isMembroGiants ? '#f5f3ff' : '#fff7ed')
+                          : (part.isMembroGiants ? '#faf5ff' : '#f8fafc'),
                         border: '2px solid',
-                        borderColor: estaSelecionado ? '#ff5722' : '#e2e8f0',
+                        borderColor: estaSelecionado
+                          ? (part.isMembroGiants ? '#7c3aed' : '#ff5722')
+                          : (part.isMembroGiants ? '#c084fc' : '#e2e8f0'),
                         borderRadius: '10px',
                         padding: '0.75rem',
                         display: 'flex',
                         flexDirection: 'column',
                         gap: '0.4rem',
-                        cursor: part.sentado || part.liberadoAlmoço ? 'pointer' : 'default',
+                        cursor: part.sentado || part.liberadoAlmoco ? 'pointer' : 'default',
                         transition: 'all 0.15s ease',
-                        boxShadow: estaSelecionado ? '0 0 10px rgba(255,87,34,0.3)' : 'none',
-                        opacity: !part.liberadoAlmoço && !part.sentado ? 0.75 : 1
+                        boxShadow: estaSelecionado
+                          ? (part.isMembroGiants ? '0 0 12px rgba(124, 58, 237, 0.45)' : '0 0 10px rgba(255,87,34,0.3)')
+                          : (part.isMembroGiants ? '0 2px 6px rgba(168, 85, 247, 0.12)' : 'none'),
+                        opacity: !part.liberadoAlmoco && !part.sentado ? 0.75 : 1
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div style={{ minWidth: 0, flex: 1 }}>
-                          <span style={{ fontWeight: '700', fontSize: '0.85rem', color: estaSelecionado ? '#ea580c' : '#0f172a', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {part.nome}
-                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <span style={{ fontWeight: '700', fontSize: '0.85rem', color: estaSelecionado ? (part.isMembroGiants ? '#6b21a8' : '#ea580c') : (part.isMembroGiants ? '#581c87' : '#0f172a'), display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {part.nome}
+                            </span>
+                            {part.isMembroGiants && (
+                              <span style={{ background: '#7c3aed', color: '#fff', fontSize: '0.62rem', fontWeight: '800', padding: '0.1rem 0.35rem', borderRadius: '4px', letterSpacing: '0.5px', flexShrink: 0 }}>
+                                GIANTS
+                              </span>
+                            )}
+                          </div>
                           <span style={{ fontSize: '0.72rem', color: '#64748b', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {part.empresa}
                           </span>
@@ -591,7 +604,7 @@ export default function Lunch() {
 
                         {part.sentado ? (
                           <span
-                            title="Clique para localizar no salÃƒÆ’Ã‚Â£o"
+                            title="Clique para localizar no salão"
                             style={{
                               background: '#fff7ed',
                               color: '#ea580c',
@@ -622,7 +635,7 @@ export default function Lunch() {
                         )}
                       </div>
 
-                      {/* Selos de ValidaÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o do Almoço e BotÃƒÆ’Ã‚Â£o de Cortesia */}
+                      {/* Selos de ValidaÆ’§Æ’£o do Almoço e BotÆ’£o de Cortesia */}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem', paddingTop: '0.35rem', borderTop: '1px solid #f1f5f9' }}>
                         <span style={{
                           fontSize: '0.68rem',
@@ -663,7 +676,7 @@ export default function Lunch() {
 
                         {!part.sentado && !part.empresaPagou && !part.membro_giants && !part.isMembroGiants && !part.isMembroGiants && (
                           <button
-                            onClick={(e) => marcarEmpresaAlmoço(part, e)}
+                            onClick={(e) => marcarEmpresaAlmoco(part, e)}
                             title="Registrar pagamento de R$ 1.000 para toda a empresa"
                             style={{
                               background: '#ecfdf5',
@@ -688,10 +701,10 @@ export default function Lunch() {
           </div>
         </div>
 
-        {/* SalÃƒÆ’Ã‚Â£o de Mesas com Grid Pontilhado */}
+        {/* Salão de Mesas com Grid Pontilhado */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
           
-          {/* Barra Superior do SalÃƒÆ’Ã‚Â£o */}
+          {/* Barra Superior do Salão */}
           <div style={{ padding: '0.85rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, background: '#fff', borderBottom: '1px solid #f1f5f9' }}>
             <div style={{ fontSize: '0.95rem', fontWeight: '800', color: '#0f172a' }}>
               {totalMesas} Mesas • <span style={{ color: '#059669' }}>{lugaresLivres} Lugares Livres</span>
@@ -726,7 +739,7 @@ export default function Lunch() {
 <option value="">🔍 Localizar quem está na mesa...</option>
                   {todasAsPessoasMesa.map((p, idx) => (
                     <option key={idx} value={p.id}>
-                      {p.tipo === 'entrevistador' ? 'ÃƒÂ°Ã…Â¸Ã…Â½Ã‚Â¤ ' : 'ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ‚Â¤ '} {p.nome}
+                      {p.tipo === 'entrevistador' ? 'Â°Ã…Â¸Ã…Â½¤ ' : 'Â°Ã…Â¸Ã¢â‚¬Ëœ¤ '} {p.nome}
                     </option>
                   ))}
                 </select>
@@ -757,7 +770,7 @@ export default function Lunch() {
             </div>
           </div>
 
-          {/* Canvas do SalÃƒÆ’Ã‚Â£o */}
+          {/* Canvas do Salão */}
           <div
             ref={containerSalaoRef}
             style={{

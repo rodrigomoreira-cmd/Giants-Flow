@@ -203,7 +203,7 @@ export default function Companies() {
         rotuloAlmoco,
         bgAlmoco,
         corAlmoco,
-        rotuloMesa: '⚠️ Escolher Mesa',
+        rotuloMesa: '⚠️ Alocar Lunch',
         bgMesa: '#fff7ed',
         corMesa: '#c2410c',
         podeEntrevista: false
@@ -244,7 +244,7 @@ export default function Companies() {
             style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#0284c7' }}
           >
             <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>restaurant</span>
-            Ver Salão de Almoço
+            Ver Salão de Lunch
           </button>
           <button
             onClick={carregarDados}
@@ -283,7 +283,7 @@ export default function Companies() {
               <th style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem' }}>Empresa / Representante</th>
               <th style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem' }}>Documento</th>
               <th style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem' }}>1. Almoço</th>
-              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem' }}>2. Mesa Almoço</th>
+              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem' }}>2. Mesa Lunch</th>
               <th style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem', textAlign: 'right' }}>3. Entrevista</th>
             </tr>
           </thead>
@@ -529,7 +529,7 @@ export default function Companies() {
                     <input type="radio" name="tipoAlmoco" value="cortesia" checked={tipoAlmoco === 'cortesia'} onChange={() => setTipoAlmoco('cortesia')} />
                     <div>
                       <div style={{ fontWeight: '700', fontSize: '0.9rem', color: '#0284c7' }}>● Cortesia</div>
-                      <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Isenção autorizada pela diretoria comercial</div>
+                      <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Isenão autorizada pela diretoria comercial</div>
                     </div>
                   </label>
 
@@ -575,7 +575,7 @@ export default function Companies() {
           <div style={{ background: '#fff', borderRadius: '16px', width: '100%', maxWidth: '480px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)', overflow: 'hidden' }}>
             <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc' }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#0f172a', fontWeight: '800' }}>Passo 2 — Alocação Rápida de Mesa</h3>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#0f172a', fontWeight: '800' }}>Passo 2 — Alocação no Salão de Lunch</h3>
                 <span style={{ fontSize: '0.8rem', color: '#64748b' }}>{clienteAlvoMesa.empresa} • {clienteAlvoMesa.nome || clienteAlvoMesa.nome_participante}</span>
               </div>
               <button onClick={() => setModalMesaAberto(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
