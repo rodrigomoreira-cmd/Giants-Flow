@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+﻿import { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
+import { useTurma } from '../context/TurmaContext';
 
 export default function Lunch() {
-  const [turmas, setTurmas] = useState([]);
-  const [turmaSelecionada, setTurmaSelecionada] = useState(1);
+    const [turmas, setTurmas] = useState([]);
+  const { turmaSelecionada } = useTurma();
   const [mesas, setMesas] = useState([]);
   const [clientesBase, setClientesBase] = useState([]);
   const [entrevistadores, setEntrevistadores] = useState([]);
@@ -35,7 +36,7 @@ export default function Lunch() {
 
       const [aux, clientesDados] = await Promise.all([
         api.get('/auxiliares'),
-        api.get('/clientes?turmaId=1')
+        api.get(`/clientes?turmaId=${turmaSelecionada || 1}`)
       ]);
 
       setTurmas(aux.turmas || []);
@@ -45,7 +46,7 @@ export default function Lunch() {
       setClientesBase(listaClientes);
 
       const tId = aux.turmas?.[0]?.id || 1;
-      setTurmaSelecionada(tId);
+      // Seleção mantida pelo Header Global
 
       const mesasFormatadas = (aux.mesas || []).map(m => {
         const ocupantesLista = [];
@@ -119,9 +120,7 @@ export default function Lunch() {
     }
   };
 
-  useEffect(() => {
-    carregarDados();
-  }, []);
+  useEffect(() => { if (turmaSelecionada) carregarDados(); }, [turmaSelecionada]);
 
   // ConsolidaÆ’§Æ’£o dos Participantes e ClassificaÆ’§Æ’£o das Regras de Almoço
   const idsSentados = new Set();
@@ -410,18 +409,7 @@ export default function Lunch() {
           <h1 style={{ fontSize: '1.25rem', fontWeight: '800', color: '#0f172a', margin: 0 }}>
             Salão de Mesas & Entrevistas
           </h1>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: '600' }}>Turma:</span>
-            <select
-              value={turmaSelecionada}
-              onChange={(e) => setTurmaSelecionada(Number(e.target.value))}
-              style={{ padding: '0.4rem 0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: '600', color: '#0f172a', fontSize: '0.85rem' }}
-            >
-              {turmas.map(t => (
-                <option key={t.id} value={t.id}>{t.codigo} - {t.nome}</option>
-              ))}
-            </select>
-          </div>
+          {/* Filtro de turma gerenciado pelo Header Global */}
         </div>
 
         <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#fff7ed', border: '1px solid #fed7aa', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ea580c' }}>
@@ -712,38 +700,7 @@ export default function Lunch() {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
               {/* Dropdown de Busca Direta */}
-              <div style={{ position: 'relative', minWidth: '270px' }}>
-                <select
-                  value={destaquePessoaId || ''}
-                  onChange={(e) => {
-                    const idSelecionado = e.target.value;
-                    if (!idSelecionado) return;
-                    const item = todasAsPessoasMesa.find(p => String(p.id) === String(idSelecionado));
-                    if (item) {
-                      focarPessoaEMesa(item.id, item.mesaId);
-                    }
-                  }}
-                  style={{
-                    width: '100%',
-                    padding: '0.5rem 1rem',
-                    borderRadius: '10px',
-                    border: '1px solid #cbd5e1',
-                    background: '#fff',
-                    fontSize: '0.85rem',
-                    fontWeight: '600',
-                    color: '#334155',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
-                  }}
-                >
-<option value="">🔍 Localizar quem está na mesa...</option>
-                  {todasAsPessoasMesa.map((p, idx) => (
-                    <option key={idx} value={p.id}>
-                      {p.tipo === 'entrevistador' ? 'Â°Ã…Â¸Ã…Â½¤ ' : 'Â°Ã…Â¸Ã¢â‚¬Ëœ¤ '} {p.nome}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Filtro de turma gerenciado pelo Header Global */}
 
               {/* Controles de Zoom */}
               <div style={{ display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '10px', overflow: 'hidden' }}>

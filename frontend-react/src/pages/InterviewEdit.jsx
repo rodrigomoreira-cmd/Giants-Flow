@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 
@@ -54,7 +54,7 @@ export default function InterviewEdit() {
         setErro('');
         
         // 1. Carregar lista de clientes para obter dados da aplicação
-        const dadosClientes = await api.get('/clientes?turmaId=1');
+        const dadosClientes = await api.get('/clientes?turmaId=${localStorage.getItem("turma_ativa_id") || "1491"}');
         const lista = Array.isArray(dadosClientes) ? dadosClientes : dadosClientes.clientes || [];
         const clienteEncontrado = lista.find(c => String(c.id || c.cliente_id || c.aplicacao_id) === String(id));
 

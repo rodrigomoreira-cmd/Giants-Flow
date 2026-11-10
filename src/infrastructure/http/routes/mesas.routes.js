@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const dbModule = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
@@ -28,16 +28,8 @@ router.get('/auxiliares', async (req, res) => {
       if (dbMesas && dbMesas.length > 0) listaMesas = dbMesas;
     } catch (_) {}
 
-    if (listaMesas.length === 0) {
-      listaMesas = [
-        { id: 1, numero: 1, nome: 'Mesa 1', capacidade_total: 4, entrevistadores_ids: [] },
-        { id: 2, numero: 2, nome: 'Mesa 2', capacidade_total: 4, entrevistadores_ids: [] },
-        { id: 3, numero: 3, nome: 'Mesa 3', capacidade_total: 4, entrevistadores_ids: [] },
-        { id: 4, numero: 4, nome: 'Mesa 4', capacidade_total: 4, entrevistadores_ids: [] },
-        { id: 5, numero: 5, nome: 'Mesa 5', capacidade_total: 4, entrevistadores_ids: [] },
-        { id: 6, numero: 6, nome: 'Mesa 6', capacidade_total: 4, entrevistadores_ids: [] }
-      ];
-    }
+    // Salão vazio legítimo respeita banco de dados
+      // if (listaMesas.length === 0) mock removido
 
     const mesasComOcupantes = listaMesas.map(m => {
       const numMesa = Number(m.numero || m.id);

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { api } from '../services/api';
 
 export default function AdminCompanies() {
@@ -6,7 +6,7 @@ export default function AdminCompanies() {
   const [carregando, setCarregando] = useState(true);
 
   useEffect(() => {
-    api.get('/clientes?turmaId=1')
+    api.get('/clientes?turmaId=${localStorage.getItem("turma_ativa_id") || "1491"}')
       .then(d => setEmpresas(Array.isArray(d) ? d : d.clientes || []))
       .catch(() => setEmpresas([]))
       .finally(() => setCarregando(false));

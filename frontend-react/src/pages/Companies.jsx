@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { useTurma } from '../context/TurmaContext';
 import { useNavigate } from 'react-router-dom';
 
 export default function Companies() {
+  const { turmaSelecionada } = useTurma();
   const [empresas, setEmpresas] = useState([]);
   const [mesasCadastradas, setMesasCadastradas] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -31,7 +33,7 @@ export default function Companies() {
       setCarregando(true);
       setErro('');
       const [dados, aux] = await Promise.all([
-        api.get('/clientes?turmaId=1'),
+        api.get(`/clientes?turmaId=${turmaSelecionada || 1}`),
         api.get('/auxiliares')
       ]);
 
@@ -47,9 +49,7 @@ export default function Companies() {
     }
   };
 
-  useEffect(() => {
-    carregarDados();
-  }, []);
+  useEffect(() => { if (turmaSelecionada) carregarDados(); }, [turmaSelecionada]);
 
   const empresasFiltradas = empresas.filter((emp) => {
     const termo = busca.toLowerCase();
