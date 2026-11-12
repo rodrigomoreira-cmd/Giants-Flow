@@ -1,8 +1,10 @@
+import { useSearchParams } from 'react-router-dom';
 ﻿import { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
 
 export default function Lunch() {
+  const [searchParams] = useSearchParams();
     const [turmas, setTurmas] = useState([]);
   const { turmaSelecionada } = useTurma();
   const [mesas, setMesas] = useState([]);
@@ -18,6 +20,22 @@ export default function Lunch() {
 
   // SeleÆ’§Æ’£o para alocaÆ’§Æ’£o
   const [clienteSelecionadoAlocacao, setClienteSelecionadoAlocacao] = useState(null);
+
+  // Integração com tela de Empresas: ativa alocação imediata via query param
+  useEffect(() => {
+    const alocarId = searchParams.get('alocarId');
+    if (!alocarId || carregando) return;
+
+    // Busca na lista completa de participantes carregados no salão
+    const listaGeral = Array.isArray(clientesBase) ? clientesBase : [];
+    const alvo = listaGeral.find(p => String(p.id) === String(alocarId));
+    if (alvo) {
+      setClienteSelecionadoAlocacao(alvo);
+      // Remove o param da URL silenciosamente sem recarregar
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [searchParams, carregando, clientesBase]);
+
 
   // Zoom, Foco e Glow
   const [zoom, setZoom] = useState(100);
@@ -122,23 +140,50 @@ export default function Lunch() {
 
   useEffect(() => { if (turmaSelecionada) carregarDados(); }, [turmaSelecionada]);
 
-  // ConsolidaÆ’§Æ’£o dos Participantes e ClassificaÆ’§Æ’£o das Regras de Almoço
+  // Consolidação e Filtragem Estrita do Salão de Almoço
   const idsSentados = new Set();
   mesas.forEach(m => {
-    m.ocupantesLista.forEach(o => {
-      idsSentados.add(String(o.aplicacaoId));
-      idsSentados.add(String(o.id));
+    (m.ocupantesLista || []).forEach(o => {
+      if (o.aplicacaoId) idsSentados.add(String(o.aplicacaoId));
+      if (o.id) idsSentados.add(String(o.id));
     });
   });
 
-  const todosParticipantes = clientesBase.map(c => {
+  // Mapeamento de CNPJs Pagantes na Turma Ativa
+  const cnpjsPagantesSalao = new Set(
+    (clientesBase || [])
+      .filter(e => {
+        const isGiant = Boolean(e.membro_giants) || String(e.origem || '').toUpperCase().includes('GIAN');
+        return !isGiant && (Number(e.valor_almoco || 0) >= 1000 || Boolean(e.almoco_pago));
+      })
+      .map(e => (e.cnpj || e.cpf_cnpj || e.empresa || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  // 1. Unicamente quem possui direito garantido entra no Salão
+  const clientesElegiveisSalao = (clientesBase || []).filter(c => {
+    const isGiant = Boolean(c.membro_giants) || 
+                    String(c.origem || '').toUpperCase().includes('GIAN') || 
+                    Boolean(c.perfil_giants) || 
+                    (c.perfil || '').toLowerCase().includes('giants') || 
+                    (c.tipo || '').toLowerCase().includes('giants');
+
+    const isCortesia = Boolean(c.cortesia_almoco || c.cortesia || cortesiasLocais[c.id]);
+    const docChave = (c.cnpj || c.cpf_cnpj || c.empresa || '').trim().toLowerCase();
+    const isPagoOuMesmoCnpj = !isGiant && (Number(c.valor_almoco || 0) >= 1000 || Boolean(c.almoco_pago) || (docChave && cnpjsPagantesSalao.has(docChave)));
+
+    return isGiant || isCortesia || isPagoOuMesmoCnpj;
+  });
+
+  // 2. Mapeia propriedades reais preservando os dados originais
+  const todosParticipantes = clientesElegiveisSalao.map(c => {
     const sentado = idsSentados.has(String(c.id)) || idsSentados.has(String(c.aplicacao_id));
     let mesaNumero = null;
     let entrevistaId = null;
 
     if (sentado) {
       for (const m of mesas) {
-        const achou = m.ocupantesLista.find(o => String(o.aplicacaoId) === String(c.id) || String(o.id) === String(c.id));
+        const achou = (m.ocupantesLista || []).find(o => String(o.aplicacaoId) === String(c.id) || String(o.id) === String(c.id));
         if (achou) {
           mesaNumero = m.numero;
           entrevistaId = achou.id;
@@ -147,43 +192,37 @@ export default function Lunch() {
       }
     }
 
-    // IdentificaÆ’§Æ’£o de Membro Giants
-    const isMembroGiants = (c.perfil || '').toLowerCase().includes('giants') || 
-                           (c.tipo || '').toLowerCase().includes('giants') ||
-                           c.perfil_giants === true;
+    const isMembroGiants = Boolean(c.membro_giants) || 
+                           String(c.origem || '').toUpperCase().includes('GIAN') || 
+                           Boolean(c.perfil_giants) || 
+                           (c.perfil || '').toLowerCase().includes('giants');
 
-    // Regra: Almoço Pago por Empresa (se empresa pagou R$ 1000 ou almoco_pago == true)
-    const empresaPagou = c.almoco_pago === true || c.almoco_pago === 'sim' || Number(c.valor_almoco) >= 1000;
-
-    // Cortesia Administrativa Concedida
-    const temCortesia = cortesiasLocais[c.id] === true || c.cortesia === true;
-
-    // Critério Global de LiberaÆ’§Æ’£o para AlmoÆ’§ar
-    const liberadoAlmoco = isMembroGiants || empresaPagou || temCortesia;
-
-    let motivoLiberacao = 'Bloqueado';
-    if (isMembroGiants) motivoLiberacao = 'Membro GIANTS';
-    else if (temCortesia) motivoLiberacao = 'Cortesia';
-    else if (empresaPagou) motivoLiberacao = 'Almoço Pago (R$ 1.000)';
+    const temCortesia = Boolean(c.cortesia_almoco || c.cortesia || cortesiasLocais[c.id]);
+    const docChave = (c.cnpj || c.cpf_cnpj || c.empresa || '').trim().toLowerCase();
+    const empresaPagou = !isMembroGiants && (Number(c.valor_almoco || 0) >= 1000 || Boolean(c.almoco_pago) || (docChave && cnpjsPagantesSalao.has(docChave)));
 
     return {
+      ...c,
       id: c.id,
       entrevistaId: entrevistaId || c.id,
-      nome: c.nome || c.nome_completo || 'Participante',
+      nome: c.nome_participante || c.nome_cracha || c.nome || c.nome_completo || 'Participante',
       empresa: c.empresa || c.razao_social || 'Empresa SGA',
       isMembroGiants,
       empresaPagou,
       temCortesia,
-      liberadoAlmoco,
-      motivoLiberacao,
+      liberadoAlmoco: true,
+      motivoLiberacao: isMembroGiants ? 'Membro GIANTS' : (temCortesia ? 'Cortesia' : 'Almoço Pago'),
       sentado,
       mesaNumero
     };
   });
 
+  // 3. Aplicação das Abas e da Busca por Texto (sem rebloquear quem já é elegível)
   const participantesFiltrados = todosParticipantes.filter(p => {
-    const matchTermo = p.nome.toLowerCase().includes(termoBuscaLateral.toLowerCase()) ||
-                       p.empresa.toLowerCase().includes(termoBuscaLateral.toLowerCase());
+    const termo = (termoBuscaLateral || '').toLowerCase().trim();
+    const nome = (p.nome || '').toLowerCase();
+    const empresa = (p.empresa || '').toLowerCase();
+    const matchTermo = !termo || nome.includes(termo) || empresa.includes(termo);
     if (!matchTermo) return false;
 
     if (filtroParticipantes === 'pendentes') return !p.sentado;

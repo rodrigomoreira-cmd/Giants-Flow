@@ -18,15 +18,30 @@ router.post('/propostas', async (req, res) => {
 
     // 1. Executa o caso de uso oficial (salva na tabela propostas com regras e cashback)
     const propostaSalva = await criarPropostaUseCase.execute({
-      aplicacaoId: Number(aplicacaoId),
-      produtoId: Number(dados.produtoId || dados.produto_id || 3),
-      valorTotal: dados.valorTotal ?? dados.valor_negociado,
-      valorEntrada: dados.valorEntrada ?? dados.valor_entrada ?? 0,
-      cashback: dados.cashback ?? 0,
-      metodoPagamento: dados.metodoPagamento || dados.formaEntrada || 'Pix',
-      quantidadeParcelas: dados.quantidadeParcelas || dados.parcelas || 1,
-      valorParcela: dados.valorParcela
-    });
+        aplicacaoId: Number(aplicacaoId),
+        produtoId: Number(dados.produtoId || dados.produto_id || 3),
+        valorTotal: dados.valorTotal ?? dados.valor_negociado,
+        valorEntrada: dados.valorEntrada ?? dados.valor_entrada ?? 0,
+        cashback: dados.cashback ?? 0,
+        metodoPagamento: dados.metodoPagamento || dados.formaEntrada || 'Pix',
+        quantidadeParcelas: dados.quantidadeParcelas || dados.parcelas || 1,
+        valorParcela: dados.valorParcela
+      });
+
+      // Vincula a proposta diretamente à turma informada ou herdada
+      const turmaAlvo = dados.turmaId || dados.turma_id || null;
+      if (propostaSalva?.id) {
+        await pool.query(`
+          UPDATE propostas 
+          SET turma_id = COALESCE(
+            $1::INT, 
+            (SELECT turma_id FROM aplicacoes WHERE id = $2), 
+            (SELECT turma_id FROM fichas WHERE id = $2), 
+            1491
+          )
+          WHERE id = $3
+        `, [turmaAlvo, Number(aplicacaoId), propostaSalva.id]);
+      }
 
     // 2. Mantém a redundância operacional na tabela fichas para retrocompatibilidade
     await pool.query(

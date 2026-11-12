@@ -61,6 +61,8 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=8080
+      - DB_USER=app_evento_user
+      - DB_PASSWORD=${DB_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy

@@ -3,7 +3,8 @@ const { pool } = require('../connection');
 const Proposta = require('../../../domain/entities/Proposta');
 
 class PropostaRepository {
-  async salvar(proposta) {
+  async salvar(proposta, clientParam = null) {
+    const runner = clientParam || pool;
     // C?lculo defensivo de fallback para satisfazer a constraint NOT NULL de valor_parcela
     const qtdParcelas = Number(proposta.quantidadeParcelas) || 1;
     const vTotal = Number(proposta.valorTotal) || 0;
@@ -37,7 +38,7 @@ class PropostaRepository {
       statusBanco,
     ];
 
-    const { rows } = await pool.query(query, values);
+    const { rows } = await runner.query(query, values);
     return this._mapearParaEntidade(rows[0]);
   }
 

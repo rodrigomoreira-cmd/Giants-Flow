@@ -148,6 +148,7 @@ export default function InterviewEdit() {
       // 1. Registra o resultado da entrevista no backend oficial
       await api.post('/entrevistas/resultado', {
         aplicacaoId: appTargetId,
+            turmaId: ficha.turma_id || 1491,
         turno: ficha.periodo_entrevista === 'Almoço' ? 'almoco' : 'jantar',
         resultado: ficha.resultado_comercial,
         observacao: `[${ficha.resultado_comercial}] ${ficha.resultado_obs || ''} | Resumo: ${ficha.resumo_entrevista || 'N/A'}`

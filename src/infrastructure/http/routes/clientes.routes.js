@@ -1,47 +1,46 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const dbModule = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
 
-// 3. CLIENTES COM CASHBACK ATÃ”MICO
+// 3. CLIENTES COM CASHBACK ATÔMICO
 router.get('/clientes', async (req, res) => {
   try {
-    const { turmaId } = req.query;
-    let query = `
-      SELECT f.id, f.empresa, f.nome_participante AS nome_completo, f.email, f.telefone,
-             f.cnpj, f.etapa_funil AS status, f.almoco_pago, f.cortesia_almoco, f.membro_giants,
-             f.cashback, f.mesa_alocada, f.mesa_alocada AS "mesaId", f.assento_alocado, f.assento_alocado AS "assentoId",
-             f.entrevistador_id, f.created_at
-      FROM fichas f
-    `;
-    const params = [];
-    if (turmaId) { query += ' WHERE f.turma_id = $1 OR f.turma_id IS NULL'; params.push(turmaId); }
-    query += ' ORDER BY f.id DESC';
-    const { rows } = await pool.query(query, params);
+    const rawTurma = req.query.turmaId || req.query.turma_id || '';
+    const digits = String(rawTurma).replace(/\D/g, '');
+    const turmaFiltro = digits ? parseInt(digits, 10) : 1491;
+
+    const { rows } = await pool.query(`
+      SELECT 
+        id, 
+        nome_participante, 
+        nome_cracha, 
+        empresa, 
+        cnpj, 
+        cpf_cnpj, 
+        telefone, 
+        email, 
+        turma_id, 
+        almoco_pago, 
+        membro_giants, 
+        valor_almoco, 
+        cortesia_almoco, 
+        mesa_alocada, 
+        assento_alocado,
+        status, 
+        cargo,
+        origem
+      FROM fichas
+      WHERE ($1::INT IS NULL OR turma_id = $1::INT)
+      ORDER BY id ASC
+    `, [turmaFiltro]);
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
-
-router.post('/clientes', async (req, res) => {
-  try {
-    const { empresa, nome, email, telefone, cnpj, turmaId } = req.body;
-    const { rows } = await pool.query(
-      `INSERT INTO fichas (empresa, nome_participante, email, telefone, cnpj, turma_id, etapa_funil)
-       VALUES ($1, $2, $3, $4, $5, $6, 'novo') RETURNING *`, [empresa, nome, email, telefone, cnpj, turmaId || 1]
-    );
-    res.status(201).json(rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-
-// VALIDADOR DE ALMOÇO (PAGO R$ 1000, CORTESIA OU GIANTS)
 
 // ALOCAÇÃO NO SALÃO DE LUNCH (MESA E ASSENTO)
-// ALOCAÇÃO DIRETA NO SALÃO DE LUNCH (MESA E ASSENTO)
-// ALOCAÇÃO DIRETA NO SALÃO DE LUNCH (MESA E ASSENTO)
-// ALOCAÇÃO NO SALÃO DE LUNCH
-// ALOCAÇÃO NO SALÃO DE LUNCH
-﻿// ALOCAÇÃO NO SALÃO DE LUNCH
 router.patch('/clientes/:id/mesa', async (req, res) => {
   const { id } = req.params;
   const fichaId = parseInt(id, 10);
@@ -73,9 +72,7 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
 
     // 2. Se for uma alocação no Lunch, validar elegibilidade e concorrência no Salão
     if (mesaNum !== null && assentoNum !== null) {
-      const liberadoAlmoco = Boolean(fichaAtual.membro_giants) || 
-                            Boolean(fichaAtual.almoco_pago) || 
-                            Boolean(fichaAtual.cortesia_almoco);
+      const liberadoAlmoco = Boolean(fichaAtual.membro_giants) || Boolean(fichaAtual.almoco_pago) || Boolean(fichaAtual.cortesia_almoco) || String(fichaAtual.origem).toUpperCase() === 'GIANTS';
 
       if (!liberadoAlmoco) {
         await client.query('ROLLBACK');
@@ -130,12 +127,12 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
   }
 });
 
+// VALIDADOR DE ALMOÇO (PAGO R$ 1000, CORTESIA OU GIANTS)
 router.patch('/clientes/:id/almoco', async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
     const { tipo, cv_cartao } = req.body; 
-    // tipo: 'pago' | 'cortesia' | 'giants' | 'pendente'
 
     let almoco_pago = false;
     let cortesia_almoco = false;
@@ -190,7 +187,9 @@ router.patch('/clientes/:id', async (req, res) => {
       [almoco_pago, cortesia_almoco, cortesia, req.params.id]
     );
     res.json(rows[0] || { sucesso: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.put('/clientes/:id', async (req, res) => {
@@ -247,6 +246,5 @@ router.put('/clientes/:id', async (req, res) => {
     client.release();
   }
 });
-
 
 module.exports = router;

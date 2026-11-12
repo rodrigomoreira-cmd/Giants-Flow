@@ -10,6 +10,7 @@ export default function Companies() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
   const [busca, setBusca] = useState('');
+  const [filtroAlmoco, setFiltroAlmoco] = useState('todos'); // 'todos' | 'pagos' | 'giants' | 'cortesia' | 'pendentes'
   const [pagina, setPagina] = useState(1);
   const itensPorPagina = 60;
   const navigate = useNavigate();
@@ -33,7 +34,7 @@ export default function Companies() {
       setCarregando(true);
       setErro('');
       const [dados, aux] = await Promise.all([
-        api.get(`/clientes?turmaId=${turmaSelecionada || 1}`),
+        api.get(`/clientes?turmaId=${turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491'}`),
         api.get('/auxiliares')
       ]);
 
@@ -51,14 +52,67 @@ export default function Companies() {
 
   useEffect(() => { if (turmaSelecionada) carregarDados(); }, [turmaSelecionada]);
 
+  const cnpjsPagantes = new Set(
+    empresas
+      .filter(e => !e.membro_giants && (Number(e.valor_almoco || 0) >= 1000 || Boolean(e.almoco_pago)))
+      .map(e => (e.cnpj || e.cpf_cnpj || e.empresa || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+
   const empresasFiltradas = empresas.filter((emp) => {
-    const termo = busca.toLowerCase();
+    const termo = (busca || '').toLowerCase().trim();
     const nome = (emp.nome || emp.nome_participante || emp.nome_completo || '').toLowerCase();
     const razaoSocial = (emp.empresa || '').toLowerCase();
-    const doc = (emp.cpf_cnpj || emp.cnpj || '').toLowerCase();
+    const doc = (emp.cnpj || emp.cpf_cnpj || emp.cpf || '').toLowerCase();
     const empId = String(emp.empId || emp.id || '');
-    return nome.includes(termo) || razaoSocial.includes(termo) || doc.includes(termo) || empId.includes(termo);
+    const matchTermo = !termo || nome.includes(termo) || razaoSocial.includes(termo) || doc.includes(termo) || empId.includes(termo);
+    if (!matchTermo) return false;
+
+    const docChave = (emp.cnpj || emp.cpf_cnpj || emp.empresa || '').trim().toLowerCase();
+    const isGiant = Boolean(emp.membro_giants) || String(emp.origem || '').toUpperCase().includes('GIAN');
+    const isCortesia = Boolean(emp.cortesia_almoco);
+    const isPago = !isGiant && (Number(emp.valor_almoco || 0) >= 1000 || Boolean(emp.almoco_pago) || (docChave && cnpjsPagantes.has(docChave)));
+    const isPendente = !isGiant && !isCortesia && !isPago;
+
+    if (filtroAlmoco === 'pagos') return isPago;
+    if (filtroAlmoco === 'giants') return isGiant;
+    if (filtroAlmoco === 'cortesia') return isCortesia;
+    if (filtroAlmoco === 'pendentes') return isPendente;
+    return true;
+  })
+  .sort((a, b) => {
+    // 1. Agrupamento por Razão Social / Empresa (A - Z)
+    const empA = (a.empresa || a.razao_social || '').trim();
+    const empB = (b.empresa || b.razao_social || '').trim();
+    const cmpEmpresa = empA.localeCompare(empB, 'pt-BR', { sensitivity: 'base' });
+    if (cmpEmpresa !== 0) return cmpEmpresa;
+
+    // 2. Dentro da mesma empresa: Titular pagante (R$ 1.000) primeiro
+    const valA = Number(a.valor_almoco || 0);
+    const valB = Number(b.valor_almoco || 0);
+    if (valB !== valA) return valB - valA;
+
+    // 3. Ordem alfabética pelo nome dos colegas
+    const nomeA = (a.nome || a.nome_participante || '').trim();
+    const nomeB = (b.nome || b.nome_participante || '').trim();
+    return nomeA.localeCompare(nomeB, 'pt-BR', { sensitivity: 'base' });
   });
+
+  const totalPagos = empresas.filter(emp => {
+    const isGiant = Boolean(emp.membro_giants) || String(emp.origem || '').toUpperCase().includes('GIAN');
+    const docChave = (emp.cnpj || emp.cpf_cnpj || emp.empresa || '').trim().toLowerCase();
+    return !isGiant && (Number(emp.valor_almoco || 0) >= 1000 || Boolean(emp.almoco_pago) || (docChave && cnpjsPagantes.has(docChave)));
+  }).length;
+
+  const totalGiants = empresas.filter(emp => Boolean(emp.membro_giants) || String(emp.origem || '').toUpperCase().includes('GIAN')).length;
+  const totalCortesia = empresas.filter(emp => Boolean(emp.cortesia_almoco)).length;
+  const totalPendentes = empresas.filter(emp => {
+    const isGiant = Boolean(emp.membro_giants) || String(emp.origem || '').toUpperCase().includes('GIAN');
+    const isCortesia = Boolean(emp.cortesia_almoco);
+    const docChave = (emp.cnpj || emp.cpf_cnpj || emp.empresa || '').trim().toLowerCase();
+    const isPago = !isGiant && (Number(emp.valor_almoco || 0) >= 1000 || Boolean(emp.almoco_pago) || (docChave && cnpjsPagantes.has(docChave)));
+    return !isGiant && !isCortesia && !isPago;
+  }).length;
 
   const totalPaginas = Math.ceil(empresasFiltradas.length / itensPorPagina) || 1;
   const indiceInicial = (pagina - 1) * itensPorPagina;
@@ -181,9 +235,10 @@ export default function Companies() {
       };
     }
 
-    let rotuloAlmoco = '● Pago R$ 1.000';
-    let corAlmoco = '#15803d';
-    let bgAlmoco = '#dcfce7';
+    const isTitularPagante = Number(emp.valor_almoco || 0) >= 1000;
+    let rotuloAlmoco = isTitularPagante ? '● Pago R$ 1.000' : '● Incluso (Mesmo CNPJ)';
+    let corAlmoco = isTitularPagante ? '#15803d' : '#059669';
+    let bgAlmoco = isTitularPagante ? '#dcfce7' : '#ecfdf5';
 
     if (emp.membro_giants) {
       rotuloAlmoco = '● GIANTS';
@@ -193,7 +248,7 @@ export default function Companies() {
       rotuloAlmoco = '● Cortesia';
       corAlmoco = '#0369a1';
       bgAlmoco = '#e0f2fe';
-    } else if (emp.cv_cartao) {
+    } else if (emp.cv_cartao && isTitularPagante) {
       rotuloAlmoco = `● Pago (${emp.cv_cartao})`;
     }
 
@@ -263,15 +318,44 @@ export default function Companies() {
       )}
 
       {/* Barra de Pesquisa */}
-      <div style={{ background: '#fff', padding: '1rem 1.25rem', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-        <span className="material-symbols-outlined" style={{ color: '#94a3b8' }}>search</span>
-        <input
-          type="text"
-          value={busca}
-          onChange={(e) => { setBusca(e.target.value); setPagina(1); }}
-          placeholder="Pesquisar por Razão Social, Nome do Sócio, CNPJ ou ID..."
-          style={{ width: '100%', border: 'none', outline: 'none', fontSize: '0.95rem', color: '#1e293b' }}
-        />
+      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: '300px', background: '#fff', padding: '0.85rem 1.25rem', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '0.75rem', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+          <span className="material-symbols-outlined" style={{ color: '#94a3b8' }}>search</span>
+          <input
+            type="text"
+            value={busca}
+            onChange={(e) => { setBusca(e.target.value); setPagina(1); }}
+            placeholder="Pesquisar por Razão Social, Nome do Sócio, CNPJ ou ID..."
+            style={{ width: '100%', border: 'none', outline: 'none', fontSize: '0.95rem', color: '#1e293b' }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <select
+            id="selectFiltroAlmoco"
+            value={filtroAlmoco}
+            onChange={(e) => { setFiltroAlmoco(e.target.value); setPagina(1); }}
+            style={{
+              padding: '0.85rem 1.25rem',
+              borderRadius: '12px',
+              border: '1px solid #cbd5e1',
+              background: '#fff',
+              fontSize: '0.9rem',
+              fontWeight: '700',
+              color: '#0f172a',
+              cursor: 'pointer',
+              outline: 'none',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+              minWidth: '250px'
+            }}
+          >
+            <option value="todos">📋 Todos os Status ({empresas.length})</option>
+            <option value="pagos">💰 Pagou / Mesmo CNPJ ({totalPagos})</option>
+            <option value="giants">⚡ Membro GIANTS ({totalGiants})</option>
+            <option value="cortesia">🎁 Cortesia ({totalCortesia})</option>
+            <option value="pendentes">⏳ Pendente ({totalPendentes})</option>
+          </select>
+        </div>
       </div>
 
       {/* Tabela de Empresas */}
@@ -352,7 +436,7 @@ export default function Companies() {
                         </button>
                       ) : (
                         <button
-                          onClick={() => abrirModalMesa(emp)}
+                          onClick={() => navigate(`/lunch?alocarId=${emp.id}`)}
                           style={{
                             background: estagio.bgMesa,
                             color: estagio.corMesa,
@@ -366,7 +450,7 @@ export default function Companies() {
                             alignItems: 'center',
                             gap: '0.35rem'
                           }}
-                          title="Clique para alocar ou alterar a mesa diretamente"
+                          title="Clique para abrir o Salão de Almoço e escolher a cadeira no mapa"
                         >
                           <span className="material-symbols-outlined" style={{ fontSize: '0.9rem' }}>table_restaurant</span>
                           {estagio.rotuloMesa}
@@ -420,7 +504,7 @@ export default function Companies() {
                         </button>
                       ) : estagio.passo === 2 ? (
                         <button
-                          onClick={() => abrirModalMesa(emp)}
+                          onClick={() => navigate(`/lunch?alocarId=${emp.id}`)}
                           style={{
                             background: '#fff7ed',
                             color: '#c2410c',

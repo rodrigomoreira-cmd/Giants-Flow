@@ -10,54 +10,74 @@ export default function Interviews() {
   const [erro, setErro] = useState('');
 
   const carregarSessoes = async () => {
-    try {
-      setCarregando(true);
-      setErro('');
-      const aux = await api.get('/auxiliares');
-      const mesas = aux.mesas || [];
-      const listaSessoes = [];
+      try {
+        setCarregando(true);
+        setErro('');
+        const [aux, clientes] = await Promise.all([
+          api.get('/auxiliares'),
+          api.get('/clientes').catch(() => [])
+        ]);
+        const listaClientes = Array.isArray(clientes) ? clientes : (clientes?.data || []);
+        const mesas = aux.mesas || [];
+        const listaSessoes = [];
 
-      mesas.forEach(m => {
-        (m.ocupantes_detalhes || []).forEach((det, idx) => {
-          let nome = 'Participante';
-          let nomeCracha = '';
-          let entrevistaId = idx + 1;
-          let empresa = 'Empresa SGA';
-          let statusAlmoço = 'Pendente';
-          let etapa = 'em_entrevista';
+        mesas.forEach(m => {
+          (m.ocupantes_detalhes || []).forEach((det, idx) => {
+            let nome = 'Participante';
+            let nomeCracha = '';
+            let entrevistaId = idx + 1;
+            let empresa = 'Empresa SGA';
+            let statusAlmoco = 'Pendente';
+            let etapa = 'em_entrevista';
 
-          if (typeof det === 'string') {
-            const mNome = det.match(/nome=([^;]+)/);
-            const mCracha = det.match(/nome_cracha=([^;]+)/);
-            const mId = det.match(/entrevista_id=([^;]+)/);
-            const mEmp = det.match(/empresa=([^;]+)/);
-            if (mNome) nome = mNome[1].trim();
-            if (mCracha && mCracha[1].trim()) nomeCracha = mCracha[1].trim();
-            if (mId) entrevistaId = mId[1].trim();
-            if (mEmp) empresa = mEmp[1].trim();
-          } else if (typeof det === 'object') {
-            nome = det.nome || det.cliente_nome || nome;
-            nomeCracha = det.nome_cracha || '';
-            entrevistaId = det.entrevista_id || det.id || entrevistaId;
-            empresa = det.empresa || empresa;
-            etapa = det.etapa || etapa;
-            statusAlmoço = det.status_almoco || statusAlmoço;
-          }
+            if (typeof det === 'string') {
+              const mNome = det.match(/nome=([^;]+)/);
+              const mCracha = det.match(/nome_cracha=([^;]+)/);
+              const mId = det.match(/entrevista_id=([^;]+)/);
+              const mEmp = det.match(/empresa=([^;]+)/);
+              if (mNome) nome = mNome[1].trim();
+              if (mCracha && mCracha[1].trim()) nomeCracha = mCracha[1].trim();
+              if (mId) entrevistaId = mId[1].trim();
+              if (mEmp) empresa = mEmp[1].trim();
+            } else if (typeof det === 'object') {
+              nome = det.nome || det.cliente_nome || nome;
+              nomeCracha = det.nome_cracha || '';
+              entrevistaId = det.entrevista_id || det.id || entrevistaId;
+              statusAlmoco = det.status_almoco || statusAlmoco;
+              if (det.empresa) empresa = det.empresa;
+            }
 
-          listaSessoes.push({
-            id: entrevistaId,
-            mesaNumero: m.numero,
-            nome,
-            nomeCracha,
-            empresa,
-            etapa,
-            statusAlmoço
+            // Exclusão de clientes GIANTS da fila de entrevistas
+            const cliRef = listaClientes.find(c =>
+              String(c.id) === String(entrevistaId) ||
+              (c.nome_completo && c.nome_completo.toLowerCase() === nome.toLowerCase()) ||
+              (c.empresa && c.empresa.toLowerCase() === empresa.toLowerCase() && c.nome_completo && c.nome_completo.toLowerCase().includes(nome.toLowerCase()))
+            );
+
+            const isGiants = (typeof det === 'string' && (det.toUpperCase().includes('GIAN') || det.includes('membro_giants=t'))) ||
+                             Boolean(det?.membro_giants) ||
+                             String(det?.origem || '').toUpperCase().includes('GIAN') ||
+                             Boolean(cliRef?.membro_giants) ||
+                             String(cliRef?.origem || '').toUpperCase().includes('GIAN');
+
+            if (isGiants) {
+              return;
+            }
+
+            listaSessoes.push({
+              id: entrevistaId,
+              mesaNumero: m.numero,
+              nome,
+              nomeCracha,
+              empresa,
+              etapa,
+              statusAlmoco
+            });
           });
         });
-      });
 
-      setSessoes(listaSessoes);
-    } catch (err) {
+        setSessoes(listaSessoes);
+      } catch (err) {
       setErro(err.message || 'Erro ao carregar sessões de entrevistas.');
     } finally {
       setCarregando(false);

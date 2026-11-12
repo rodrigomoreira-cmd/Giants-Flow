@@ -70,6 +70,8 @@ router.put('/usuarios/:id', async (req, res) => {
     const novoPapel = papel ? papel.toLowerCase() : usuarioAtual.papel;
     const novoAtivo = typeof ativo === 'boolean' ? ativo : usuarioAtual.ativo;
     if ((usuarioAtual.papel === 'admin' && novoPapel !== 'admin') || (usuarioAtual.ativo === true && novoAtivo === false && usuarioAtual.papel === 'admin')) {
+      // Trava atômica serializada no PostgreSQL para mutação de perfil admin (Lock ID: 987654321)
+      await client.query('SELECT pg_advisory_xact_lock(987654321)');
       const { rows: adminsAtivos } = await client.query(
         "SELECT COUNT(*) FROM usuarios WHERE papel = 'admin' AND ativo = true"
       );
@@ -128,6 +130,8 @@ router.patch('/usuarios/:id/papel', async (req, res) => {
     const usuarioAtual = userRows[0];
 
     if (usuarioAtual.papel === 'admin' && papel.toLowerCase() !== 'admin') {
+      // Trava atômica serializada no PostgreSQL para mutação de perfil admin (Lock ID: 987654321)
+      await client.query('SELECT pg_advisory_xact_lock(987654321)');
       const { rows: adminsAtivos } = await client.query(
         "SELECT COUNT(*) FROM usuarios WHERE papel = 'admin' AND ativo = true"
       );
@@ -177,6 +181,8 @@ router.patch('/usuarios/:id/status', async (req, res) => {
 
     // Salvaguarda: impede desativar o último administrador ativo
     if (usuarioAtual.papel === 'admin' && ativoFinal === false) {
+      // Trava atômica serializada no PostgreSQL para inativação de admin (Lock ID: 987654321)
+      await client.query('SELECT pg_advisory_xact_lock(987654321)');
       const { rows: adminsAtivos } = await client.query(
         "SELECT COUNT(*) FROM usuarios WHERE papel = 'admin' AND ativo = true"
       );

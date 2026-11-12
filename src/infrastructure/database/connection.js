@@ -1,15 +1,21 @@
-﻿// src/infrastructure/database/connection.js
+// src/infrastructure/database/connection.js
 const { Pool } = require('pg');
 const { AsyncLocalStorage } = require('async_hooks');
 require('dotenv').config();
+
+// Trava de integridade: bloqueia inicialização se a senha não vier do ambiente
+if (!process.env.DB_PASSWORD) {
+  console.error('❌ [FATAL] DB_PASSWORD não definida nas variáveis de ambiente. Inicialização abortada.');
+  process.exit(1);
+}
 
 const rlsStorage = new AsyncLocalStorage();
 
 const pool = new Pool({
   host: process.env.DB_HOST || 'postgres',
   port: Number(process.env.DB_PORT) || 5432,
-  user: process.env.DB_USER || 'admin_local',
-  password: process.env.DB_PASSWORD || 'senha_segura_evento',
+  user: process.env.DB_USER || 'app_evento_user',
+  password: process.env.DB_PASSWORD,
   database: process.env.DB_DATABASE || process.env.DB_NAME || 'evento_operacao',
   max: 10,
   idleTimeoutMillis: 30000,
@@ -20,18 +26,29 @@ pool.on('error', (err) => {
   console.error('🔴 Erro inesperado no Pool do PostgreSQL:', err.message);
 });
 
+function resolverContextoRLS(store) {
+  if (!store) {
+    return { userId: '', userRole: 'SYSTEM' };
+  }
+  if (store.userId) {
+    return {
+      userId: String(store.userId),
+      userRole: String(store.userRole || 'USER').toUpperCase(),
+    };
+  }
+  return {
+    userId: '',
+    userRole: String(store.userRole || 'ANON').toUpperCase(),
+  };
+}
+
 function wrapClient(client) {
-  const store = rlsStorage.getStore();
   const originalRelease = client.release.bind(client);
 
   client.release = function(err) {
-    if (store && store.userId) {
-      client.query("SELECT set_config('app.current_user_id', '', false), set_config('app.user_role', '', false)")
-        .catch(() => {})
-        .finally(() => originalRelease(err));
-    } else {
-      originalRelease(err);
-    }
+    client.query("SELECT set_config('app.current_user_id', '', false), set_config('app.user_role', '', false)")
+      .catch(() => {})
+      .finally(() => originalRelease(err));
   };
 
   return client;
@@ -40,7 +57,7 @@ function wrapClient(client) {
 const originalConnect = pool.connect.bind(pool);
 
 pool.connect = function(callback) {
-  const store = rlsStorage.getStore();
+  const ctx = resolverContextoRLS(rlsStorage.getStore());
 
   // 1. Suporte a Callback (usado internamente pelo pool.query no pg)
   if (typeof callback === 'function') {
@@ -49,18 +66,14 @@ pool.connect = function(callback) {
 
       wrapClient(client);
 
-      if (store && store.userId) {
-        client.query(
-          "SELECT set_config('app.current_user_id', $1, false), set_config('app.user_role', $2, false)",
-          [String(store.userId), String(store.userRole || 'USER')],
-          (rlsErr) => {
-            if (rlsErr) console.warn('⚠️ Falha ao setar contexto RLS na conexão:', rlsErr.message);
-            callback(null, client, client.release);
-          }
-        );
-      } else {
-        callback(null, client, client.release);
-      }
+      client.query(
+        "SELECT set_config('app.current_user_id', $1, false), set_config('app.user_role', $2, false)",
+        [ctx.userId, ctx.userRole],
+        (rlsErr) => {
+          if (rlsErr) console.warn('⚠️ Falha ao setar contexto RLS na conexão:', rlsErr.message);
+          callback(null, client, client.release);
+        }
+      );
     });
   }
 
@@ -68,15 +81,13 @@ pool.connect = function(callback) {
   return originalConnect().then(async (client) => {
     wrapClient(client);
 
-    if (store && store.userId) {
-      try {
-        await client.query(
-          "SELECT set_config('app.current_user_id', $1, false), set_config('app.user_role', $2, false)",
-          [String(store.userId), String(store.userRole || 'USER')]
-        );
-      } catch (err) {
-        console.warn('⚠️ Falha ao setar contexto RLS na conexão:', err.message);
-      }
+    try {
+      await client.query(
+        "SELECT set_config('app.current_user_id', $1, false), set_config('app.user_role', $2, false)",
+        [ctx.userId, ctx.userRole]
+      );
+    } catch (err) {
+      console.warn('⚠️ Falha ao setar contexto RLS na conexão:', err.message);
     }
 
     return client;

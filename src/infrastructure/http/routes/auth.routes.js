@@ -2,10 +2,12 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const dbModule = require('../../database/connection');
+const { rlsStorage } = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
 
 // LOGIN AUTENTICADO COM BCRYPT E SEM BACKDOOR DE FALLBACK
 router.post('/login', async (req, res) => {
+  return rlsStorage.run({ userId: null, userRole: 'SYSTEM' }, async () => {
   try {
     const { email, senha } = req.body;
     if (!email) {
@@ -62,6 +64,7 @@ router.post('/login', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+  });
 });
 
 module.exports = router;

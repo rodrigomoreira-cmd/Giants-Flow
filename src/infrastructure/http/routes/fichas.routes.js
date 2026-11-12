@@ -8,7 +8,7 @@ router.get('/', async (_req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   try {
     const query = `
-      SELECT id, nome, nome_cracha, empresa, cpf_cnpj, telefone, email, origem, status, criado_em 
+      SELECT id, nome_participante AS nome, nome_cracha, empresa, cpf_cnpj, telefone, email, origem, status, criado_em 
       FROM fichas 
       ORDER BY id DESC
     `;
@@ -24,14 +24,15 @@ router.get('/', async (_req, res) => {
 router.post('/', async (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   try {
-    const { nome, nome_cracha, empresa, cpf_cnpj, telefone, email, origem, status } = req.body;
+    const { nome: nomeRaw, nome_participante, nome_cracha, empresa, cpf_cnpj, telefone, email, origem, status } = req.body;
 
+    const nome = nomeRaw || nome_participante;
     if (!nome || !telefone) {
       return res.status(400).json({ erro: 'Nome e WhatsApp/Telefone são obrigatórios.' });
     }
 
     const query = `
-      INSERT INTO fichas (nome, nome_cracha, empresa, cpf_cnpj, telefone, email, origem, status)
+      INSERT INTO fichas (nome_participante, nome_cracha, empresa, cpf_cnpj, telefone, email, origem, status)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
     `;
@@ -50,6 +51,9 @@ router.post('/', async (req, res) => {
     return res.status(201).json(rows[0]);
   } catch (err) {
     console.error('Erro ao registrar ficha:', err);
+    if (err.code === '42501') {
+      return res.status(403).json({ erro: 'Acesso negado pela política de segurança do banco de dados (RLS).' });
+    }
     return res.status(500).json({ erro: 'Erro ao registrar ficha: ' + err.message });
   }
 });
