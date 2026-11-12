@@ -273,7 +273,16 @@ export default function Lunch() {
             : 'Almoço Pago'
         };
       })
-      .sort((a, b) => a.empresa.localeCompare(b.empresa, 'pt-BR', { sensitivity: 'base' }));
+      .sort((a, b) => {
+        // Prioriza grupos com maior número de pessoas aguardando mesa (maior -> menor)
+        if (b.pendentesMesa.length !== a.pendentesMesa.length) {
+          return b.pendentesMesa.length - a.pendentesMesa.length;
+        }
+        if (b.membros.length !== a.membros.length) {
+          return b.membros.length - a.membros.length;
+        }
+        return a.empresa.localeCompare(b.empresa, 'pt-BR', { sensitivity: 'base' });
+      });
   }, [todosParticipantes]);
 
   // Integração com tela de Empresas: ativa alocação imediata do grupo CNPJ via ?alocarId=
@@ -351,28 +360,94 @@ export default function Lunch() {
       return;
     }
 
+    let listaParaSentar = pendentes;
+    let mesaVizinhaSugerida = null;
     const mesaAlvo = mesas.find((m) => Number(m.id) === Number(mesaId));
+
     if (mesaAlvo) {
       const capTotal = Number(mesaAlvo.capacidade_total || 5);
       const ocupados = mesaAlvo.ocupantesLista.length + (mesaAlvo.tem_entrevistador ? 1 : 0);
       const livres = Math.max(0, capTotal - ocupados);
 
-      if (livres < pendentes.length) {
-        alert(
-          `A Mesa ${mesaAlvo.numero} possui apenas ${livres} ${livres === 1 ? 'lugar livre' : 'lugares livres'}, mas a empresa "${grupoSelecionadoAlocacao.empresa}" precisa de ${pendentes.length} lugares para sentar todos os sócios juntos.\n\nAumente a capacidade da mesa (+) ou escolha outra mesa com espaço suficiente.`
-        );
+      if (livres === 0) {
+        alert(`A Mesa ${mesaAlvo.numero} está lotada (0 lugares livres). Aumente a capacidade (+) ou escolha outra mesa.`);
         return;
+      }
+
+      if (livres < pendentes.length) {
+        // Divisão equilibrada para ninguém ficar sozinho (ex: 5 pessoas em 4 lugares -> 3 nesta mesa e 2 na próxima)
+        let qtdNestaMesa = Math.min(livres, Math.ceil(pendentes.length / 2));
+        let sobra = pendentes.length - qtdNestaMesa;
+
+        // Garante que nem o primeiro grupo nem o restante fiquem com apenas 1 pessoa se houver alternativa
+        if (sobra === 1 && qtdNestaMesa > 2) {
+          qtdNestaMesa -= 1;
+          sobra += 1;
+        }
+
+        // Procura a mesa livre mais próxima (ao lado pelo número da mesa) que comporte o restante
+        const mesasVizinhas = mesas
+          .filter((m) => Number(m.id) !== Number(mesaAlvo.id))
+          .map((m) => {
+            const c = Number(m.capacidade_total || 5);
+            const oc = m.ocupantesLista.length + (m.tem_entrevistador ? 1 : 0);
+            return { ...m, livres: Math.max(0, c - oc), distancia: Math.abs(Number(m.numero) - Number(mesaAlvo.numero)) };
+          })
+          .filter((m) => m.livres >= sobra)
+          .sort((a, b) => a.distancia - b.distancia || b.livres - a.livres);
+
+        mesaVizinhaSugerida = mesasVizinhas[0] || null;
+        const textoVizinha = mesaVizinhaSugerida
+          ? ` (sugestão ao lado: Mesa ${mesaVizinhaSugerida.numero} com ${mesaVizinhaSugerida.livres} lugares livres)`
+          : '';
+
+        const confirmarDivisao = window.confirm(
+          `A empresa "${grupoSelecionadoAlocacao.empresa}" tem ${pendentes.length} pessoas e a Mesa ${mesaAlvo.numero} possui ${livres} ${livres === 1 ? 'lugar' : 'lugares'}.\n\n` +
+          `Para que ninguém fique sozinho, faremos a divisão equilibrada:\n` +
+          `• ${qtdNestaMesa} ${qtdNestaMesa === 1 ? 'pessoa senta' : 'pessoas sentam'} agora na Mesa ${mesaAlvo.numero}\n` +
+          `• ${sobra} ${sobra === 1 ? 'pessoa fica' : 'pessoas ficam'} prontas para a próxima mesa${textoVizinha}\n\n` +
+          `Deseja confirmar esta divisão?`
+        );
+        if (!confirmarDivisao) return;
+        listaParaSentar = pendentes.slice(0, qtdNestaMesa);
       }
     }
 
     try {
-      for (const socio of pendentes) {
+      for (const socio of listaParaSentar) {
         await api.post('/entrevistas/agendar', {
           aplicacaoId: Number(socio.id),
           mesaId: Number(mesaId)
         });
       }
-      setGrupoSelecionadoAlocacao(null);
+
+      const idsSentadosAgora = new Set(listaParaSentar.map((s) => String(s.id)));
+      const restantes = pendentes.filter((s) => !idsSentadosAgora.has(String(s.id)));
+
+      if (restantes.length > 0) {
+        // Mantém o grupo selecionado com os sócios restantes e destaca a mesa vizinha no mapa
+        setGrupoSelecionadoAlocacao((prev) =>
+          prev
+            ? {
+                ...prev,
+                pendentesMesa: restantes
+              }
+            : null
+        );
+        if (mesaVizinhaSugerida) {
+          setMesaFocadaId(mesaVizinhaSugerida.id);
+          setTimeout(() => {
+            const elVizinha = document.getElementById(`mesa-box-${mesaVizinhaSugerida.id}`);
+            if (elVizinha) {
+              elVizinha.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+            }
+          }, 150);
+          setTimeout(() => setMesaFocadaId(null), 5000);
+        }
+      } else {
+        setGrupoSelecionadoAlocacao(null);
+      }
+
       carregarDados();
     } catch (err) {
       alert('Erro ao alocar empresa na mesa: ' + err.message);
