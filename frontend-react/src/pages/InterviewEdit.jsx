@@ -95,7 +95,7 @@ export default function InterviewEdit() {
           const nomeTitular = clienteEncontrado.nome_participante || clienteEncontrado.nome || clienteEncontrado.nome_completo || '';
 
           // Localiza todos os sócios cadastrados na turma vinculados ao mesmo CNPJ ou mesma empresa
-          const sociosMesmaEmpresa = lista.filter((c) => {
+          const (typeof sociosMesmaEmpresa !== 'undefined' ? sociosMesmaEmpresa : []) = lista.filter((c) => {
             if (c.membro_giants) return false;
             const cDigits = String(c.cnpj || c.cpf_cnpj || '').replace(/\D/g, '');
             if (cnpjDigits.length >= 11 && cDigits === cnpjDigits) return true;
@@ -103,7 +103,7 @@ export default function InterviewEdit() {
             return String(c.id) === String(clienteEncontrado.id);
           });
 
-          const listaInicialSocios = sociosMesmaEmpresa.map((s, idx) => ({
+          const listaInicialSocios = (typeof sociosMesmaEmpresa !== 'undefined' ? sociosMesmaEmpresa : []).map((s, idx) => ({
             id: s.id,
             nome: s.nome_participante || s.nome || `Participante #${s.id}`,
             cpf: s.cpf_cnpj || s.cnpj || '',
@@ -119,13 +119,13 @@ export default function InterviewEdit() {
           setSociosLista(listaInicialSocios);
 
           const qtdEntrando = Math.max(1, listaInicialSocios.filter((s) => s.entraNoContrato).length);
-          const temAlmocoPago = sociosMesmaEmpresa.some((s) => Boolean(s.almoco_pago) || Number(s.valor_almoco || 0) >= 1000);
+          const temAlmocoPago = (typeof sociosMesmaEmpresa !== 'undefined' ? sociosMesmaEmpresa : []).some((s) => Boolean(s.almoco_pago) || Number(s.valor_almoco || 0) >= 1000);
           const cashbackAlmocoCnpj = temAlmocoPago ? 1000 : 0;
-          const cashbackUpgradeCnpj = sociosMesmaEmpresa.reduce(
+          const cashbackUpgradeCnpj = (typeof sociosMesmaEmpresa !== 'undefined' ? sociosMesmaEmpresa : []).reduce(
             (maxVal, s) => Math.max(maxVal, Number(s.cashback_upgrade_90_pct || 0)),
             0
           );
-          const socioComHistorico = sociosMesmaEmpresa.find((s) => s.historico_produtos_elegiveis);
+          const socioComHistorico = (typeof sociosMesmaEmpresa !== 'undefined' ? sociosMesmaEmpresa : []).find((s) => s.historico_produtos_elegiveis);
           const historicoElegivel = socioComHistorico ? socioComHistorico.historico_produtos_elegiveis : '';
 
           setFicha((prev) => ({
@@ -962,24 +962,36 @@ export default function InterviewEdit() {
                     Participantes Vinculados ao Contrato:
                   </div>
                   <div style={{ fontSize: '0.82rem', color: '#1e293b', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    {Array.isArray(sociosMesmaEmpresa) && sociosMesmaEmpresa.length > 0 ? (
-                      sociosMesmaEmpresa
-                        .filter((s) => s.selecionado !== false && s.marcado !== false)
-                        .map((s, idx) => (
-                          <div key={s.id || idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#ffffff', padding: '0.3rem 0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                            <span>
-                              <strong style={{ color: '#10b981' }}>✓</strong> {s.nome_participante}
-                            </span>
-                            <span style={{ fontSize: '0.7rem', fontWeight: '700', color: idx === 0 || s.isTitular ? '#047857' : '#b45309', background: idx === 0 || s.isTitular ? '#ecfdf5' : '#fffbeb', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
-                              {idx === 0 || s.isTitular ? 'Titular (Base)' : 'Adicional'}
-                            </span>
-                          </div>
-                        ))
-                    ) : (
+                    {(() => {
+                    const listaSocios =
+                      (typeof sociosQueEntram !== 'undefined' && Array.isArray(sociosQueEntram) && sociosQueEntram) ||
+                      (typeof participantesContrato !== 'undefined' && Array.isArray(participantesContrato) && participantesContrato) ||
+                      (typeof sociosContrato !== 'undefined' && Array.isArray(sociosContrato) && sociosContrato) ||
+                      (typeof sociosVinculados !== 'undefined' && Array.isArray(sociosVinculados) && sociosVinculados) ||
+                      (typeof sociosEmpresa !== 'undefined' && Array.isArray(sociosEmpresa) && sociosEmpresa) ||
+                      (typeof membrosEmpresa !== 'undefined' && Array.isArray(membrosEmpresa) && membrosEmpresa) ||
+                      (Array.isArray(ficha?.socios) && ficha.socios) ||
+                      (Array.isArray(ficha?.participantes) && ficha.participantes) ||
+                      [];
+                    const ativos = listaSocios.filter((s) => s && s.selecionado !== false && s.marcado !== false && s.incluido !== false);
+                    if (ativos.length > 0) {
+                      return ativos.map((s, idx) => (
+                        <div key={s.id || idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#ffffff', padding: '0.3rem 0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                          <span>
+                            <strong style={{ color: '#10b981' }}>✓</strong> {s.nome_participante || s.nome}
+                          </span>
+                          <span style={{ fontSize: '0.7rem', fontWeight: '700', color: idx === 0 || s.isTitular || s.titular ? '#047857' : '#b45309', background: idx === 0 || s.isTitular || s.titular ? '#ecfdf5' : '#fffbeb', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
+                            {idx === 0 || s.isTitular || s.titular ? 'Titular (Base)' : 'Adicional'}
+                          </span>
+                        </div>
+                      ));
+                    }
+                    return (
                       <div style={{ background: '#ffffff', padding: '0.3rem 0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
                         <strong style={{ color: '#10b981' }}>✓</strong> {ficha.nome_participante || 'Titular'} <strong>(Titular)</strong>
                       </div>
-                    )}
+                    );
+                  })()}
                   </div>
                 </div>
               </div>
