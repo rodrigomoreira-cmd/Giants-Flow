@@ -35,8 +35,8 @@ router.post('/propostas', async (req, res) => {
           UPDATE propostas 
           SET turma_id = COALESCE(
             $1::INT, 
-            (SELECT turma_id FROM aplicacoes WHERE id = $2), 
-            (SELECT turma_id FROM fichas WHERE id = $2), 
+            (SELECT  turma_id FROM aplicacoes WHERE id = $2), 
+            (SELECT turma_id, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae  FROM fichas WHERE id = $2), 
             1491
           )
           WHERE id = $3
@@ -46,7 +46,7 @@ router.post('/propostas', async (req, res) => {
     // 2. Cadastra sócios externos adicionados na hora do fechamento na mesma empresa/turma
     const sociosDetalhes = Array.isArray(dados.sociosDetalhes) ? dados.sociosDetalhes : [];
     const { rows: fichaBaseRows } = await pool.query(
-      'SELECT turma_id, empresa, cnpj FROM fichas WHERE id = $1',
+      'SELECT  turma_id, empresa, cnpj, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae  FROM fichas WHERE id = $1',
       [aplicacaoId]
     );
     const fichaBase = fichaBaseRows[0] || {};
@@ -57,7 +57,7 @@ router.post('/propostas', async (req, res) => {
     for (const socio of sociosDetalhes) {
       if (socio && socio.externo && socio.entraNoContrato && socio.nome && socio.nome.trim()) {
         const { rows: jaExiste } = await pool.query(
-          'SELECT id FROM fichas WHERE turma_id = $1 AND LOWER(TRIM(nome_participante)) = LOWER(TRIM($2)) AND LOWER(TRIM(empresa)) = LOWER(TRIM($3))',
+          'SELECT  id, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae  FROM fichas WHERE turma_id = $1 AND LOWER(TRIM(nome_participante)) = LOWER(TRIM($2)) AND LOWER(TRIM(empresa)) = LOWER(TRIM($3))',
           [turmaFinal, socio.nome.trim(), empresaFinal]
         );
         if (jaExiste.length === 0) {
@@ -124,12 +124,12 @@ router.patch('/propostas/:id/vender', async (req, res) => {
 router.get('/financeiro/propostas', async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT f.*,
+      SELECT  f.*,
              COALESCE(
                NULLIF(f.dados_proposta->>'produtoNome', ''),
                (SELECT p.nome FROM produtos p WHERE p.id = NULLIF(f.dados_proposta->>'produtoId', '')::int),
                'GIANTS'
-             ) AS produto_nome
+             ) AS produto_nome, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae 
       FROM fichas f
       ORDER BY f.id DESC
     `);
@@ -145,7 +145,7 @@ router.post('/financeiro/analisar', async (req, res) => {
     if (!targetId || !decisao) return res.status(400).json({ error: 'Parâmetros obrigatórios ausentes.' });
 
     await client.query('BEGIN');
-    const { rows: atual } = await client.query('SELECT status_aprovacao, etapa_funil FROM fichas WHERE id = $1 FOR UPDATE', [targetId]);
+    const { rows: atual } = await client.query('SELECT  status_aprovacao, etapa_funil, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae  FROM fichas WHERE id = $1 FOR UPDATE', [targetId]);
     if (atual.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Ficha não encontrada.' });

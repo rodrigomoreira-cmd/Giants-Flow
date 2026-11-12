@@ -17,7 +17,7 @@ router.post('/entrevistas/agendar', async (req, res) => {
     await client.query('BEGIN');
 
     const { rows: clienteRows } = await client.query(
-      'SELECT almoco_pago, cortesia_almoco, membro_giants FROM fichas WHERE id = $1 FOR UPDATE',
+      'SELECT  almoco_pago, cortesia_almoco, membro_giants, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae  FROM fichas WHERE id = $1 FOR UPDATE',
       [id]
     );
 

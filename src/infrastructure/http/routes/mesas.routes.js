@@ -7,7 +7,7 @@ const pool = dbModule.pool || dbModule;
 router.get('/auxiliares', async (req, res) => {
   try {
     const { rows: entrevistadores } = await pool.query(
-      'SELECT id, nome, email, papel, ativo FROM usuarios WHERE ativo = true ORDER BY nome ASC'
+      'SELECT  id, nome, email, papel, ativo FROM usuarios WHERE ativo = true ORDER BY nome ASC'
     );
     const { rows: turmas } = await pool.query(
       'SELECT id, codigo, nome, ativa FROM turmas ORDER BY id ASC'
@@ -16,7 +16,7 @@ router.get('/auxiliares', async (req, res) => {
     const { rows: ocupantes } = await pool.query(`
       SELECT id, nome_participante AS nome, empresa,
              mesa_alocada, almoco_pago, cortesia_almoco, membro_giants, etapa_funil,
-             entrevistador_id, entrevistadores_ids
+             entrevistador_id, entrevistadores_ids, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae 
       FROM fichas
       WHERE mesa_alocada IS NOT NULL
       ORDER BY id ASC

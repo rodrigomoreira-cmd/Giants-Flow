@@ -13,7 +13,7 @@ router.get('/hub/metricas', async (req, res) => {
     // 1. ESTATÍSTICAS DA TABELA FICHAS (TURMA ESPECÍFICA)
     const statsQuery = `
       SELECT 
-        COUNT(*)::INT AS total_alunos,
+         COUNT(*)::INT AS total_alunos,
         COUNT(DISTINCT NULLIF(TRIM(COALESCE(cnpj, cpf_cnpj, empresa)), ''))::INT AS total_empresas,
         COUNT(DISTINCT NULLIF(TRIM(COALESCE(cnpj, cpf_cnpj, empresa)), '')) FILTER (WHERE valor_almoco >= 1000.00)::INT AS empresas_pagantes_almoco,
         COALESCE(SUM(valor_almoco) FILTER (WHERE valor_almoco >= 1000.00), 0)::FLOAT AS valor_almoco,
@@ -27,7 +27,7 @@ router.get('/hub/metricas', async (req, res) => {
           WHERE status ILIKE '%no_show%' 
              OR status ILIKE '%ausente%' 
              OR etapa_funil ILIKE '%no_show%'
-        )::INT AS no_show_qtd
+        )::INT AS no_show_qtd, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae 
       FROM fichas
       WHERE ($1::INT IS NULL OR turma_id = $1::INT);
 `;
@@ -46,7 +46,7 @@ router.get('/hub/metricas', async (req, res) => {
     // 2. PROPOSTAS COMERCIAIS FECHADAS (GIANTS & PAC)
     const fechamentoQuery = `
       SELECT 
-        p.id AS proposta_id,
+         p.id AS proposta_id,
         COALESCE(p.turma_id, a.turma_id, f.turma_id) AS turma_id,
         p.status,
         COALESCE(p.valor_total, 0)::FLOAT AS valor_total,
@@ -92,7 +92,7 @@ router.get('/hub/metricas', async (req, res) => {
         SELECT 
           COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), ''), empresa) AS empresa_chave,
           COUNT(*) AS total_pessoas,
-          COUNT(*) FILTER (WHERE cargo ILIKE '%socio%' OR cargo ILIKE '%sócio%' OR cargo ILIKE '%propriet%' OR cargo ILIKE '%fundad%') AS qtd_socios
+          COUNT(*) FILTER (WHERE cargo ILIKE '%socio%' OR cargo ILIKE '%sócio%' OR cargo ILIKE '%propriet%' OR cargo ILIKE '%fundad%') AS qtd_socios, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae 
         FROM fichas
         WHERE ($1::INT IS NULL OR turma_id = $1::INT)
           AND COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), ''), empresa) = ANY($2::TEXT[])

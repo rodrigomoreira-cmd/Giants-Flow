@@ -11,8 +11,7 @@ router.get('/clientes', async (req, res) => {
     const turmaFiltro = digits ? parseInt(digits, 10) : 1491;
 
     const { rows } = await pool.query(`
-      SELECT 
-        id, 
+      SELECT id, 
         nome_participante, 
         nome_cracha, 
         empresa, 
@@ -29,8 +28,7 @@ router.get('/clientes', async (req, res) => {
         assento_alocado,
         status, 
         cargo,
-        origem
-      FROM fichas
+        origem, historico_produtos_elegiveis, valor_investido_pac_ae, cashback_upgrade_90_pct FROM fichas
       WHERE ($1::INT IS NULL OR turma_id = $1::INT)
       ORDER BY id ASC
     `, [turmaFiltro]);
@@ -58,7 +56,7 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
 
     // 1. Obter dados do participante com bloqueio pessimista FOR UPDATE
     const { rows: fichaRows } = await client.query(
-      'SELECT id, turma_id, nome_participante, empresa, almoco_pago, cortesia_almoco, membro_giants, etapa_funil FROM fichas WHERE id = $1::integer FOR UPDATE',
+      'SELECT  id, turma_id, nome_participante, empresa, almoco_pago, cortesia_almoco, membro_giants, etapa_funil, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae  FROM fichas WHERE id = $1::integer FOR UPDATE',
       [fichaId]
     );
 
@@ -83,7 +81,7 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
 
       // Checa concorrência de assento no Salão de Lunch com casting tipado
       const { rows: ocupante } = await client.query(
-        'SELECT id, nome_participante FROM fichas WHERE mesa_alocada = $1::integer AND assento_alocado = $2::integer AND COALESCE(turma_id, 0) = COALESCE($3::integer, 0) AND id <> $4::integer FOR UPDATE',
+        'SELECT  id, nome_participante, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae  FROM fichas WHERE mesa_alocada = $1::integer AND assento_alocado = $2::integer AND COALESCE(turma_id, 0) = COALESCE($3::integer, 0) AND id <> $4::integer FOR UPDATE',
         [mesaNum, assentoNum, turmaId, fichaId]
       );
 
@@ -214,7 +212,7 @@ router.put('/clientes/:id', async (req, res) => {
     await client.query('BEGIN');
 
     const { rows: clienteAtual } = await client.query(
-      'SELECT id, cashback, empresa FROM fichas WHERE id = $1 FOR UPDATE',
+      'SELECT  id, cashback, empresa, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae  FROM fichas WHERE id = $1 FOR UPDATE',
       [id]
     );
 

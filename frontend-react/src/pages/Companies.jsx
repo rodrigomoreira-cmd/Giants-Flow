@@ -422,9 +422,9 @@ export default function Companies() {
                           </span>
                         )}
                           {(() => {
-                            const membros = g.membros || [];
+                            const membros = g.sociosNaoGiants || g.membros || g.socios || g.participantes || [];
                             const cbAlmoco = membros.some((m) => Boolean(m.almoco_pago) || Number(m.valor_almoco || 0) >= 1000) ? 1000 : 0;
-                            const cbUpgrade = membros.reduce((mx, m) => Math.max(mx, Number(m.cashback_upgrade_90_pct || 0)), 0);
+                            const cbUpgrade = membros.reduce((mx, m) => Math.max(mx, (Number(m.cashback_upgrade_90_pct) || 0)), 0);
                             const cbTotal = cbAlmoco + cbUpgrade;
                             if (cbTotal <= 0) return null;
                             const hist = (membros.find((m) => m.historico_produtos_elegiveis) || {}).historico_produtos_elegiveis || '';

@@ -8,7 +8,7 @@ router.get('/', async (_req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   try {
     const query = `
-      SELECT id, nome_participante AS nome, nome_cracha, empresa, cpf_cnpj, telefone, email, origem, status, criado_em 
+      SELECT id, nome_participante AS nome, nome_cracha, empresa, cpf_cnpj, telefone, email, origem, status, criado_em, historico_produtos_elegiveis, valor_investido_pac_ae, cashback_upgrade_90_pct 
       FROM fichas 
       ORDER BY id DESC
     `;

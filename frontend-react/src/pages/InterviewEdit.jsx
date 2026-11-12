@@ -927,37 +927,203 @@ export default function InterviewEdit() {
           <div>
             <h3 style={{ margin: '0 0 1.25rem 0', color: '#0f172a', fontSize: '1.15rem' }}>6. Revisão Final e Envio</h3>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
-              <div style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Empresa (CNPJ)</span>
-                <div style={{ fontWeight: '800', color: '#0f172a', marginTop: '0.3rem' }}>{ficha.razao_social}</div>
-                {ficha.cnpj && <div style={{ fontSize: '0.8rem', fontFamily: 'monospace', color: '#475569' }}>CNPJ: {ficha.cnpj}</div>}
-                <div style={{ fontSize: '0.82rem', color: '#166534', fontWeight: '700', marginTop: '0.4rem' }}>
-                  Entram no contrato ({sociosQueEntram.length}): {sociosQueEntram.map((s) => s.nome).join(', ')}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: '1.15rem', margin: '1.25rem 0' }}>
+              {/* CARD 1: EMPRESA, CNPJ & PARTICIPANTES NO CONTRATO */}
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  1. Empresa & Sócios no Contrato
                 </div>
-                {sociosQueNaoEntram.length > 0 && (
-                  <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '0.25rem' }}>
-                    Não entram nesta venda: {sociosQueNaoEntram.map((s) => s.nome).join(', ')}
+                <div style={{ fontSize: '1.1rem', fontWeight: '800', color: '#0f172a', lineHeight: '1.25' }}>
+                  {ficha.empresa || ficha.razao_social || ficha.nome_fantasia || 'Empresa não informada'}
+                </div>
+                {ficha.nome_fantasia && ficha.nome_fantasia !== ficha.empresa && (
+                  <div style={{ fontSize: '0.8rem', color: '#475569' }}>
+                    Fantasia: <strong>{ficha.nome_fantasia}</strong>
                   </div>
                 )}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', fontSize: '0.8rem', color: '#334155' }}>
+                  <span style={{ background: '#e2e8f0', padding: '0.15rem 0.5rem', borderRadius: '6px', fontWeight: '700' }}>
+                    CNPJ: {ficha.cnpj || ficha.cpf_cnpj || 'Não informado'}
+                  </span>
+                  {(ficha.cidade || ficha.estado) && (
+                    <span style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '0.15rem 0.5rem', borderRadius: '6px' }}>
+                      {[ficha.cidade, ficha.estado].filter(Boolean).join(' - ')}
+                    </span>
+                  )}
+                </div>
+                {(ficha.telefone || ficha.whatsapp || ficha.nicho) && (
+                  <div style={{ fontSize: '0.78rem', color: '#475569' }}>
+                    {ficha.nicho && <span>Nicho: <strong>{ficha.nicho}</strong> • </span>}
+                    {(ficha.telefone || ficha.whatsapp) && <span>Contato: <strong>{ficha.telefone || ficha.whatsapp}</strong></span>}
+                  </div>
+                )}
+                <div style={{ marginTop: '0.35rem', paddingTop: '0.55rem', borderTop: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '0.76rem', fontWeight: '800', color: '#047857', marginBottom: '0.35rem' }}>
+                    Participantes Vinculados ao Contrato:
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: '#1e293b', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    {Array.isArray(sociosMesmaEmpresa) && sociosMesmaEmpresa.length > 0 ? (
+                      sociosMesmaEmpresa
+                        .filter((s) => s.selecionado !== false && s.marcado !== false)
+                        .map((s, idx) => (
+                          <div key={s.id || idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#ffffff', padding: '0.3rem 0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                            <span>
+                              <strong style={{ color: '#10b981' }}>✓</strong> {s.nome_participante}
+                            </span>
+                            <span style={{ fontSize: '0.7rem', fontWeight: '700', color: idx === 0 || s.isTitular ? '#047857' : '#b45309', background: idx === 0 || s.isTitular ? '#ecfdf5' : '#fffbeb', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
+                              {idx === 0 || s.isTitular ? 'Titular (Base)' : 'Adicional'}
+                            </span>
+                          </div>
+                        ))
+                    ) : (
+                      <div style={{ background: '#ffffff', padding: '0.3rem 0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                        <strong style={{ color: '#10b981' }}>✓</strong> {ficha.nome_participante || 'Titular'} <strong>(Titular)</strong>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              <div style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Produto & Condições</span>
-                <div style={{ fontWeight: '700', color: '#0f172a', marginTop: '0.3rem' }}>{ficha.produto_nome}</div>
-                <div style={{ fontWeight: '800', color: '#059669', fontSize: '1.05rem', marginTop: '0.15rem' }}>
-                  {calc.valorNegociado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              {/* CARD 2: DEMONSTRATIVO FINANCEIRO & CASHBACK DETALHADO */}
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.45rem', boxShadow: '0 2px 6px rgba(15,23,42,0.03)' }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.15rem' }}>
+                  2. Demonstrativo Financeiro & Cashback
                 </div>
-                <div style={{ fontSize: '0.82rem', color: '#475569', marginTop: '0.2rem' }}>
-                  Entrada de {calc.entrada.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} ({ficha.forma_entrada}) + {calc.parcelas}x parcelas
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.84rem', gap: '0.5rem' }}>
+                  <span style={{ color: '#64748b' }}>Linha / Plano:</span>
+                  <strong style={{ color: '#0f172a', textAlign: 'right' }}>
+                    {ficha.produto_nome || ficha.categoria_produto || 'Não selecionado'}
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.84rem' }}>
+                  <span style={{ color: '#64748b' }}>Valor Tabela:</span>
+                  <span style={{ color: '#334155', fontWeight: '600' }}>
+                    {Number(ficha.valor_tabela || ficha.valor_negociado || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.86rem' }}>
+                  <span style={{ color: '#475569', fontWeight: '600' }}>Valor Negociado:</span>
+                  <strong style={{ color: '#0f172a' }}>
+                    {Number(ficha.valor_negociado || ficha.valor_tabela || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </strong>
+                </div>
+
+                {/* Detalhamento do Cashback por Origem */}
+                {Number(ficha.cashback_almoco_cnpj || 0) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#047857', background: '#ecfdf5', padding: '0.28rem 0.55rem', borderRadius: '6px', border: '1px solid #a7f3d0' }}>
+                    <span>(-) Cashback Almoço Pago:</span>
+                    <strong>- {Number(ficha.cashback_almoco_cnpj).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong>
+                  </div>
+                )}
+
+                {Number(ficha.cashback_upgrade_cnpj || 0) > 0 && (
+                  <div style={{ fontSize: '0.8rem', color: '#047857', background: '#ecfdf5', padding: '0.32rem 0.55rem', borderRadius: '6px', border: '1px solid #a7f3d0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>
+                        (-) Upgrade {/ACELERADOR|AE|ACEd/i.test(ficha.historico_produtos_elegiveis || '') ? '100% AE' : '90% PAC'}:
+                      </span>
+                      <strong>
+                        - {(ficha.categoria_produto === 'GIANTS' ? Number(ficha.cashback_upgrade_cnpj) : 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </strong>
+                    </div>
+                    {ficha.historico_produtos_elegiveis && (
+                      <div style={{ fontSize: '0.71rem', color: '#065f46', marginTop: '0.15rem' }}>
+                        Origem: {ficha.historico_produtos_elegiveis} {ficha.categoria_produto !== 'GIANTS' ? '(Exclusivo GIANTS)' : ''}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {Number(ficha.cashback || 0) > 0 && Number(ficha.cashback_almoco_cnpj || 0) === 0 && Number(ficha.cashback_upgrade_cnpj || 0) === 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#047857', background: '#ecfdf5', padding: '0.28rem 0.55rem', borderRadius: '6px' }}>
+                    <span>(-) Cashback Total Abatido:</span>
+                    <strong>- {Number(ficha.cashback).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong>
+                  </div>
+                )}
+
+                {Number(ficha.desconto_concedido || ficha.desconto || 0) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#b91c1c', background: '#fef2f2', padding: '0.28rem 0.55rem', borderRadius: '6px', border: '1px solid #fecaca' }}>
+                    <span>(-) Desconto Comercial:</span>
+                    <strong>- {Number(ficha.desconto_concedido || ficha.desconto || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong>
+                  </div>
+                )}
+
+                <div style={{ marginTop: 'auto', paddingTop: '0.65rem', borderTop: '1.5px dashed #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.88rem', fontWeight: '800', color: '#0f172a' }}>Saldo Líquido do Contrato:</span>
+                  <span style={{ fontSize: '1.15rem', fontWeight: '900', color: '#ea580c' }}>
+                    {Math.max(
+                      0,
+                      Number(ficha.valor_negociado || ficha.valor_tabela || 0) -
+                        Number(ficha.cashback || 0) -
+                        Number(ficha.desconto_concedido || ficha.desconto || 0)
+                    ).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
                 </div>
               </div>
 
-              <div style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Resultado Comercial</span>
-                <div style={{ fontWeight: '800', color: '#ff5722', marginTop: '0.3rem' }}>
-                  {ficha.resultado_comercial || 'Pendente'}
+              {/* CARD 3: CONDIÇÕES DE PAGAMENTO & RESULTADO COMERCIAL */}
+              <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '12px', padding: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: '800', color: '#c2410c', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    3. Pagamento & Status
+                  </span>
+                  <span style={{ background: '#ffedd5', color: '#9a3412', border: '1px solid #fdba74', padding: '0.18rem 0.6rem', borderRadius: '999px', fontSize: '0.76rem', fontWeight: '800' }}>
+                    {ficha.resultado_comercial || 'Em Negociação'}
+                  </span>
                 </div>
+
+                <div style={{ background: '#ffffff', padding: '0.75rem 0.9rem', borderRadius: '8px', border: '1px solid #fed7aa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: '0.72rem', fontWeight: '800', color: '#9a3412' }}>ENTRADA</div>
+                    <div style={{ fontSize: '0.8rem', color: '#c2410c', fontWeight: '600' }}>
+                      Forma: {ficha.forma_entrada || 'Pix'}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '1.15rem', fontWeight: '900', color: '#ea580c' }}>
+                    {Number(ficha.valor_entrada || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </div>
+                </div>
+
+                <div style={{ background: '#ffffff', padding: '0.75rem 0.9rem', borderRadius: '8px', border: '1px solid #fed7aa', flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ fontSize: '0.72rem', fontWeight: '800', color: '#9a3412' }}>SALDO RESTANTE PARCELADO</div>
+                      <div style={{ fontSize: '0.8rem', color: '#c2410c', fontWeight: '600' }}>
+                        Forma: {ficha.forma_restante || 'Pix'}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '1.1rem', fontWeight: '900', color: '#0f172a' }}>
+                        {Number(ficha.parcelas || 12)}x de{' '}
+                        {(
+                          Math.max(
+                            0,
+                            Number(ficha.valor_negociado || ficha.valor_tabela || 0) -
+                              Number(ficha.cashback || 0) -
+                              Number(ficha.desconto_concedido || ficha.desconto || 0) -
+                              Number(ficha.valor_entrada || 0)
+                          ) / Math.max(1, Number(ficha.parcelas || 12))
+                        ).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#9a3412', fontWeight: '700', marginTop: '0.15rem' }}>
+                        Total Restante:{' '}
+                        {Math.max(
+                          0,
+                          Number(ficha.valor_negociado || ficha.valor_tabela || 0) -
+                            Number(ficha.cashback || 0) -
+                            Number(ficha.desconto_concedido || ficha.desconto || 0) -
+                            Number(ficha.valor_entrada || 0)
+                        ).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {(ficha.observacoes || ficha.dores_principais) && (
+                  <div style={{ fontSize: '0.76rem', color: '#7c2d12', background: '#ffedd5', padding: '0.45rem 0.65rem', borderRadius: '6px' }}>
+                    <strong>Obs.:</strong> {ficha.observacoes || ficha.dores_principais}
+                  </div>
+                )}
               </div>
             </div>
 
