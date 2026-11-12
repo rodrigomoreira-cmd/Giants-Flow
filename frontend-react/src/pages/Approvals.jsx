@@ -136,6 +136,12 @@ export default function Approvals() {
                       <span style={{ fontWeight: '700', color: '#0f172a', fontSize: '0.84rem' }}>
                         {prop.produto_nome || 'GIANTS - Titular (Empresa)'}
                       </span>
+                      {Array.isArray(prop.socios_detalhes) && prop.socios_detalhes.filter(s => s.entraNoContrato).length > 0 && (
+                        <div style={{ fontSize: '0.75rem', color: '#475569', marginTop: '0.3rem' }}>
+                          <strong>Sócios ({prop.socios_detalhes.filter(s => s.entraNoContrato).length}):</strong>{' '}
+                          {prop.socios_detalhes.filter(s => s.entraNoContrato).map(s => s.nome).join(', ')}
+                        </div>
+                      )}
                     </div>
                   </td>
                   <td style={{ padding: '1rem', fontWeight: '700', color: '#059669' }}>

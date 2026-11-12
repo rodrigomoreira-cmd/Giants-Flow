@@ -1,9 +1,16 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 
+const normalizarEmpresa = (emp) =>
+  String(emp || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
 export default function InterviewEdit() {
-  const { id } = useParams(); // id pode ser aplicacaoId ou clienteId
+  const { id } = useParams();
   const navigate = useNavigate();
 
   const [etapaAtual, setEtapaAtual] = useState(1);
@@ -11,9 +18,18 @@ export default function InterviewEdit() {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
   const [catalogoProdutos, setCatalogoProdutos] = useState([]);
-const [ficha, setFicha] = useState({
+
+  // Lista de sócios da empresa (cadastrados na turma + adicionados na hora do fechamento)
+  const [sociosLista, setSociosLista] = useState([]);
+  const [novoSocioNome, setNovoSocioNome] = useState('');
+  const [novoSocioCpf, setNovoSocioCpf] = useState('');
+  const [novoSocioTelefone, setNovoSocioTelefone] = useState('');
+
+  const [ficha, setFicha] = useState({
     aplicacao_id: id,
+    turma_id: Number(localStorage.getItem('turma_ativa_id') || 1491),
     razao_social: '',
+    cnpj: '',
     nome_fantasia: '',
     nome_empresario: '',
     telefone: '',
@@ -21,14 +37,14 @@ const [ficha, setFicha] = useState({
     periodo_entrevista: 'Almoço',
 
     // Etapa 2 - Negociação
+    categoria_produto: 'GIANTS',
+    produto_nome: 'GIANTS - Titular (Empresa)',
     socios: 1,
     forma_entrada: 'Pix',
     valor_entrada: 10000,
     cashback: 0,
-    categoria_produto: 'GIANTS',
-    produto_nome: 'GIANTS - Titular (Empresa)',
     almoco_pago: false,
-    parcelas: 10,
+    parcelas: 12,
     forma_restante: 'Pix',
     desconto: 0,
     desc_dif: '',
@@ -54,37 +70,91 @@ const [ficha, setFicha] = useState({
       try {
         setCarregando(true);
         setErro('');
-        
-        // 0. Carregar catálogo oficial de produtos e subprodutos
-        const listaProds = await api.get('/produtos').catch(() => []);
-        if (Array.isArray(listaProds)) setCatalogoProdutos(listaProds);
 
-        // 1. Carregar lista de clientes para obter dados da aplicação
-        const dadosClientes = await api.get('/clientes?turmaId=${localStorage.getItem("turma_ativa_id") || "1491"}');
-        const lista = Array.isArray(dadosClientes) ? dadosClientes : dadosClientes.clientes || [];
-        const clienteEncontrado = lista.find(c => String(c.id || c.cliente_id || c.aplicacao_id) === String(id));
+        const turmaAtiva = localStorage.getItem('turma_ativa_id') || '1491';
+        const [listaProds, dadosClientes] = await Promise.all([
+          api.get('/produtos').catch(() => []),
+          api.get(`/clientes?turmaId=${turmaAtiva}`).catch(() => [])
+        ]);
+
+        if (Array.isArray(listaProds)) {
+          setCatalogoProdutos(listaProds);
+        }
+
+        const lista = Array.isArray(dadosClientes) ? dadosClientes : dadosClientes?.clientes || [];
+        const clienteEncontrado = lista.find((c) => String(c.id || c.cliente_id || c.aplicacao_id) === String(id));
 
         if (clienteEncontrado) {
-          setFicha(prev => ({
+          const cnpjTitular = clienteEncontrado.cnpj || clienteEncontrado.cpf_cnpj || '';
+          const cnpjDigits = String(cnpjTitular).replace(/\D/g, '');
+          const empTitular = clienteEncontrado.empresa || clienteEncontrado.razao_social || 'Empresa SGA';
+          const empNorm = normalizarEmpresa(empTitular);
+          const nomeTitular = clienteEncontrado.nome_participante || clienteEncontrado.nome || clienteEncontrado.nome_completo || '';
+
+          // Localiza todos os sócios cadastrados na turma vinculados ao mesmo CNPJ ou mesma empresa
+          const sociosMesmaEmpresa = lista.filter((c) => {
+            if (c.membro_giants) return false;
+            const cDigits = String(c.cnpj || c.cpf_cnpj || '').replace(/\D/g, '');
+            if (cnpjDigits.length >= 11 && cDigits === cnpjDigits) return true;
+            if (empNorm && empNorm !== 'empresa sga' && normalizarEmpresa(c.empresa) === empNorm) return true;
+            return String(c.id) === String(clienteEncontrado.id);
+          });
+
+          const listaInicialSocios = sociosMesmaEmpresa.map((s, idx) => ({
+            id: s.id,
+            nome: s.nome_participante || s.nome || `Participante #${s.id}`,
+            cpf: s.cpf_cnpj || s.cnpj || '',
+            telefone: s.telefone || '',
+            cargo: s.cargo || (idx === 0 ? 'Sócio Titular' : 'Sócio'),
+            titular: String(s.id) === String(clienteEncontrado.id),
+            entraNoContrato: String(s.id) === String(clienteEncontrado.id),
+            externo: false
+          }));
+
+          // Garante o titular no topo
+          listaInicialSocios.sort((a, b) => (a.titular === b.titular ? 0 : a.titular ? -1 : 1));
+          setSociosLista(listaInicialSocios);
+
+          const qtdEntrando = Math.max(1, listaInicialSocios.filter((s) => s.entraNoContrato).length);
+          const temAlmocoPago = sociosMesmaEmpresa.some((s) => Boolean(s.almoco_pago || s.cortesia_almoco));
+
+          setFicha((prev) => ({
             ...prev,
             aplicacao_id: clienteEncontrado.id || id,
-            razao_social: clienteEncontrado.empresa || clienteEncontrado.razao_social || 'Empresa SGA',
-            nome_fantasia: clienteEncontrado.nome_fantasia || clienteEncontrado.empresa || '',
-            nome_empresario: clienteEncontrado.nome || clienteEncontrado.nome_completo || '',
+            turma_id: Number(clienteEncontrado.turma_id || turmaAtiva),
+            razao_social: empTitular,
+            cnpj: cnpjTitular,
+            nome_fantasia: clienteEncontrado.nome_fantasia || empTitular,
+            nome_empresario: nomeTitular,
             telefone: clienteEncontrado.telefone || clienteEncontrado.whatsapp || '',
-            email: clienteEncontrado.email || ''
+            email: clienteEncontrado.email || '',
+            almoco_pago: temAlmocoPago,
+            cashback: temAlmocoPago ? 1000 : 0,
+            socios: qtdEntrando
           }));
         } else {
-          // Se não encontrou na lista, mantém os dados com ID padrão
-          setFicha(prev => ({
+          setSociosLista([
+            {
+              id: Number(id),
+              nome: `Participante #${id}`,
+              cpf: '',
+              telefone: '',
+              cargo: 'Sócio Titular',
+              titular: true,
+              entraNoContrato: true,
+              externo: false
+            }
+          ]);
+          setFicha((prev) => ({
             ...prev,
             aplicacao_id: id,
             razao_social: `Empresa Participante #${id}`,
-            nome_empresario: `Participante #${id}`
+            nome_empresario: `Participante #${id}`,
+            socios: 1
           }));
         }
       } catch (err) {
-        setErro('Erro ao carregar dados do participante: ' + err.message);
+        setErro('Erro ao carregar dados da empresa: ' + err.message);
       } finally {
         setCarregando(false);
       }
@@ -92,15 +162,61 @@ const [ficha, setFicha] = useState({
     carregarDadosIniciais();
   }, [id]);
 
-  const atualizarCampo = (campo, valor) => {
-    setFicha(prev => ({ ...prev, [campo]: valor }));
+  // Sincroniza automaticamente a contagem de sócios/vagas com os checkboxes marcados
+  const sincronizarSociosNoContrato = (novaLista) => {
+    setSociosLista(novaLista);
+    const totalEntrando = Math.max(1, novaLista.filter((s) => s.entraNoContrato).length);
+    setFicha((prev) => ({ ...prev, socios: totalEntrando }));
   };
 
-  // Cálculos comerciais do GIANTS Flow
+  const alternarSocioContrato = (index) => {
+    const atualizada = sociosLista.map((item, idx) => {
+      if (idx !== index) return item;
+      // Impede desmarcar o único participante restante
+      const totalMarcados = sociosLista.filter((s) => s.entraNoContrato).length;
+      if (item.entraNoContrato && totalMarcados <= 1) return item;
+      return { ...item, entraNoContrato: !item.entraNoContrato };
+    });
+    sincronizarSociosNoContrato(atualizada);
+  };
+
+  const adicionarNovoSocio = () => {
+    if (!novoSocioNome.trim()) {
+      alert('Informe o nome completo do sócio ou participante adicional.');
+      return;
+    }
+    const novoItem = {
+      id: `ext-${Date.now()}`,
+      nome: novoSocioNome.trim(),
+      cpf: novoSocioCpf.trim(),
+      telefone: novoSocioTelefone.trim(),
+      cargo: 'Sócio Adicional (Novo)',
+      titular: false,
+      entraNoContrato: true,
+      externo: true
+    };
+    sincronizarSociosNoContrato([...sociosLista, novoItem]);
+    setNovoSocioNome('');
+    setNovoSocioCpf('');
+    setNovoSocioTelefone('');
+  };
+
+  const removerSocioExterno = (index) => {
+    const atualizada = sociosLista.filter((_, idx) => idx !== index);
+    sincronizarSociosNoContrato(atualizada);
+  };
+
+  const atualizarCampo = (campo, valor) => {
+    setFicha((prev) => ({ ...prev, [campo]: valor }));
+  };
+
+  // Cálculos comerciais dinâmicos conforme Linha + Subproduto + Sócios Marcados
   const calcularValores = () => {
     const catUpper = String(ficha.categoria_produto || 'GIANTS').toUpperCase();
-    const prodSelecionado = catalogoProdutos.find(p => p.nome === ficha.produto_nome)
-      || catalogoProdutos.find(p => String(p.categoria || '').toUpperCase() === catUpper && p.tipo_item === 'PRINCIPAL');
+    const prodSelecionado =
+      catalogoProdutos.find((p) => p.nome === ficha.produto_nome) ||
+      catalogoProdutos.find((p) => String(p.categoria || '').toUpperCase() === catUpper && p.tipo_item === 'PRINCIPAL');
+
     const defaultsPreco = {
       'GIANTS - Titular (Empresa)': 279000,
       'PAC - Completo': 69900,
@@ -108,15 +224,22 @@ const [ficha, setFicha] = useState({
       'AE - Condição Especial (Evento)': 29990,
       'AE - Tabela Regular': 45990
     };
-    const valorBase = prodSelecionado ? Number(prodSelecionado.valor_base) : (defaultsPreco[ficha.produto_nome] || 279000);
+    const valorBase = prodSelecionado ? Number(prodSelecionado.valor_base) : defaultsPreco[ficha.produto_nome] || 279000;
 
-    const itemAdicional = catalogoProdutos.find(p => String(p.categoria || '').toUpperCase() === catUpper && p.tipo_item === 'ADICIONAL');
-    const adicional = itemAdicional
+    const itemAdicional = catalogoProdutos.find(
+      (p) => String(p.categoria || '').toUpperCase() === catUpper && p.tipo_item === 'ADICIONAL'
+    );
+    const adicionalUnitario = itemAdicional
       ? Number(itemAdicional.valor_base)
-      : (catUpper === 'GIANTS' ? 90000 : catUpper === 'AE' ? 9900 : 0);
+      : catUpper === 'GIANTS'
+      ? 90000
+      : catUpper === 'AE'
+      ? 9900
+      : 0;
 
     const socios = Math.max(1, Number(ficha.socios) || 1);
-    const contrato = valorBase + (socios - 1) * adicional;
+    const totalAdicionais = (socios - 1) * adicionalUnitario;
+    const contrato = valorBase + totalAdicionais;
     const desconto = Math.max(0, Number(ficha.desconto) || 0);
 
     const valorNegociado = Math.max(0, contrato - desconto);
@@ -124,7 +247,7 @@ const [ficha, setFicha] = useState({
     const cashback = Math.max(0, Number(ficha.cashback) || 0);
     const saldo = Math.max(0, valorNegociado - entrada - cashback);
     const parcelas = Math.max(1, Number(ficha.parcelas) || 1);
-    const valorParcela = saldo > 0 ? (saldo / parcelas) : 0;
+    const valorParcela = saldo > 0 ? saldo / parcelas : 0;
 
     const motivosAprovacao = [];
     if (desconto > 0) motivosAprovacao.push(`Desconto concedido: R$ ${desconto.toLocaleString('pt-BR')}`);
@@ -133,6 +256,9 @@ const [ficha, setFicha] = useState({
     if (ficha.desc_dif?.trim()) motivosAprovacao.push('Condição especial declarada');
 
     return {
+      valorBase,
+      adicionalUnitario,
+      totalAdicionais,
       contrato,
       desconto,
       valorNegociado,
@@ -147,9 +273,12 @@ const [ficha, setFicha] = useState({
   };
 
   const calc = calcularValores();
+  const sociosQueEntram = sociosLista.filter((s) => s.entraNoContrato);
+  const sociosQueNaoEntram = sociosLista.filter((s) => !s.entraNoContrato);
 
   const camposFaltantes = [];
-  if (!ficha.nome_empresario?.trim()) camposFaltantes.push('Nome do empresário');
+  if (!ficha.razao_social?.trim()) camposFaltantes.push('Razão Social / Empresa');
+  if (!ficha.nome_empresario?.trim()) camposFaltantes.push('Nome do empresário titular');
   if (!ficha.forma_entrada) camposFaltantes.push('Forma de entrada');
   if (ficha.valor_entrada === undefined || ficha.valor_entrada === null) camposFaltantes.push('Valor de entrada');
   if (!ficha.resultado_comercial) camposFaltantes.push('Resultado comercial');
@@ -165,36 +294,43 @@ const [ficha, setFicha] = useState({
     try {
       setSalvando(true);
       const appTargetId = Number(ficha.aplicacao_id || id);
+      const resumoSocios = sociosQueEntram.map((s) => s.nome).join(', ');
 
       // 1. Registra o resultado da entrevista no backend oficial
       await api.post('/entrevistas/resultado', {
         aplicacaoId: appTargetId,
-            turmaId: ficha.turma_id || 1491,
+        turmaId: ficha.turma_id || 1491,
         turno: ficha.periodo_entrevista === 'Almoço' ? 'almoco' : 'jantar',
         resultado: ficha.resultado_comercial,
-        observacao: `[${ficha.resultado_comercial}] ${ficha.resultado_obs || ''} | Resumo: ${ficha.resumo_entrevista || 'N/A'}`
+        observacao: `[${ficha.resultado_comercial}] Empresa: ${ficha.razao_social} | Sócios no contrato (${sociosQueEntram.length}): ${resumoSocios} | ${ficha.resultado_obs || ''} | Resumo: ${ficha.resumo_entrevista || 'N/A'}`
       });
 
-      // 2. Se gerou fechamento ou negociação, cria a proposta comercial na API
+      // 2. Se gerou fechamento, cria a proposta comercial com todos os sócios vinculados
       if (['Fechou GIANTS', 'Fechou PAC', 'Downsell PAC', 'Fechou AE'].includes(ficha.resultado_comercial)) {
-        const prodMatch = catalogoProdutos.find(p => p.nome === ficha.produto_nome)
-          || catalogoProdutos.find(p => String(p.categoria || '').toUpperCase() === String(ficha.categoria_produto || 'GIANTS').toUpperCase());
+        const prodMatch =
+          catalogoProdutos.find((p) => p.nome === ficha.produto_nome) ||
+          catalogoProdutos.find((p) => String(p.categoria || '').toUpperCase() === String(ficha.categoria_produto || 'GIANTS').toUpperCase());
+
         await api.post('/propostas', {
           aplicacaoId: appTargetId,
-          produtoId: prodMatch ? prodMatch.id : 3,
+          turmaId: ficha.turma_id || 1491,
+          razaoSocial: ficha.razao_social,
+          cnpj: ficha.cnpj,
+          produtoId: prodMatch ? prodMatch.id : 7,
           produtoNome: ficha.produto_nome,
           categoriaProduto: ficha.categoria_produto,
-          socios: Number(ficha.socios) || 1,
+          socios: sociosQueEntram.length,
+          sociosDetalhes: sociosLista,
           valorTotal: calc.valorNegociado,
           valorEntrada: calc.entrada,
-          cashback: 0,
+          cashback: calc.cashback,
           metodoPagamento: `${ficha.forma_entrada} + ${calc.parcelas}x ${ficha.forma_restante}`,
           quantidadeParcelas: calc.parcelas,
           valorParcela: calc.valorParcela
         });
       }
 
-      alert('Entrevista e deliberação comercial registradas com sucesso no servidor!');
+      alert('Entrevista da empresa e sócios vinculados registrados com sucesso!');
       navigate('/interviews');
     } catch (err) {
       alert(`Erro ao registrar: ${err.message}`);
@@ -204,11 +340,11 @@ const [ficha, setFicha] = useState({
   };
 
   if (carregando) {
-    return <div style={{ padding: '2.5rem', color: '#64748b' }}>Carregando dados do participante...</div>;
+    return <div style={{ padding: '2.5rem', color: '#64748b' }}>Carregando ficha consolidada da empresa...</div>;
   }
 
   const etapas = [
-    { num: 1, rotulo: '1. Participantes' },
+    { num: 1, rotulo: '1. Empresa & Sócios' },
     { num: 2, rotulo: '2. Negociação' },
     { num: 3, rotulo: '3. Contexto' },
     { num: 4, rotulo: '4. Programa' },
@@ -221,14 +357,19 @@ const [ficha, setFicha] = useState({
       {/* Cabeçalho */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#ff5722', background: '#fff7ed', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-              Ref #{id}
+              Ficha Empresa #{id}
             </span>
+            {ficha.cnpj && (
+              <span style={{ fontSize: '0.78rem', fontFamily: 'monospace', color: '#475569', background: '#f1f5f9', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                CNPJ: {ficha.cnpj}
+              </span>
+            )}
             <span style={{ fontSize: '0.85rem', color: '#64748b' }}>• {ficha.razao_social}</span>
           </div>
           <h1 style={{ fontSize: '1.6rem', fontWeight: '800', color: '#0f172a', margin: 0 }}>
-            Condução da Entrevista Comercial
+            Entrevista Comercial por CNPJ
           </h1>
         </div>
 
@@ -248,7 +389,7 @@ const [ficha, setFicha] = useState({
 
       {/* Navegação entre etapas */}
       <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '0.75rem', marginBottom: '2rem', overflowX: 'auto' }}>
-        {etapas.map(et => (
+        {etapas.map((et) => (
           <button
             key={et.num}
             onClick={() => setEtapaAtual(et.num)}
@@ -272,47 +413,218 @@ const [ficha, setFicha] = useState({
 
       {/* Conteúdo por Etapa */}
       <div style={{ background: '#fff', borderRadius: '14px', border: '1px solid #e2e8f0', padding: '2rem', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', marginBottom: '2rem' }}>
-        
-        {/* ETAPA 1 */}
+        {/* ETAPA 1: EMPRESA + GESTÃO DE SÓCIOS */}
         {etapaAtual === 1 && (
           <div>
-            <h3 style={{ margin: '0 0 1.25rem 0', color: '#0f172a', fontSize: '1.15rem' }}>1. Empresa e Participantes</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.25rem' }}>
+            <h3 style={{ margin: '0 0 1.25rem 0', color: '#0f172a', fontSize: '1.15rem' }}>1. Dados do CNPJ & Sócios no Contrato</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Empresa / Razão Social</label>
-                <input type="text" value={ficha.razao_social} onChange={(e) => atualizarCampo('razao_social', e.target.value)} style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Empresa / Razão Social *</label>
+                <input
+                  type="text"
+                  value={ficha.razao_social}
+                  onChange={(e) => atualizarCampo('razao_social', e.target.value)}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Nome do Empresário *</label>
-                <input type="text" value={ficha.nome_empresario} onChange={(e) => atualizarCampo('nome_empresario', e.target.value)} placeholder="Ex: Carlos Andrade" style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>CNPJ</label>
+                <input
+                  type="text"
+                  value={ficha.cnpj}
+                  onChange={(e) => atualizarCampo('cnpj', e.target.value)}
+                  placeholder="00.000.000/0001-00"
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Sócio Titular (Responsável) *</label>
+                <input
+                  type="text"
+                  value={ficha.nome_empresario}
+                  onChange={(e) => {
+                    const novoNome = e.target.value;
+                    atualizarCampo('nome_empresario', novoNome);
+                    setSociosLista((prev) =>
+                      prev.map((s) => (s.titular ? { ...s, nome: novoNome } : s))
+                    );
+                  }}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Telefone / WhatsApp</label>
-                <input type="text" value={ficha.telefone} onChange={(e) => atualizarCampo('telefone', e.target.value)} placeholder="(11) 99999-9999" style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                <input
+                  type="text"
+                  value={ficha.telefone}
+                  onChange={(e) => atualizarCampo('telefone', e.target.value)}
+                  placeholder="(11) 99999-9999"
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
               </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Período</label>
-                <select value={ficha.periodo_entrevista} onChange={(e) => atualizarCampo('periodo_entrevista', e.target.value)} style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', boxSizing: 'border-box' }}>
-                  <option value="Almoço">Almoço</option>
-                  <option value="Coffee">Coffee Break</option>
-                  <option value="Outro">Outro</option>
-                </select>
+            </div>
+
+            {/* PAINEL DE SÓCIOS DO CNPJ */}
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '1.25rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div>
+                  <h4 style={{ margin: 0, color: '#0f172a', fontSize: '1rem', fontWeight: '800' }}>
+                    Sócios & Participantes Vinculados ao CNPJ
+                  </h4>
+                  <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                    Marque quem vai entrar junto no fechamento. Cada sócio adicional selecionado soma automaticamente o valor unitário ao contrato.
+                  </span>
+                </div>
+                <span style={{ background: '#0f172a', color: '#fff', padding: '0.3rem 0.7rem', borderRadius: '999px', fontSize: '0.78rem', fontWeight: '700' }}>
+                  {sociosQueEntram.length} {sociosQueEntram.length === 1 ? 'participante no contrato' : 'participantes no contrato'}
+                </span>
+              </div>
+
+              {/* Lista de sócios cadastrados e adicionados */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginBottom: '1.25rem' }}>
+                {sociosLista.map((socio, idx) => {
+                  const posicaoAdicional = sociosQueEntram.findIndex((s) => s.id === socio.id);
+                  const ehTitularContrato = socio.entraNoContrato && posicaoAdicional === 0;
+                  return (
+                    <div
+                      key={socio.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '0.85rem 1rem',
+                        borderRadius: '10px',
+                        background: socio.entraNoContrato ? '#fff' : '#f1f5f9',
+                        border: socio.entraNoContrato ? '1.5px solid #ff5722' : '1px solid #cbd5e1',
+                        gap: '1rem',
+                        flexWrap: 'wrap'
+                      }}
+                    >
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', flex: 1 }}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(socio.entraNoContrato)}
+                          onChange={() => alternarSocioContrato(idx)}
+                          style={{ width: '18px', height: '18px', accentColor: '#ff5722', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <div style={{ fontWeight: '800', color: '#0f172a', fontSize: '0.92rem' }}>
+                            {socio.nome}
+                            {socio.externo && (
+                              <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', background: '#dbeafe', color: '#1e40af', padding: '0.15rem 0.45rem', borderRadius: '4px' }}>
+                                Adicionado no fechamento
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                            {socio.cargo} {socio.cpf && `• CPF/CNPJ: ${socio.cpf}`} {socio.telefone && `• Tel: ${socio.telefone}`}
+                          </div>
+                        </div>
+                      </label>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                        {socio.entraNoContrato ? (
+                          <span
+                            style={{
+                              fontSize: '0.78rem',
+                              fontWeight: '800',
+                              padding: '0.28rem 0.65rem',
+                              borderRadius: '6px',
+                              background: ehTitularContrato ? '#dcfce7' : '#ffedd5',
+                              color: ehTitularContrato ? '#166534' : '#9a3412'
+                            }}
+                          >
+                            {ehTitularContrato
+                              ? 'Entra como Titular (Plano Base)'
+                              : `Entra como Adicional (+ ${calc.adicionalUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})`}
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '0.78rem', fontWeight: '700', color: '#64748b', background: '#e2e8f0', padding: '0.28rem 0.65rem', borderRadius: '6px' }}>
+                            Não entra nesta venda
+                          </span>
+                        )}
+
+                        {socio.externo && (
+                          <button
+                            type="button"
+                            onClick={() => removerSocioExterno(idx)}
+                            title="Remover sócio adicionado"
+                            style={{ background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', padding: '0.3rem 0.55rem', fontSize: '0.75rem', fontWeight: '700', cursor: 'pointer' }}
+                          >
+                            Remover
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Formulário rápido para adicionar sócio não cadastrado na turma */}
+              <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '1rem' }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: '700', color: '#334155', marginBottom: '0.6rem' }}>
+                  + Adicionar outro sócio ou participante que não está cadastrado na turma:
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.65rem', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    value={novoSocioNome}
+                    onChange={(e) => setNovoSocioNome(e.target.value)}
+                    placeholder="Nome completo do sócio *"
+                    style={{ padding: '0.55rem 0.7rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                  />
+                  <input
+                    type="text"
+                    value={novoSocioCpf}
+                    onChange={(e) => setNovoSocioCpf(e.target.value)}
+                    placeholder="CPF (opcional)"
+                    style={{ padding: '0.55rem 0.7rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                  />
+                  <input
+                    type="text"
+                    value={novoSocioTelefone}
+                    onChange={(e) => setNovoSocioTelefone(e.target.value)}
+                    placeholder="WhatsApp (opcional)"
+                    style={{ padding: '0.55rem 0.7rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={adicionarNovoSocio}
+                    style={{
+                      background: '#0f172a',
+                      color: '#fff',
+                      border: 'none',
+                      padding: '0.58rem 0.9rem',
+                      borderRadius: '8px',
+                      fontWeight: '700',
+                      fontSize: '0.82rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    + Incluir no Contrato
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* ETAPA 2 */}
+        {/* ETAPA 2: NEGOCIAÇÃO */}
         {etapaAtual === 2 && (
           <div>
             <h3 style={{ margin: '0 0 1.25rem 0', color: '#0f172a', fontSize: '1.15rem' }}>2. Condições da Negociação</h3>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', background: '#f8fafc', padding: '1.25rem', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', background: '#f8fafc', padding: '1.25rem', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '1.25rem' }}>
               <div>
-                <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Valor Tabela</span>
+                <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Valor Tabela ({sociosQueEntram.length} {sociosQueEntram.length === 1 ? 'participante' : 'participantes'})</span>
                 <div style={{ fontSize: '1.2rem', fontWeight: '800', color: '#0f172a', marginTop: '0.2rem' }}>
                   {calc.contrato.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </div>
+                {calc.totalAdicionais > 0 && (
+                  <div style={{ fontSize: '0.72rem', color: '#475569' }}>
+                    Base {calc.valorBase.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} + Adicionais {calc.totalAdicionais.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </div>
+                )}
               </div>
               <div>
                 <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Valor Negociado</span>
@@ -325,45 +637,44 @@ const [ficha, setFicha] = useState({
                 <div style={{ fontSize: '1.2rem', fontWeight: '800', color: '#ff5722', marginTop: '0.2rem' }}>
                   {calc.saldo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </div>
+                <div style={{ fontSize: '0.72rem', color: '#475569' }}>
+                  {calc.parcelas}x de {calc.valorParcela.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                </div>
               </div>
             </div>
 
+            {/* Resumo visual dos sócios vinculados ao cálculo */}
+            <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '1.5rem', fontSize: '0.82rem', color: '#9a3412' }}>
+              <strong>Participantes vinculados a este contrato:</strong>{' '}
+              {sociosQueEntram.map((s, idx) => (
+                <span key={s.id}>
+                  {idx > 0 && ' • '}
+                  {s.nome} ({idx === 0 ? 'Titular' : `+ ${calc.adicionalUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`})
+                </span>
+              ))}
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.25rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Produto Negociado *</label>
-                <select
-                  value={ficha.produto_nome}
-                  onChange={(e) => {
-                    const novoProd = e.target.value;
-                    const mapaResultado = { GIANTS: 'Fechou GIANTS', PAC: 'Downsell PAC', AE: 'Fechou AE' };
-                    setFicha(prev => ({ ...prev, produto_nome: novoProd, resultado_comercial: mapaResultado[novoProd] || prev.resultado_comercial }));
-                  }}
-                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: '700', boxSizing: 'border-box' }}
-                >
-                  <option value="GIANTS">GIANTS</option>
-                  <option value="PAC">PAC</option>
-                  <option value="AE">AE</option>
-                </select>
-              </div>
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Linha de Produto *</label>
                 <select
                   value={ficha.categoria_produto}
                   onChange={(e) => {
                     const novaCat = e.target.value;
-                    const primeiroSub = catalogoProdutos.find(p => String(p.categoria || '').toUpperCase() === novaCat && p.tipo_item === 'PRINCIPAL');
+                    const primeiroSub = catalogoProdutos.find(
+                      (p) => String(p.categoria || '').toUpperCase() === novaCat && p.tipo_item === 'PRINCIPAL'
+                    );
                     const fallbackSub = {
                       GIANTS: 'GIANTS - Titular (Empresa)',
                       PAC: 'PAC - Completo',
                       AE: 'AE - Condição Especial (Evento)'
                     };
                     const mapaResultado = { GIANTS: 'Fechou GIANTS', PAC: 'Fechou PAC', AE: 'Fechou AE' };
-                    setFicha(prev => ({
+                    setFicha((prev) => ({
                       ...prev,
                       categoria_produto: novaCat,
                       produto_nome: primeiroSub ? primeiroSub.nome : fallbackSub[novaCat],
                       parcelas: primeiroSub ? Number(primeiroSub.parcelas_padrao || 12) : 12,
-                      socios: 1,
                       resultado_comercial: mapaResultado[novaCat] || prev.resultado_comercial
                     }));
                   }}
@@ -374,14 +685,15 @@ const [ficha, setFicha] = useState({
                   <option value="AE">AE (Acelerador Empresarial)</option>
                 </select>
               </div>
+
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Subproduto / Plano *</label>
                 <select
                   value={ficha.produto_nome}
                   onChange={(e) => {
                     const novoSub = e.target.value;
-                    const objSub = catalogoProdutos.find(p => p.nome === novoSub);
-                    setFicha(prev => ({
+                    const objSub = catalogoProdutos.find((p) => p.nome === novoSub);
+                    setFicha((prev) => ({
                       ...prev,
                       produto_nome: novoSub,
                       parcelas: objSub ? Number(objSub.parcelas_padrao || prev.parcelas) : prev.parcelas
@@ -390,49 +702,87 @@ const [ficha, setFicha] = useState({
                   style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: '600', boxSizing: 'border-box' }}
                 >
                   {catalogoProdutos
-                    .filter(p => String(p.categoria || '').toUpperCase() === String(ficha.categoria_produto || 'GIANTS').toUpperCase() && p.tipo_item === 'PRINCIPAL')
-                    .map(p => (
+                    .filter((p) => String(p.categoria || '').toUpperCase() === String(ficha.categoria_produto || 'GIANTS').toUpperCase() && p.tipo_item === 'PRINCIPAL')
+                    .map((p) => (
                       <option key={p.id} value={p.nome}>
                         {p.nome} ({Number(p.valor_base).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})
                       </option>
                     ))}
-                  {catalogoProdutos.filter(p => String(p.categoria || '').toUpperCase() === String(ficha.categoria_produto || 'GIANTS').toUpperCase() && p.tipo_item === 'PRINCIPAL').length === 0 && (
+                  {catalogoProdutos.filter((p) => String(p.categoria || '').toUpperCase() === String(ficha.categoria_produto || 'GIANTS').toUpperCase() && p.tipo_item === 'PRINCIPAL').length === 0 && (
                     <option value={ficha.produto_nome}>{ficha.produto_nome}</option>
                   )}
                 </select>
               </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>
-                  {ficha.categoria_produto === 'GIANTS' ? 'Qtd. de Sócios *' : 'Qtd. Participantes (Vagas) *'}
-                </label>
-                <input type="number" min="1" max="10" value={ficha.socios} onChange={(e) => atualizarCampo('socios', Number(e.target.value))} style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
-              </div>
+
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Valor da Entrada (R$) *</label>
-                <input type="number" value={ficha.valor_entrada} onChange={(e) => atualizarCampo('valor_entrada', Number(e.target.value))} style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                <input
+                  type="number"
+                  value={ficha.valor_entrada}
+                  onChange={(e) => atualizarCampo('valor_entrada', Number(e.target.value))}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
               </div>
+
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Forma da Entrada *</label>
-                <select value={ficha.forma_entrada} onChange={(e) => atualizarCampo('forma_entrada', e.target.value)} style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', boxSizing: 'border-box' }}>
+                <select
+                  value={ficha.forma_entrada}
+                  onChange={(e) => atualizarCampo('forma_entrada', e.target.value)}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', boxSizing: 'border-box' }}
+                >
                   <option value="Pix">Pix</option>
                   <option value="Cartão de Crédito">Cartão de Crédito</option>
                   <option value="Cartão de Débito">Cartão de Débito</option>
                   <option value="Link de Pagamento">Link de Pagamento</option>
                 </select>
               </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Cashback Abatido (R$)</label>
+                <input
+                  type="number"
+                  value={ficha.cashback}
+                  onChange={(e) => atualizarCampo('cashback', Number(e.target.value))}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Desconto Comercial (R$)</label>
+                <input
+                  type="number"
+                  value={ficha.desconto}
+                  onChange={(e) => atualizarCampo('desconto', Number(e.target.value))}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
+              </div>
+
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Parcelas do Restante</label>
-                <input type="number" min="1" max="24" value={ficha.parcelas} onChange={(e) => atualizarCampo('parcelas', Number(e.target.value))} style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                <input
+                  type="number"
+                  min="1"
+                  max="24"
+                  value={ficha.parcelas}
+                  onChange={(e) => atualizarCampo('parcelas', Number(e.target.value))}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
               </div>
+
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Forma do Restante</label>
-                <select value={ficha.forma_restante} onChange={(e) => atualizarCampo('forma_restante', e.target.value)} style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', boxSizing: 'border-box' }}>
+                <select
+                  value={ficha.forma_restante}
+                  onChange={(e) => atualizarCampo('forma_restante', e.target.value)}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', boxSizing: 'border-box' }}
+                >
                   <option value="Pix">Pix</option>
                   <option value="Cartão de Crédito">Cartão de Crédito</option>
                   <option value="Boleto">Boleto (Requer Aprovação)</option>
                 </select>
               </div>
-              </div>
+            </div>
           </div>
         )}
 
@@ -456,10 +806,10 @@ const [ficha, setFicha] = useState({
         {/* ETAPA 4 */}
         {etapaAtual === 4 && (
           <div>
-            <h3 style={{ margin: '0 0 1.25rem 0', color: '#0f172a', fontSize: '1.15rem' }}>4. Programa GIANTS</h3>
+            <h3 style={{ margin: '0 0 1.25rem 0', color: '#0f172a', fontSize: '1.15rem' }}>4. Programa & Cronograma</h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.25rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Mês do Encontro</label>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Mês do Encontro / Turma</label>
                 <input type="text" value={ficha.mes_encontro} onChange={(e) => atualizarCampo('mes_encontro', e.target.value)} style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
               </div>
             </div>
@@ -477,13 +827,27 @@ const [ficha, setFicha] = useState({
                   value={ficha.resultado_comercial}
                   onChange={(e) => {
                     const resVal = e.target.value;
-                    const mapaProd = { 'Fechou GIANTS': 'GIANTS', 'Downsell PAC': 'PAC', 'Fechou AE': 'AE' };
-                    setFicha(prev => ({ ...prev, resultado_comercial: resVal, produto_nome: mapaProd[resVal] || prev.produto_nome }));
+                    const mapaCat = { 'Fechou GIANTS': 'GIANTS', 'Fechou PAC': 'PAC', 'Downsell PAC': 'PAC', 'Fechou AE': 'AE' };
+                    const novaCat = mapaCat[resVal];
+                    if (novaCat && novaCat !== ficha.categoria_produto) {
+                      const primeiroSub = catalogoProdutos.find(
+                        (p) => String(p.categoria || '').toUpperCase() === novaCat && p.tipo_item === 'PRINCIPAL'
+                      );
+                      setFicha((prev) => ({
+                        ...prev,
+                        resultado_comercial: resVal,
+                        categoria_produto: novaCat,
+                        produto_nome: primeiroSub ? primeiroSub.nome : prev.produto_nome
+                      }));
+                    } else {
+                      atualizarCampo('resultado_comercial', resVal);
+                    }
                   }}
                   style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', boxSizing: 'border-box' }}
                 >
                   <option value="">Selecione o resultado</option>
                   <option value="Fechou GIANTS">Fechou GIANTS</option>
+                  <option value="Fechou PAC">Fechou PAC</option>
                   <option value="Downsell PAC">Downsell PAC</option>
                   <option value="Fechou AE">Fechou AE</option>
                   <option value="Não fechou">Não fechou</option>
@@ -498,31 +862,40 @@ const [ficha, setFicha] = useState({
           </div>
         )}
 
-        {/* ETAPA 6 */}
+        {/* ETAPA 6: REVISÃO */}
         {etapaAtual === 6 && (
           <div>
             <h3 style={{ margin: '0 0 1.25rem 0', color: '#0f172a', fontSize: '1.15rem' }}>6. Revisão Final e Envio</h3>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
               <div style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Empresa / Representante</span>
-                <div style={{ fontWeight: '700', color: '#0f172a', marginTop: '0.3rem' }}>{ficha.razao_social}</div>
-                <div style={{ fontSize: '0.85rem', color: '#475569' }}>{ficha.nome_empresario}</div>
+                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Empresa (CNPJ)</span>
+                <div style={{ fontWeight: '800', color: '#0f172a', marginTop: '0.3rem' }}>{ficha.razao_social}</div>
+                {ficha.cnpj && <div style={{ fontSize: '0.8rem', fontFamily: 'monospace', color: '#475569' }}>CNPJ: {ficha.cnpj}</div>}
+                <div style={{ fontSize: '0.82rem', color: '#166534', fontWeight: '700', marginTop: '0.4rem' }}>
+                  Entram no contrato ({sociosQueEntram.length}): {sociosQueEntram.map((s) => s.nome).join(', ')}
+                </div>
+                {sociosQueNaoEntram.length > 0 && (
+                  <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '0.25rem' }}>
+                    Não entram nesta venda: {sociosQueNaoEntram.map((s) => s.nome).join(', ')}
+                  </div>
+                )}
               </div>
 
               <div style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Fechamento Comercial</span>
-                <div style={{ fontWeight: '700', color: '#059669', marginTop: '0.3rem' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Produto & Condições</span>
+                <div style={{ fontWeight: '700', color: '#0f172a', marginTop: '0.3rem' }}>{ficha.produto_nome}</div>
+                <div style={{ fontWeight: '800', color: '#059669', fontSize: '1.05rem', marginTop: '0.15rem' }}>
                   {calc.valorNegociado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </div>
-                <div style={{ fontSize: '0.85rem', color: '#475569' }}>
+                <div style={{ fontSize: '0.82rem', color: '#475569', marginTop: '0.2rem' }}>
                   Entrada de {calc.entrada.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} ({ficha.forma_entrada}) + {calc.parcelas}x parcelas
                 </div>
               </div>
 
               <div style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Resultado</span>
-                <div style={{ fontWeight: '700', color: '#ff5722', marginTop: '0.3rem' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Resultado Comercial</span>
+                <div style={{ fontWeight: '800', color: '#ff5722', marginTop: '0.3rem' }}>
                   {ficha.resultado_comercial || 'Pendente'}
                 </div>
               </div>
@@ -540,7 +913,7 @@ const [ficha, setFicha] = useState({
             ) : (
               <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '1rem', marginBottom: '1.5rem' }}>
                 <span style={{ fontSize: '0.85rem', fontWeight: '700', color: '#16a34a' }}>
-                  ✔ Dados prontos para registro e sincronização com o banco de dados.
+                  ✔ Ficha da empresa e sócios vinculados prontos para registro no servidor.
                 </span>
               </div>
             )}
@@ -564,7 +937,7 @@ const [ficha, setFicha] = useState({
                 }}
               >
                 <span className="material-symbols-outlined">check_circle</span>
-                {salvando ? 'Registrando...' : 'Confirmar e Gravar Entrevista'}
+                {salvando ? 'Registrando...' : 'Confirmar e Gravar Ficha da Empresa'}
               </button>
             </div>
           </div>
@@ -575,7 +948,7 @@ const [ficha, setFicha] = useState({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <button
           disabled={etapaAtual === 1}
-          onClick={() => setEtapaAtual(e => Math.max(1, e - 1))}
+          onClick={() => setEtapaAtual((e) => Math.max(1, e - 1))}
           style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '0.5rem 1.25rem', borderRadius: '8px', fontWeight: '600', cursor: etapaAtual === 1 ? 'not-allowed' : 'pointer', opacity: etapaAtual === 1 ? 0.5 : 1 }}
         >
           Voltar Etapa
@@ -583,7 +956,7 @@ const [ficha, setFicha] = useState({
 
         <button
           disabled={etapaAtual === 6}
-          onClick={() => setEtapaAtual(e => Math.min(6, e + 1))}
+          onClick={() => setEtapaAtual((e) => Math.min(6, e + 1))}
           style={{ background: '#0f172a', color: '#fff', border: 'none', padding: '0.5rem 1.25rem', borderRadius: '8px', fontWeight: '600', cursor: etapaAtual === 6 ? 'not-allowed' : 'pointer', opacity: etapaAtual === 6 ? 0.5 : 1 }}
         >
           Avançar Etapa

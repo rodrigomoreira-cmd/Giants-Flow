@@ -43,19 +43,61 @@ router.post('/propostas', async (req, res) => {
         `, [turmaAlvo, Number(aplicacaoId), propostaSalva.id]);
       }
 
-    // 2. Mantém a redundância operacional na tabela fichas para retrocompatibilidade
+    // 2. Cadastra sócios externos adicionados na hora do fechamento na mesma empresa/turma
+    const sociosDetalhes = Array.isArray(dados.sociosDetalhes) ? dados.sociosDetalhes : [];
+    const { rows: fichaBaseRows } = await pool.query(
+      'SELECT turma_id, empresa, cnpj FROM fichas WHERE id = $1',
+      [aplicacaoId]
+    );
+    const fichaBase = fichaBaseRows[0] || {};
+    const empresaFinal = dados.razaoSocial || fichaBase.empresa || 'Empresa SGA';
+    const cnpjFinal = dados.cnpj || fichaBase.cnpj || null;
+    const turmaFinal = turmaAlvo || fichaBase.turma_id || 1491;
+
+    for (const socio of sociosDetalhes) {
+      if (socio && socio.externo && socio.entraNoContrato && socio.nome && socio.nome.trim()) {
+        const { rows: jaExiste } = await pool.query(
+          'SELECT id FROM fichas WHERE turma_id = $1 AND LOWER(TRIM(nome_participante)) = LOWER(TRIM($2)) AND LOWER(TRIM(empresa)) = LOWER(TRIM($3))',
+          [turmaFinal, socio.nome.trim(), empresaFinal]
+        );
+        if (jaExiste.length === 0) {
+          const { rows: novoSocio } = await pool.query(
+            `INSERT INTO fichas (turma_id, nome_participante, nome_cracha, empresa, cnpj, cpf_cnpj, telefone, cargo, origem, etapa_funil)
+             VALUES ($1, $2, $2, $3, $4, $5, $6, 'Sócio Adicional', 'EVENTO', 'aguardando_aprovacao')
+             RETURNING id`,
+            [turmaFinal, socio.nome.trim(), empresaFinal, cnpjFinal, socio.cpf || null, socio.telefone || null]
+          );
+          if (novoSocio[0]) socio.id = novoSocio[0].id;
+        } else {
+          socio.id = jaExiste[0].id;
+        }
+      }
+    }
+
+    // 3. Atualiza a ficha principal com o pacote consolidado de sócios e produto
     await pool.query(
       `UPDATE fichas 
-        SET valor_negociado = $1,
-            etapa_funil = 'aguardando_aprovacao',
-            status_aprovacao = 'pendente',
-            dados_proposta = $2,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = $3`,
+       SET empresa = COALESCE(NULLIF($4, ''), empresa),
+           cnpj = COALESCE(NULLIF($5, ''), cnpj),
+           valor_negociado = $1,
+           etapa_funil = 'aguardando_aprovacao',
+           status_aprovacao = 'pendente',
+           dados_proposta = $2,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3`,
       [
         propostaSalva.valorTotal,
-        JSON.stringify({ ...propostaSalva, produtoNome: dados.produtoNome || dados.produto_nome || null }),
-        aplicacaoId
+        JSON.stringify({
+          ...propostaSalva,
+          produtoNome: dados.produtoNome || dados.produto_nome || null,
+          categoriaProduto: dados.categoriaProduto || dados.categoria_produto || null,
+          socios: dados.socios || 1,
+          sociosDetalhes,
+          cnpj: cnpjFinal
+        }),
+        aplicacaoId,
+        empresaFinal,
+        cnpjFinal
       ]
     );
 
