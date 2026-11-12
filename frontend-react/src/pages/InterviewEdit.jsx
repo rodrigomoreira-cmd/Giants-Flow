@@ -95,7 +95,7 @@ export default function InterviewEdit() {
           const nomeTitular = clienteEncontrado.nome_participante || clienteEncontrado.nome || clienteEncontrado.nome_completo || '';
 
           // Localiza todos os sócios cadastrados na turma vinculados ao mesmo CNPJ ou mesma empresa
-          const (typeof sociosMesmaEmpresa !== 'undefined' ? sociosMesmaEmpresa : []) = lista.filter((c) => {
+          const sociosMesmaEmpresa = lista.filter((c) => {
             if (c.membro_giants) return false;
             const cDigits = String(c.cnpj || c.cpf_cnpj || '').replace(/\D/g, '');
             if (cnpjDigits.length >= 11 && cDigits === cnpjDigits) return true;
