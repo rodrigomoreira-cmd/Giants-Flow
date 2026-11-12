@@ -44,6 +44,9 @@ export default function InterviewEdit() {
     valor_entrada: 10000,
     cashback: 0,
     almoco_pago: false,
+    cashback_almoco_cnpj: 0,
+    cashback_upgrade_cnpj: 0,
+    historico_produtos_elegiveis: '',
     parcelas: 12,
     forma_restante: 'Pix',
     desconto: 0,
@@ -116,7 +119,14 @@ export default function InterviewEdit() {
           setSociosLista(listaInicialSocios);
 
           const qtdEntrando = Math.max(1, listaInicialSocios.filter((s) => s.entraNoContrato).length);
-          const temAlmocoPago = sociosMesmaEmpresa.some((s) => Boolean(s.almoco_pago || s.cortesia_almoco));
+          const temAlmocoPago = sociosMesmaEmpresa.some((s) => Boolean(s.almoco_pago) || Number(s.valor_almoco || 0) >= 1000);
+          const cashbackAlmocoCnpj = temAlmocoPago ? 1000 : 0;
+          const cashbackUpgradeCnpj = sociosMesmaEmpresa.reduce(
+            (maxVal, s) => Math.max(maxVal, Number(s.cashback_upgrade_90_pct || 0)),
+            0
+          );
+          const socioComHistorico = sociosMesmaEmpresa.find((s) => s.historico_produtos_elegiveis);
+          const historicoElegivel = socioComHistorico ? socioComHistorico.historico_produtos_elegiveis : '';
 
           setFicha((prev) => ({
             ...prev,
@@ -129,7 +139,10 @@ export default function InterviewEdit() {
             telefone: clienteEncontrado.telefone || clienteEncontrado.whatsapp || '',
             email: clienteEncontrado.email || '',
             almoco_pago: temAlmocoPago,
-            cashback: temAlmocoPago ? 1000 : 0,
+            cashback_almoco_cnpj: cashbackAlmocoCnpj,
+            cashback_upgrade_cnpj: cashbackUpgradeCnpj,
+            historico_produtos_elegiveis: historicoElegivel,
+            cashback: cashbackAlmocoCnpj + cashbackUpgradeCnpj,
             socios: qtdEntrando
           }));
         } else {
@@ -643,6 +656,29 @@ export default function InterviewEdit() {
               </div>
             </div>
 
+            {/* Demonstrativo de Cashback apurado pelo CNPJ */}
+            {(Number(ficha.cashback_almoco_cnpj || 0) > 0 || Number(ficha.cashback_upgrade_cnpj || 0) > 0) && (
+              <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: '10px', padding: '0.85rem 1rem', marginBottom: '1rem', fontSize: '0.82rem', color: '#166534' }}>
+                <div style={{ fontWeight: '800', marginBottom: '0.25rem' }}>
+                  ✔ Crédito de Cashback Identificado no CNPJ ({ficha.cnpj || ficha.razao_social}):
+                </div>
+                <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap' }}>
+                  {Number(ficha.cashback_almoco_cnpj || 0) > 0 && (
+                    <span>• Almoço Exclusivo Pago: <strong>R$ 1.000,00</strong></span>
+                  )}
+                  {Number(ficha.cashback_upgrade_cnpj || 0) > 0 && (
+                    <span>
+                      • Upgrade 90% ({ficha.historico_produtos_elegiveis || 'PAC/AE anterior'}):{' '}
+                      <strong>
+                        {Number(ficha.cashback_upgrade_cnpj).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </strong>{' '}
+                      {ficha.categoria_produto === 'GIANTS' ? '(Aplicado no GIANTS)' : '(Disponível apenas se fechar GIANTS)'}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Resumo visual dos sócios vinculados ao cálculo */}
             <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '1.5rem', fontSize: '0.82rem', color: '#9a3412' }}>
               <strong>Participantes vinculados a este contrato:</strong>{' '}
@@ -670,13 +706,19 @@ export default function InterviewEdit() {
                       AE: 'AE - Condição Especial (Evento)'
                     };
                     const mapaResultado = { GIANTS: 'Fechou GIANTS', PAC: 'Fechou PAC', AE: 'Fechou AE' };
-                    setFicha((prev) => ({
-                      ...prev,
-                      categoria_produto: novaCat,
-                      produto_nome: primeiroSub ? primeiroSub.nome : fallbackSub[novaCat],
-                      parcelas: primeiroSub ? Number(primeiroSub.parcelas_padrao || 12) : 12,
-                      resultado_comercial: mapaResultado[novaCat] || prev.resultado_comercial
-                    }));
+                    setFicha((prev) => {
+                      const novoCashback =
+                        Number(prev.cashback_almoco_cnpj || 0) +
+                        (novaCat === 'GIANTS' ? Number(prev.cashback_upgrade_cnpj || 0) : 0);
+                      return {
+                        ...prev,
+                        categoria_produto: novaCat,
+                        produto_nome: primeiroSub ? primeiroSub.nome : fallbackSub[novaCat],
+                        parcelas: primeiroSub ? Number(primeiroSub.parcelas_padrao || 12) : 12,
+                        cashback: novoCashback,
+                        resultado_comercial: mapaResultado[novaCat] || prev.resultado_comercial
+                      };
+                    });
                   }}
                   style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: '700', boxSizing: 'border-box' }}
                 >

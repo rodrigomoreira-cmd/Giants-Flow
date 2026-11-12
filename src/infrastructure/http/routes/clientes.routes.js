@@ -247,4 +247,71 @@ router.put('/clientes/:id', async (req, res) => {
   }
 });
 
+
+// SINCRONIZAÇÃO EM LOTE DE CASHBACK DE UPGRADE (90% PAC/AE) POR CNPJ
+router.post('/clientes/sincronizar-cashback-cnpj', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const registros = Array.isArray(req.body) ? req.body : (req.body.registros || []);
+    if (registros.length === 0) {
+      return res.status(400).json({ error: 'Envie um array de registros com cnpj/empresa e cashback_upgrade_90_pct.' });
+    }
+
+    await client.query('BEGIN');
+    let atualizados = 0;
+
+    // Deduplica por CNPJ antes de aplicar para garantir crédito único por empresa
+    const mapaCnpj = new Map();
+    for (const r of registros) {
+      const cnpjLimpo = String(r.cnpj || r.cpfcnpj || '').replace(/\D/g, '');
+      const razaoNorm = String(r.empresa || r.razaoSocial || '').trim().toUpperCase();
+      const chave = cnpjLimpo.length >= 11 ? `cnpj:${cnpjLimpo}` : (razaoNorm ? `emp:${razaoNorm}` : null);
+      if (!chave) continue;
+
+      const valInvestido = Number(r.valor_investido_pac_ae || 0);
+      const valCashback = Number(r.cashback_upgrade_90_pct || (valInvestido * 0.90) || 0);
+      const hist = r.historico_produtos_elegiveis || null;
+
+      const atual = mapaCnpj.get(chave);
+      if (!atual || valCashback > atual.valCashback) {
+        mapaCnpj.set(chave, { cnpjLimpo, razaoNorm, valInvestido, valCashback, hist });
+      }
+    }
+
+    for (const item of mapaCnpj.values()) {
+      if (item.cnpjLimpo.length >= 11) {
+        const resUpd = await client.query(
+          `UPDATE fichas
+           SET historico_produtos_elegiveis = COALESCE($1, historico_produtos_elegiveis),
+               valor_investido_pac_ae = $2,
+               cashback_upgrade_90_pct = $3,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE REGEXP_REPLACE(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $4`,
+          [item.hist, item.valInvestido, item.valCashback, item.cnpjLimpo]
+        );
+        atualizados += resUpd.rowCount || 0;
+      } else if (item.razaoNorm) {
+        const resUpd = await client.query(
+          `UPDATE fichas
+           SET historico_produtos_elegiveis = COALESCE($1, historico_produtos_elegiveis),
+               valor_investido_pac_ae = $2,
+               cashback_upgrade_90_pct = $3,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE UPPER(TRIM(COALESCE(empresa, ''))) = $4`,
+          [item.hist, item.valInvestido, item.valCashback, item.razaoNorm]
+        );
+        atualizados += resUpd.rowCount || 0;
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ sucesso: true, empresasProcessadas: mapaCnpj.size, fichasAtualizadas: atualizados });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Erro ao sincronizar cashback por CNPJ: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
