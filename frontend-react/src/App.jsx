@@ -18,6 +18,7 @@ import AdminUsers from './pages/AdminUsers';
 import AdminCompanies from './pages/AdminCompanies';
 import AdminCohorts from './pages/AdminCohorts';
 import AdminRules from './pages/AdminRules';
+import AuditLogs from './pages/AuditLogs';
 
 function RotaProtegida({ children }) {
   const sessao = localStorage.getItem('sessao_operador');
@@ -59,6 +60,7 @@ export default function App() {
           <Route path="/admin/companies" element={<RotaProtegida><LayoutComSidebar><AdminCompanies /></LayoutComSidebar></RotaProtegida>} />
           <Route path="/admin/cohorts" element={<RotaProtegida><LayoutComSidebar><AdminCohorts /></LayoutComSidebar></RotaProtegida>} />
           <Route path="/admin/rules" element={<RotaProtegida><LayoutComSidebar><AdminRules /></LayoutComSidebar></RotaProtegida>} />
+          <Route path="/admin/audit" element={<RotaProtegida><LayoutComSidebar><AuditLogs /></LayoutComSidebar></RotaProtegida>} />
 
           {/* Redirecionamentos de Compatibilidade */}
           <Route path="/" element={<Navigate to="/home" replace />} />

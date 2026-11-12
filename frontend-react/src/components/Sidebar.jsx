@@ -11,6 +11,7 @@ export default function Sidebar() {
   const usuario = sessao?.usuario || sessao || {};
   const papel = (usuario.papel || sessao?.papel || 'ADMIN').toUpperCase();
   const isAdmin = papel === 'ADMIN';
+  const isAuditor = papel === 'ADMIN' || papel === 'FINANCEIRO';
 
   const menuGeral = [
     { label: 'Início', path: '/home', icon: 'home' },
@@ -24,7 +25,8 @@ export default function Sidebar() {
     { label: 'Usuários & Acessos', path: '/admin/users', icon: 'manage_accounts' },
     { label: 'Admin Empresas', path: '/admin/companies', icon: 'corporate_fare' },
     { label: 'Turmas & Eventos', path: '/admin/cohorts', icon: 'event' },
-    { label: 'Regras Comerciais', path: '/admin/rules', icon: 'rule' }
+    { label: 'Regras Comerciais', path: '/admin/rules', icon: 'rule' },
+    { label: 'Trilha de Auditoria', path: '/admin/audit', icon: 'history_edu' }
   ];
 
   const linkEstilo = (path) => {
@@ -130,13 +132,13 @@ export default function Sidebar() {
         </div>
 
         {/* Bloco 2: Administração (Visível apenas para ADMIN) */}
-        {isAdmin && (
+        {isAuditor && (
           <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '1rem' }}>
             <span style={{ display: 'block', fontSize: '0.7rem', fontWeight: '800', color: '#ea580c', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '0.5rem', paddingLeft: '0.5rem' }}>
               Administração
             </span>
             <nav>
-              {menuAdmin.map((item) => (
+              {menuAdmin.filter((item) => isAdmin || item.path === '/admin/audit').map((item) => (
                 <Link key={item.path} to={item.path} style={linkEstilo(item.path)}>
                   <span className="material-symbols-outlined" style={{ fontSize: '1.15rem' }}>{item.icon}</span>
                   {item.label}
