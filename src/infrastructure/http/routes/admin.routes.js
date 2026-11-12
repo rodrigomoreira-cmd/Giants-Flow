@@ -89,27 +89,6 @@ router.get('/regras', async (req, res) => {
   }
 });
 
-// GET /regras - Listagem completa de regras comerciais
-router.get('/regras', async (req, res) => {
-  try {
-    const { rows } = await pool.query('SELECT * FROM regras_comerciais ORDER BY id ASC');
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// PUT /regras/:id - Atualização atÃ´mica com validação de limites no servidor
-// GET /regras - Listagem completa de regras comerciais
-router.get('/regras', async (req, res) => {
-  try {
-    const { rows } = await pool.query('SELECT * FROM regras_comerciais ORDER BY id ASC');
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // PUT /regras/:id - Atualização atômica com validação de limites no servidor
 router.put('/regras/:id', async (req, res) => {
   const client = await pool.connect();
@@ -133,7 +112,7 @@ router.put('/regras/:id', async (req, res) => {
 
     // 2. Lock de linha para leitura atômica e prevenção de lost update
     const { rows: regraAtual } = await client.query(
-      'SELECT id, chave, nome, valor_numerico, ativa FROM regras_comerciais WHERE id = put FOR UPDATE',
+      'SELECT id, chave, nome, valor_numerico, ativa FROM regras_comerciais WHERE id = $1 FOR UPDATE',
       [id]
     );
 
@@ -153,14 +132,12 @@ router.put('/regras/:id', async (req, res) => {
       }
 
       // Validação de regras percentuais (ex: descontos, comissões ou taxas)
-      const isPercentual = (regra.chave && regra.chave.toLowerCase().includes('desconto')) ||
-                           (regra.nome && regra.nome.toLowerCase().includes('desconto')) ||
-                           (regra.chave && regra.chave.toLowerCase().includes('taxa')) ||
+      const isPercentual = (regra.chave && (regra.chave.toLowerCase().includes('pct') || regra.chave.toLowerCase().includes('percentual'))) ||
                            (regra.nome && regra.nome.toLowerCase().includes('percentual'));
 
       if (isPercentual && valor_numerico > 100) {
         await client.query('ROLLBACK');
-        return res.status(400).json({ error: 'Regras de percentual/desconto não podem exceder 100%.' });
+        return res.status(400).json({ error: 'Regras percentuais não podem exceder 100%.' });
       }
 
       // Teto máximo operacional para valores monetários absolutos
@@ -173,7 +150,7 @@ router.put('/regras/:id', async (req, res) => {
     // 4. Atualização atômica
     const { rows: atualizado } = await client.query(
       `UPDATE regras_comerciais 
-       SET valor_numerico = COALESCE(put, valor_numerico),
+       SET valor_numerico = COALESCE($1, valor_numerico),
            ativa = COALESCE($2, ativa),
            descricao = COALESCE($3, descricao),
            updated_at = CURRENT_TIMESTAMP
