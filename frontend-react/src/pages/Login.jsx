@@ -1,11 +1,11 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 
 export default function Login() {
-  const [credenciais, setCredenciais] = useState({ 
-    email: 'rodrigo.moreira@grupoacelerador.com.br', 
-    password: 'admin' 
+  const [credenciais, setCredenciais] = useState({
+    email: '',
+    password: ''
   });
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState('');
@@ -21,51 +21,39 @@ export default function Login() {
     setErro('');
 
     try {
-      // 1. Tenta autenticar no endpoint oficial
-      let usuario = null;
-      let token = 'token-auth-local';
+      const res = await api.post('/auth/login', {
+        email: credenciais.email,
+        senha: credenciais.password
+      });
 
-      try {
-        const res = await api.post('/auth/login', { 
-          email: credenciais.email, 
-          senha: credenciais.password 
-        });
-        usuario = res.usuario || res.user || res;
-        token = res.token || token;
-      } catch (_) {
-        // Fallback: consulta lista de usuários do banco
-        const lista = await api.get('/usuarios');
-        const achou = (lista || []).find(u => 
-          u.email?.toLowerCase() === credenciais.email.toLowerCase() ||
-          u.papel?.toLowerCase() === 'admin'
-        );
-        if (achou) usuario = achou;
+      const usuario = res?.usuario;
+      const token = res?.token;
+
+      if (!token || !usuario) {
+        throw new Error('Resposta de autenticação inválida do servidor.');
       }
 
-      const papelFinal = (usuario?.papel || 'ADMIN').toUpperCase();
-      const nomeFinal = usuario?.nome || 'Rodrigo Moreira';
-      const emailFinal = usuario?.email || credenciais.email;
-      const idFinal = usuario?.id || 7;
+      const papelFinal = (usuario.papel || 'USER').toUpperCase();
 
-      // Grava nos dois formatos (plano e aninhado) para compatibilidade absoluta
       const sessao = {
         token,
-        nome: nomeFinal,
-        email: emailFinal,
+        expiresAt: res.expiresAt,
+        nome: usuario.nome,
+        email: usuario.email,
         papel: papelFinal,
         usuario: {
-          id: idFinal,
-          nome: nomeFinal,
-          email: emailFinal,
+          id: usuario.id,
+          nome: usuario.nome,
+          email: usuario.email,
           papel: papelFinal,
-          ativo: usuario?.ativo !== false
+          ativo: usuario.ativo !== false
         }
       };
 
       localStorage.setItem('sessao_operador', JSON.stringify(sessao));
       navigate('/');
     } catch (err) {
-      setErro('Erro ao autenticar: ' + (err.message || 'Verifique as credenciais'));
+      setErro(err.message || 'Credenciais inválidas. Verifique e tente novamente.');
     } finally {
       setCarregando(false);
     }
@@ -79,7 +67,7 @@ export default function Login() {
             <span className="material-symbols-outlined" style={{ fontSize: '2rem' }}>filter_alt</span>
           </div>
         </div>
-        
+
         <h1 style={{ fontSize: '1.5rem', color: '#0f172a', marginBottom: '0.5rem', fontWeight: '800' }}>GIANTS Flow</h1>
         <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '2rem' }}>Acesso ao painel administrativo</p>
 
@@ -92,38 +80,42 @@ export default function Login() {
         <form onSubmit={fazerLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', textAlign: 'left' }}>
           <div>
             <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem', fontWeight: '600', color: '#334155' }}>E-mail Corporativo</label>
-            <input 
-              type="email" 
-              name="email" 
-              value={credenciais.email} 
-              onChange={lidarComMudanca} 
-              required 
-              style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none' }} 
+            <input
+              type="email"
+              name="email"
+              placeholder="seu.nome@grupoacelerador.com.br"
+              value={credenciais.email}
+              onChange={lidarComMudanca}
+              required
+              autoComplete="username"
+              style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none' }}
             />
           </div>
 
           <div>
             <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem', fontWeight: '600', color: '#334155' }}>Senha de Acesso</label>
-            <input 
-              type="password" 
-              name="password" 
-              value={credenciais.password} 
-              onChange={lidarComMudanca} 
-              required 
-              style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none' }} 
+            <input
+              type="password"
+              name="password"
+              placeholder="••••••••"
+              value={credenciais.password}
+              onChange={lidarComMudanca}
+              required
+              autoComplete="current-password"
+              style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none' }}
             />
           </div>
 
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             disabled={carregando}
-            style={{ 
-              background: '#ff5722', 
-              color: '#fff', 
-              border: 'none', 
-              padding: '0.85rem', 
-              borderRadius: '8px', 
-              fontWeight: '700', 
+            style={{
+              background: '#ff5722',
+              color: '#fff',
+              border: 'none',
+              padding: '0.85rem',
+              borderRadius: '8px',
+              fontWeight: '700',
               cursor: carregando ? 'not-allowed' : 'pointer',
               marginTop: '0.5rem',
               opacity: carregando ? 0.7 : 1

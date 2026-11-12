@@ -6,6 +6,7 @@ const fs = require('fs');
 require('dotenv').config();
 
 const { pool, rlsStorage } = require('./infrastructure/database/connection');
+const { verificarJWT, verificarTokenRevogado } = require('./infrastructure/security/jwt');
 const redisModule = require('./infrastructure/redis/client');
 const redisClient = redisModule?.redisClient || redisModule;
 
@@ -53,7 +54,7 @@ app.get(['/pitch', '/pitch.html'], (_req, res) => renderHtml(res, 'pitch.html'))
 app.get(['/propostas', '/propostas.html'], (_req, res) => renderHtml(res, 'propostas.html'));
 app.get(['/financeiro', '/financeiro.html'], (_req, res) => renderHtml(res, 'financeiro.html'));
 
-// Middleware de Contexto RLS (Sessão de Usuário no PostgreSQL)
+// Middleware de Contexto RLS & Verificação Criptográfica JWT
 app.use('/api', async (req, res, next) => {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.replace(/^Bearer\s+/i, '').trim();
@@ -62,22 +63,31 @@ app.use('/api', async (req, res, next) => {
   let userRole = null;
 
   if (token) {
-    const match = token.match(/token-(?:auth|admin)-(\d+)/);
-    if (match) {
-      const parsedId = parseInt(match[1], 10);
-      try {
-        const { rows } = await pool.query(
-          'SELECT id, papel, ativo FROM usuarios WHERE id = $1 LIMIT 1',
-          [parsedId]
-        );
-        if (rows.length > 0 && rows[0].ativo) {
-          userId = rows[0].id;
-          userRole = (rows[0].papel || 'USER').toUpperCase();
-          req.usuario = rows[0];
-        }
-      } catch (e) {
-        console.warn('⚠️ Erro ao verificar token RLS:', e.message);
+    const payload = verificarJWT(token);
+    if (!payload) {
+      return res.status(401).json({ error: 'Token de autenticação inválido ou expirado.' });
+    }
+
+    const revogado = await verificarTokenRevogado(payload);
+    if (revogado) {
+      return res.status(401).json({ error: 'Sessão revogada. Faça login novamente.' });
+    }
+
+    try {
+      const { rows } = await pool.query(
+        'SELECT id, nome, email, papel, ativo FROM usuarios WHERE id = $1 LIMIT 1',
+        [payload.sub]
+      );
+      if (rows.length === 0 || rows[0].ativo === false) {
+        return res.status(401).json({ error: 'Usuário inativo ou não encontrado.' });
       }
+      userId = rows[0].id;
+      userRole = (rows[0].papel || 'USER').toUpperCase();
+      req.usuario = rows[0];
+      req.authPayload = payload;
+    } catch (e) {
+      console.warn('⚠️ Erro ao validar sessão RLS:', e.message);
+      return res.status(500).json({ error: 'Falha ao validar sessão.' });
     }
   }
 
@@ -93,14 +103,40 @@ if (typeof apiRoutes === 'function') {
   console.warn('⚠️ Roteador /api não exportou uma função de middleware válida.');
 }
 
-// Healthcheck
-app.get('/health', async (_req, res) => {
+// Healthcheck unificado (Docker interno + Proxy /api/health)
+app.get(['/health', '/api/health'], async (_req, res) => {
+  const inicio = Date.now();
+  const checks = { postgres: 'unknown', redis: 'unknown' };
+
   try {
     await pool.query('SELECT 1');
-    res.status(200).json({ status: 'healthy', uptime: process.uptime() });
-  } catch (error) {
-    res.status(503).json({ status: 'unhealthy', error: error.message });
+    checks.postgres = 'healthy';
+  } catch (err) {
+    checks.postgres = 'unhealthy: ' + err.message;
   }
+
+  try {
+    if (redisClient) {
+      if (redisClient.status === 'wait') await redisClient.connect();
+      const pong = await redisClient.ping();
+      checks.redis = pong === 'PONG' ? 'healthy' : 'degraded';
+    } else {
+      checks.redis = 'not_configured';
+    }
+  } catch (err) {
+    checks.redis = 'unhealthy: ' + err.message;
+  }
+
+  const dbOk = checks.postgres === 'healthy';
+  const redisOk = checks.redis === 'healthy' || checks.redis === 'not_configured';
+  const statusCode = dbOk && redisOk ? 200 : 503;
+
+  return res.status(statusCode).json({
+    status: statusCode === 200 ? 'healthy' : 'unhealthy',
+    latencyMs: Date.now() - inicio,
+    uptime: Math.round(process.uptime()),
+    checks
+  });
 });
 
 // Fallback 404
