@@ -36,7 +36,7 @@ router.post('/propostas', async (req, res) => {
           SET turma_id = COALESCE(
             $1::INT, 
             (SELECT  turma_id FROM aplicacoes WHERE id = $2), 
-            (SELECT turma_id, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae  FROM fichas WHERE id = $2), 
+            (SELECT turma_id  FROM fichas WHERE id = $2), 
             1491
           )
           WHERE id = $3
