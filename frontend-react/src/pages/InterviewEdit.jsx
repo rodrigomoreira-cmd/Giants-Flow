@@ -353,7 +353,25 @@ export default function InterviewEdit() {
   };
 
   if (carregando) {
-    return <div style={{ padding: '2.5rem', color: '#64748b' }}>Carregando ficha consolidada da empresa...</div>;
+    return <div style={{ padding: '2.5rem', color: '#64748b' }}>Carregando ficha consolidada da empresa...</div>
+              {/* Resumo Cashback Total Abatido */}
+              <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: '10px', padding: '0.85rem 1rem', marginTop: '0.75rem', color: '#166534', fontSize: '0.85rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: '800' }}>
+                  <span>Cashback Total Abatido (CNPJ):</span>
+                  <span style={{ fontSize: '1rem' }}>
+                    - {Number(ficha.cashback || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.76rem', marginTop: '0.3rem', color: '#15803d', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                  <span>• Almoço Pago: <strong>{Number(ficha.cashback_almoco_cnpj || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong></span>
+                  <span>
+                    • Upgrade 90% ({ficha.categoria_produto === 'GIANTS' ? 'Aplicado' : 'Exclusivo GIANTS'}):{' '}
+                    <strong>
+                      {(ficha.categoria_produto === 'GIANTS' ? Number(ficha.cashback_upgrade_cnpj || 0) : 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </strong>
+                  </span>
+                </div>
+              </div>;
   }
 
   const etapas = [

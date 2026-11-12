@@ -395,6 +395,26 @@ export default function Companies() {
                       >
                         <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '0.92rem' }}>
                           {g.empresa}
+                            {Number(g.cashbackTotalCnpj || 0) > 0 && (
+                              <span
+                                title={g.historicoUpgradeCnpj ? `Inclui upgrade 90%: ${g.historicoUpgradeCnpj}` : 'Crédito de Almoço Pago'}
+                                style={{
+                                  background: '#ecfdf5',
+                                  color: '#047857',
+                                  border: '1px solid #6ee7b7',
+                                  padding: '0.15rem 0.5rem',
+                                  borderRadius: '6px',
+                                  fontSize: '0.72rem',
+                                  fontWeight: '800',
+                                  marginLeft: '0.45rem',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.2rem'
+                                }}
+                              >
+                                Cashback: {Number(g.cashbackTotalCnpj).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                              </span>
+                            )}
                         </span>
                         {g.sociosNaoGiants.length > 1 && (
                           <span style={{ fontSize: '0.72rem', fontWeight: '700', background: '#e0e7ff', color: '#3730a3', padding: '0.15rem 0.5rem', borderRadius: '999px' }}>
