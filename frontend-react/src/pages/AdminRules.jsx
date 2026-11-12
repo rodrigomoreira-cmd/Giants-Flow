@@ -43,7 +43,7 @@ export default function AdminRules() {
         parcelas_padrao: Number(prod.parcelas_padrao) || 12,
         descricao_entregaveis: prod.descricao_entregaveis
       });
-      alert(`Produto "${prod.nome}" atualizado com sucesso!\nValor: ${Number(prod.valor_base).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (${prod.parcelas_padrao}x).\nVendas anteriores permanecem congeladas.`);
+      alert(`Produto "${prod.nome}" atualizado com sucesso!\nNovo valor: ${Number(prod.valor_base).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (${prod.parcelas_padrao}x).\nVendas já aprovadas permanecem congeladas.`);
     } catch (err) {
       alert('Erro ao atualizar produto: ' + err.message);
     } finally {
@@ -81,23 +81,46 @@ export default function AdminRules() {
     }
   };
 
-  const badgeCategoria = (cat) => {
-    const map = {
-      GIANTS: { bg: '#ffedd5', color: '#9a3412' },
-      PAC: { bg: '#dbeafe', color: '#1e40af' },
-      AE: { bg: '#fef3c7', color: '#92400e' }
-    };
-    const st = map[cat] || { bg: '#f1f5f9', color: '#334155' };
-    return (
-      <span style={{ background: st.bg, color: st.color, padding: '0.22rem 0.55rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: '800' }}>
-        {cat}
-      </span>
-    );
+  const rotuloTipoItem = (tipo) => {
+    if (tipo === 'PRINCIPAL') {
+      return { texto: 'Plano Principal', bg: '#dcfce7', color: '#166534' };
+    }
+    if (tipo === 'ADICIONAL') {
+      return { texto: 'Adicional por Sócio/Vaga', bg: '#e0e7ff', color: '#3730a3' };
+    }
+    return { texto: 'Taxa de Convocação', bg: '#fef3c7', color: '#92400e' };
   };
+
+  const linhasConfig = [
+    {
+      chave: 'GIANTS',
+      titulo: 'Linha GIANTS — Programa 360°',
+      subtitulo: 'Titular da empresa, adicional por sócio extra e convocação do Almoço Exclusivo.',
+      corBorda: '#fed7aa',
+      corHeader: '#fff7ed',
+      corTitulo: '#9a3412'
+    },
+    {
+      chave: 'PAC',
+      titulo: 'Linha PAC — Programa de Aceleração Pré-GIANTS',
+      subtitulo: 'Opções de downsell / aceleração intermediária (Completo e Compacto).',
+      corBorda: '#bfdbfe',
+      corHeader: '#eff6ff',
+      corTitulo: '#1e40af'
+    },
+    {
+      chave: 'AE',
+      titulo: 'Linha AE — Acelerador Empresarial',
+      subtitulo: 'Imersão presencial de 3 dias (Condição Especial do Evento, Tabela Regular e Vaga Adicional).',
+      corBorda: '#fde68a',
+      corHeader: '#fffbeb',
+      corTitulo: '#92400e'
+    }
+  ];
 
   return (
     <div style={{ padding: '2rem', width: '100%', boxSizing: 'border-box' }}>
-      <div style={{ marginBottom: '1.5rem' }}>
+      <div style={{ marginBottom: '1.75rem' }}>
         <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#ff5722', background: '#fff7ed', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
           Administração Geral
         </span>
@@ -105,112 +128,122 @@ export default function AdminRules() {
           Catálogo de Produtos, Subprodutos & Regras Comerciais
         </h1>
         <p style={{ color: '#64748b', fontSize: '0.9rem', margin: '0.25rem 0 0 0' }}>
-          Configure os valores de GIANTS, PAC e AE. Alterações afetam apenas novas propostas; vendas já aprovadas permanecem congeladas.
+          Edite valores e parcelas padrão por linha de produto. As alterações valem apenas para novas propostas e ficam registradas na Trilha de Auditoria.
         </p>
       </div>
 
-      {/* BLOCO 1: CATÁLOGO DE PRODUTOS E SUBPRODUTOS */}
-      <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', marginBottom: '2rem' }}>
-        <div style={{ padding: '1rem 1.25rem', background: '#fff7ed', borderBottom: '1px solid #fed7aa' }}>
-          <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '800', color: '#9a3412' }}>
-            Tabela Oficial de Produtos & Subprodutos (GIANTS, PAC e AE)
-          </h2>
-          <span style={{ fontSize: '0.8rem', color: '#c2410c' }}>
-            Os valores e parcelamentos padrão são carregados em tempo real nas entrevistas comerciais e auditados no log de segurança.
-          </span>
+      {/* BLOCO 1: 3 CARDS SEPARADOS POR LINHA (GIANTS, PAC, AE) */}
+      {carregandoProdutos ? (
+        <div style={{ padding: '2rem', background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', textAlign: 'center', color: '#94a3b8', marginBottom: '2rem' }}>
+          Carregando catálogo oficial...
         </div>
+      ) : (
+        linhasConfig.map((linha) => {
+          const itensLinha = produtos.filter((p) => String(p.categoria || '').toUpperCase() === linha.chave);
+          return (
+            <div
+              key={linha.chave}
+              style={{ background: '#fff', borderRadius: '12px', border: `1px solid ${linha.corBorda}`, overflow: 'hidden', marginBottom: '1.5rem' }}
+            >
+              <div style={{ padding: '1rem 1.25rem', background: linha.corHeader, borderBottom: `1px solid ${linha.corBorda}` }}>
+                <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '800', color: linha.corTitulo }}>
+                  {linha.titulo}
+                </h2>
+                <span style={{ fontSize: '0.8rem', color: '#475569' }}>{linha.subtitulo}</span>
+              </div>
 
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-              <tr>
-                <th style={{ padding: '0.9rem 1rem', color: '#475569', fontSize: '0.8rem' }}>Linha</th>
-                <th style={{ padding: '0.9rem 1rem', color: '#475569', fontSize: '0.8rem' }}>Produto / Subproduto</th>
-                <th style={{ padding: '0.9rem 1rem', color: '#475569', fontSize: '0.8rem' }}>Entregáveis & Condições</th>
-                <th style={{ padding: '0.9rem 1rem', color: '#475569', fontSize: '0.8rem' }}>Valor Base (R$)</th>
-                <th style={{ padding: '0.9rem 1rem', color: '#475569', fontSize: '0.8rem' }}>Parcelas Padrão</th>
-                <th style={{ padding: '0.9rem 1rem', color: '#475569', fontSize: '0.8rem', textAlign: 'right' }}>Ação</th>
-              </tr>
-            </thead>
-            <tbody>
-              {carregandoProdutos ? (
-                <tr><td colSpan="6" style={{ padding: '1.5rem', textAlign: 'center', color: '#94a3b8' }}>Carregando catálogo...</td></tr>
-              ) : produtos.length === 0 ? (
-                <tr><td colSpan="6" style={{ padding: '1.5rem', textAlign: 'center', color: '#94a3b8' }}>Nenhum produto cadastrado.</td></tr>
-              ) : (
-                produtos.map((prod) => {
-                  const parcelaMedia = Number(prod.parcelas_padrao) > 0 ? (Number(prod.valor_base) / Number(prod.parcelas_padrao)) : Number(prod.valor_base);
-                  return (
-                    <tr key={prod.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '0.9rem 1rem' }}>{badgeCategoria(prod.categoria)}</td>
-                      <td style={{ padding: '0.9rem 1rem', fontWeight: '800', color: '#0f172a', fontSize: '0.9rem' }}>
-                        {prod.nome}
-                        <div style={{ fontSize: '0.72rem', color: '#94a3b8', fontFamily: 'monospace' }}>
-                          {prod.tipo_item} • ID #{prod.id}
-                        </div>
-                      </td>
-                      <td style={{ padding: '0.9rem 1rem', color: '#475569', fontSize: '0.8rem', maxWidth: '340px' }}>
-                        {prod.descricao_entregaveis || '-'}
-                      </td>
-                      <td style={{ padding: '0.9rem 1rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                          <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: '700' }}>R$</span>
-                          <input
-                            type="number"
-                            step="10"
-                            value={prod.valor_base}
-                            onChange={(e) => alterarCampoProduto(prod.id, 'valor_base', e.target.value)}
-                            style={{ width: '125px', padding: '0.4rem 0.55rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '800', fontSize: '0.88rem', color: '#0f172a' }}
-                          />
-                        </div>
-                      </td>
-                      <td style={{ padding: '0.9rem 1rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                          <input
-                            type="number"
-                            min="1"
-                            max="24"
-                            value={prod.parcelas_padrao || 12}
-                            onChange={(e) => alterarCampoProduto(prod.id, 'parcelas_padrao', e.target.value)}
-                            style={{ width: '60px', padding: '0.4rem 0.5rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '700', fontSize: '0.85rem', color: '#0f172a' }}
-                          />
-                          <span style={{ fontSize: '0.75rem', color: '#64748b', whiteSpace: 'nowrap' }}>
-                            x {parcelaMedia.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                          </span>
-                        </div>
-                      </td>
-                      <td style={{ padding: '0.9rem 1rem', textAlign: 'right' }}>
-                        <button
-                          onClick={() => salvarProduto(prod)}
-                          disabled={salvandoProdutoId === prod.id}
-                          style={{
-                            background: '#0f172a',
-                            color: '#fff',
-                            border: 'none',
-                            padding: '0.45rem 0.9rem',
-                            borderRadius: '6px',
-                            fontSize: '0.78rem',
-                            fontWeight: '700',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {salvandoProdutoId === prod.id ? 'Salvando...' : 'Atualizar'}
-                        </button>
-                      </td>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                  <thead style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                    <tr>
+                      <th style={{ padding: '0.85rem 1rem', color: '#475569', fontSize: '0.8rem', width: '24%' }}>Subproduto / Plano</th>
+                      <th style={{ padding: '0.85rem 1rem', color: '#475569', fontSize: '0.8rem', width: '15%' }}>Tipo</th>
+                      <th style={{ padding: '0.85rem 1rem', color: '#475569', fontSize: '0.8rem', width: '31%' }}>Entregáveis & Regra</th>
+                      <th style={{ padding: '0.85rem 1rem', color: '#475569', fontSize: '0.8rem', width: '13%' }}>Valor Base (R$)</th>
+                      <th style={{ padding: '0.85rem 1rem', color: '#475569', fontSize: '0.8rem', width: '10%' }}>Parcelas</th>
+                      <th style={{ padding: '0.85rem 1rem', color: '#475569', fontSize: '0.8rem', textAlign: 'right', width: '7%' }}>Ação</th>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                  </thead>
+                  <tbody>
+                    {itensLinha.map((prod) => {
+                      const badge = rotuloTipoItem(prod.tipo_item);
+                      const parcelaMedia = Number(prod.parcelas_padrao) > 0
+                        ? Number(prod.valor_base) / Number(prod.parcelas_padrao)
+                        : Number(prod.valor_base);
+                      return (
+                        <tr key={prod.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '0.85rem 1rem', fontWeight: '800', color: '#0f172a', fontSize: '0.9rem' }}>
+                            {prod.nome}
+                          </td>
+                          <td style={{ padding: '0.85rem 1rem' }}>
+                            <span style={{ background: badge.bg, color: badge.color, padding: '0.2rem 0.55rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: '700', whiteSpace: 'nowrap' }}>
+                              {badge.texto}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.85rem 1rem', color: '#475569', fontSize: '0.8rem' }}>
+                            {prod.descricao_entregaveis || '-'}
+                          </td>
+                          <td style={{ padding: '0.85rem 1rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                              <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: '700' }}>R$</span>
+                              <input
+                                type="number"
+                                step="10"
+                                value={prod.valor_base}
+                                onChange={(e) => alterarCampoProduto(prod.id, 'valor_base', e.target.value)}
+                                style={{ width: '115px', padding: '0.4rem 0.5rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '800', fontSize: '0.86rem', color: '#0f172a' }}
+                              />
+                            </div>
+                          </td>
+                          <td style={{ padding: '0.85rem 1rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                              <input
+                                type="number"
+                                min="1"
+                                max="24"
+                                value={prod.parcelas_padrao || 12}
+                                onChange={(e) => alterarCampoProduto(prod.id, 'parcelas_padrao', e.target.value)}
+                                style={{ width: '52px', padding: '0.4rem 0.45rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '700', fontSize: '0.84rem', color: '#0f172a' }}
+                              />
+                              <span style={{ fontSize: '0.73rem', color: '#64748b', whiteSpace: 'nowrap' }}>
+                                x {parcelaMedia.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                              </span>
+                            </div>
+                          </td>
+                          <td style={{ padding: '0.85rem 1rem', textAlign: 'right' }}>
+                            <button
+                              onClick={() => salvarProduto(prod)}
+                              disabled={salvandoProdutoId === prod.id}
+                              style={{
+                                background: '#0f172a',
+                                color: '#fff',
+                                border: 'none',
+                                padding: '0.42rem 0.85rem',
+                                borderRadius: '6px',
+                                fontSize: '0.78rem',
+                                fontWeight: '700',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {salvandoProdutoId === prod.id ? 'Salvando...' : 'Atualizar'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })
+      )}
 
-      {/* BLOCO 2: REGRAS DE ALÇADA */}
-      <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+      {/* BLOCO 2: REGRAS DE ALÇADA E CASHBACK */}
+      <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', marginTop: '2rem' }}>
         <div style={{ padding: '1rem 1.25rem', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
           <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '800', color: '#0f172a' }}>
-            Regras de Alçada, Entrada Mínima & Cashback
+            Regras de Alçada, Entrada Mínima & Cashback de Upgrade
           </h2>
         </div>
 
@@ -236,7 +269,7 @@ export default function AdminRules() {
                     {r.nome}
                     <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontFamily: 'monospace' }}>{r.chave}</div>
                   </td>
-                  <td style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem', maxWidth: '300px' }}>
+                  <td style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem', maxWidth: '320px' }}>
                     {r.descricao}
                   </td>
                   <td style={{ padding: '1rem' }}>
