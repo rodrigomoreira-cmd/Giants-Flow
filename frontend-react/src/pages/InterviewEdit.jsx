@@ -365,7 +365,7 @@ export default function InterviewEdit() {
                 <div style={{ fontSize: '0.76rem', marginTop: '0.3rem', color: '#15803d', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                   <span>• Almoço Pago: <strong>{Number(ficha.cashback_almoco_cnpj || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong></span>
                   <span>
-                    • Upgrade 90% ({ficha.categoria_produto === 'GIANTS' ? 'Aplicado' : 'Exclusivo GIANTS'}):{' '}
+                    • Upgrade {/ACELERADOR|\bAE\b|ACE\d/i.test(ficha.historico_produtos_elegiveis || '') ? '100% AE' : '90% PAC'} ({ficha.categoria_produto === 'GIANTS' ? 'Aplicado' : 'Exclusivo GIANTS'}):{' '}
                     <strong>
                       {(ficha.categoria_produto === 'GIANTS' ? Number(ficha.cashback_upgrade_cnpj || 0) : 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                     </strong>
@@ -686,7 +686,7 @@ export default function InterviewEdit() {
                   )}
                   {Number(ficha.cashback_upgrade_cnpj || 0) > 0 && (
                     <span>
-                      • Upgrade 90% ({ficha.historico_produtos_elegiveis || 'PAC/AE anterior'}):{' '}
+                      • Upgrade {/ACELERADOR|\bAE\b|ACE\d/i.test(ficha.historico_produtos_elegiveis || '') ? '100% AE' : '90% PAC'} ({ficha.historico_produtos_elegiveis || 'PAC/AE anterior'}):{' '}
                       <strong>
                         {Number(ficha.cashback_upgrade_cnpj).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                       </strong>{' '}
