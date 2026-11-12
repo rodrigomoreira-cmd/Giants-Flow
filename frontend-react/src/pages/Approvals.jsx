@@ -40,7 +40,9 @@ export default function Approvals() {
 
   const propostasFiltradas = propostas.filter((p) => {
     if (filtro === 'TODOS') return true;
-    return (p.status_aprovacao || p.status || '').toUpperCase() === filtro;
+    const st = (p.status_aprovacao || p.status || '').toUpperCase();
+    if (filtro === 'APROVADO') return st === 'APROVADO' || st === 'APROVADA';
+    return st === filtro;
   });
 
   return (
@@ -118,7 +120,17 @@ export default function Approvals() {
                     <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{prop.cliente_nome || prop.nome}</div>
                   </td>
                   <td style={{ padding: '1rem', color: '#334155', fontWeight: '500' }}>
-                    {prop.produto_nome || 'Mentoria GIANTS Individual'}
+                    <span style={{
+                      display: 'inline-block',
+                      padding: '0.25rem 0.65rem',
+                      borderRadius: '6px',
+                      fontSize: '0.78rem',
+                      fontWeight: '800',
+                      background: (prop.produto_nome || '').toUpperCase() === 'PAC' ? '#dbeafe' : (prop.produto_nome || '').toUpperCase() === 'AE' ? '#fef3c7' : '#ffedd5',
+                      color: (prop.produto_nome || '').toUpperCase() === 'PAC' ? '#1e40af' : (prop.produto_nome || '').toUpperCase() === 'AE' ? '#92400e' : '#9a3412'
+                    }}>
+                      {prop.produto_nome || 'GIANTS'}
+                    </span>
                   </td>
                   <td style={{ padding: '1rem', fontWeight: '700', color: '#059669' }}>
                     {Number(prop.valor_total || 25000).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}

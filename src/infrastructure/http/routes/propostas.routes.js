@@ -54,7 +54,7 @@ router.post('/propostas', async (req, res) => {
         WHERE id = $3`,
       [
         propostaSalva.valorTotal,
-        JSON.stringify(propostaSalva),
+        JSON.stringify({ ...propostaSalva, produtoNome: dados.produtoNome || dados.produto_nome || null }),
         aplicacaoId
       ]
     );
@@ -81,7 +81,16 @@ router.patch('/propostas/:id/vender', async (req, res) => {
 
 router.get('/financeiro/propostas', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM fichas ORDER BY id DESC');
+    const { rows } = await pool.query(`
+      SELECT f.*,
+             COALESCE(
+               NULLIF(f.dados_proposta->>'produtoNome', ''),
+               (SELECT p.nome FROM produtos p WHERE p.id = NULLIF(f.dados_proposta->>'produtoId', '')::int),
+               'GIANTS'
+             ) AS produto_nome
+      FROM fichas f
+      ORDER BY f.id DESC
+    `);
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

@@ -10,6 +10,7 @@ export default function InterviewEdit() {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
+  const [catalogoProdutos, setCatalogoProdutos] = useState([]);
 
   const [ficha, setFicha] = useState({
     aplicacao_id: id,
@@ -24,7 +25,8 @@ export default function InterviewEdit() {
     socios: 1,
     forma_entrada: 'Pix',
     valor_entrada: 10000,
-    cashback: calc.cashback,
+    cashback: 0,
+    produto_nome: 'GIANTS',
     almoco_pago: false,
     parcelas: 10,
     forma_restante: 'Pix',
@@ -53,6 +55,10 @@ export default function InterviewEdit() {
         setCarregando(true);
         setErro('');
         
+        // 0. Carregar tabela de preços oficial (GIANTS, PAC, AE)
+        const listaProds = await api.get('/produtos').catch(() => []);
+        if (Array.isArray(listaProds)) setCatalogoProdutos(listaProds);
+
         // 1. Carregar lista de clientes para obter dados da aplicação
         const dadosClientes = await api.get('/clientes?turmaId=${localStorage.getItem("turma_ativa_id") || "1491"}');
         const lista = Array.isArray(dadosClientes) ? dadosClientes : dadosClientes.clientes || [];
@@ -92,8 +98,11 @@ export default function InterviewEdit() {
 
   // Cálculos comerciais do GIANTS Flow
   const calcularValores = () => {
-    const valorBase = 279000;
-    const adicional = 90000;
+    const prodSelecionado = catalogoProdutos.find(p => String(p.nome || '').toUpperCase() === String(ficha.produto_nome || 'GIANTS').toUpperCase());
+    const defaultsPreco = { GIANTS: 279000, PAC: 60000, AE: 35000 };
+    const nomeProdUpper = String(ficha.produto_nome || 'GIANTS').toUpperCase();
+    const valorBase = prodSelecionado ? Number(prodSelecionado.valor_base) : (defaultsPreco[nomeProdUpper] || 279000);
+    const adicional = nomeProdUpper === 'GIANTS' ? 90000 : 0;
     const socios = Math.max(1, Number(ficha.socios) || 1);
     const contrato = valorBase + (socios - 1) * adicional;
     const desconto = Math.max(0, Number(ficha.desconto) || 0);
@@ -155,10 +164,12 @@ export default function InterviewEdit() {
       });
 
       // 2. Se gerou fechamento ou negociação, cria a proposta comercial na API
-      if (ficha.resultado_comercial === 'Fechou GIANTS' || ficha.resultado_comercial === 'Downsell PAC') {
+      if (['Fechou GIANTS', 'Downsell PAC', 'Fechou AE'].includes(ficha.resultado_comercial)) {
+        const prodMatch = catalogoProdutos.find(p => String(p.nome || '').toUpperCase() === String(ficha.produto_nome || 'GIANTS').toUpperCase());
         await api.post('/propostas', {
           aplicacaoId: appTargetId,
-          produtoId: 3, // Mentoria Individual Premium oficial
+          produtoId: prodMatch ? prodMatch.id : 3,
+          produtoNome: ficha.produto_nome || 'GIANTS',
           valorTotal: calc.valorNegociado,
           valorEntrada: calc.entrada,
           cashback: 0,
@@ -304,6 +315,22 @@ export default function InterviewEdit() {
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.25rem' }}>
               <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Produto Negociado *</label>
+                <select
+                  value={ficha.produto_nome}
+                  onChange={(e) => {
+                    const novoProd = e.target.value;
+                    const mapaResultado = { GIANTS: 'Fechou GIANTS', PAC: 'Downsell PAC', AE: 'Fechou AE' };
+                    setFicha(prev => ({ ...prev, produto_nome: novoProd, resultado_comercial: mapaResultado[novoProd] || prev.resultado_comercial }));
+                  }}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: '700', boxSizing: 'border-box' }}
+                >
+                  <option value="GIANTS">GIANTS</option>
+                  <option value="PAC">PAC</option>
+                  <option value="AE">AE</option>
+                </select>
+              </div>
+              <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Qtd. de Sócios *</label>
                 <input type="number" min="1" max="10" value={ficha.socios} onChange={(e) => atualizarCampo('socios', Number(e.target.value))} style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
               </div>
@@ -373,10 +400,19 @@ export default function InterviewEdit() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Resultado Comercial *</label>
-                <select value={ficha.resultado_comercial} onChange={(e) => atualizarCampo('resultado_comercial', e.target.value)} style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', boxSizing: 'border-box' }}>
+                <select
+                  value={ficha.resultado_comercial}
+                  onChange={(e) => {
+                    const resVal = e.target.value;
+                    const mapaProd = { 'Fechou GIANTS': 'GIANTS', 'Downsell PAC': 'PAC', 'Fechou AE': 'AE' };
+                    setFicha(prev => ({ ...prev, resultado_comercial: resVal, produto_nome: mapaProd[resVal] || prev.produto_nome }));
+                  }}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', boxSizing: 'border-box' }}
+                >
                   <option value="">Selecione o resultado</option>
                   <option value="Fechou GIANTS">Fechou GIANTS</option>
                   <option value="Downsell PAC">Downsell PAC</option>
+                  <option value="Fechou AE">Fechou AE</option>
                   <option value="Não fechou">Não fechou</option>
                   <option value="Decisão futura">Decisão futura</option>
                 </select>
