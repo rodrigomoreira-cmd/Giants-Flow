@@ -120,17 +120,23 @@ export default function Approvals() {
                     <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{prop.cliente_nome || prop.nome}</div>
                   </td>
                   <td style={{ padding: '1rem', color: '#334155', fontWeight: '500' }}>
-                    <span style={{
-                      display: 'inline-block',
-                      padding: '0.25rem 0.65rem',
-                      borderRadius: '6px',
-                      fontSize: '0.78rem',
-                      fontWeight: '800',
-                      background: (prop.produto_nome || '').toUpperCase() === 'PAC' ? '#dbeafe' : (prop.produto_nome || '').toUpperCase() === 'AE' ? '#fef3c7' : '#ffedd5',
-                      color: (prop.produto_nome || '').toUpperCase() === 'PAC' ? '#1e40af' : (prop.produto_nome || '').toUpperCase() === 'AE' ? '#92400e' : '#9a3412'
-                    }}>
-                      {prop.produto_nome || 'GIANTS'}
-                    </span>
+                    <div>
+                      <span style={{
+                        display: 'inline-block',
+                        padding: '0.2rem 0.55rem',
+                        borderRadius: '6px',
+                        fontSize: '0.72rem',
+                        fontWeight: '800',
+                        marginRight: '0.4rem',
+                        background: (prop.categoria_produto || '').toUpperCase() === 'PAC' ? '#dbeafe' : (prop.categoria_produto || '').toUpperCase() === 'AE' ? '#fef3c7' : '#ffedd5',
+                        color: (prop.categoria_produto || '').toUpperCase() === 'PAC' ? '#1e40af' : (prop.categoria_produto || '').toUpperCase() === 'AE' ? '#92400e' : '#9a3412'
+                      }}>
+                        {prop.categoria_produto || 'GIANTS'}
+                      </span>
+                      <span style={{ fontWeight: '700', color: '#0f172a', fontSize: '0.84rem' }}>
+                        {prop.produto_nome || 'GIANTS - Titular (Empresa)'}
+                      </span>
+                    </div>
                   </td>
                   <td style={{ padding: '1rem', fontWeight: '700', color: '#059669' }}>
                     {Number(prop.valor_total || 25000).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}

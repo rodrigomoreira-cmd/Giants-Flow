@@ -11,9 +11,7 @@ export default function InterviewEdit() {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
   const [catalogoProdutos, setCatalogoProdutos] = useState([]);
-  const [catalogoProdutos, setCatalogoProdutos] = useState([]);
-
-  const [ficha, setFicha] = useState({
+const [ficha, setFicha] = useState({
     aplicacao_id: id,
     razao_social: '',
     nome_fantasia: '',
@@ -27,7 +25,8 @@ export default function InterviewEdit() {
     forma_entrada: 'Pix',
     valor_entrada: 10000,
     cashback: 0,
-    produto_nome: 'GIANTS',
+    categoria_produto: 'GIANTS',
+    produto_nome: 'GIANTS - Titular (Empresa)',
     almoco_pago: false,
     parcelas: 10,
     forma_restante: 'Pix',
@@ -56,10 +55,6 @@ export default function InterviewEdit() {
         setCarregando(true);
         setErro('');
         
-        // 0. Carregar tabela de preços oficial (GIANTS, PAC, AE)
-        const listaProds = await api.get('/produtos').catch(() => []);
-        if (Array.isArray(listaProds)) setCatalogoProdutos(listaProds);
-
         // 0. Carregar catálogo oficial de produtos e subprodutos
         const listaProds = await api.get('/produtos').catch(() => []);
         if (Array.isArray(listaProds)) setCatalogoProdutos(listaProds);
@@ -103,11 +98,23 @@ export default function InterviewEdit() {
 
   // Cálculos comerciais do GIANTS Flow
   const calcularValores = () => {
-    const prodSelecionado = catalogoProdutos.find(p => String(p.nome || '').toUpperCase() === String(ficha.produto_nome || 'GIANTS').toUpperCase());
-    const defaultsPreco = { GIANTS: 279000, PAC: 60000, AE: 35000 };
-    const nomeProdUpper = String(ficha.produto_nome || 'GIANTS').toUpperCase();
-    const valorBase = prodSelecionado ? Number(prodSelecionado.valor_base) : (defaultsPreco[nomeProdUpper] || 279000);
-    const adicional = nomeProdUpper === 'GIANTS' ? 90000 : 0;
+    const catUpper = String(ficha.categoria_produto || 'GIANTS').toUpperCase();
+    const prodSelecionado = catalogoProdutos.find(p => p.nome === ficha.produto_nome)
+      || catalogoProdutos.find(p => String(p.categoria || '').toUpperCase() === catUpper && p.tipo_item === 'PRINCIPAL');
+    const defaultsPreco = {
+      'GIANTS - Titular (Empresa)': 279000,
+      'PAC - Completo': 69900,
+      'PAC - Compacto': 59900,
+      'AE - Condição Especial (Evento)': 29990,
+      'AE - Tabela Regular': 45990
+    };
+    const valorBase = prodSelecionado ? Number(prodSelecionado.valor_base) : (defaultsPreco[ficha.produto_nome] || 279000);
+
+    const itemAdicional = catalogoProdutos.find(p => String(p.categoria || '').toUpperCase() === catUpper && p.tipo_item === 'ADICIONAL');
+    const adicional = itemAdicional
+      ? Number(itemAdicional.valor_base)
+      : (catUpper === 'GIANTS' ? 90000 : catUpper === 'AE' ? 9900 : 0);
+
     const socios = Math.max(1, Number(ficha.socios) || 1);
     const contrato = valorBase + (socios - 1) * adicional;
     const desconto = Math.max(0, Number(ficha.desconto) || 0);
@@ -169,12 +176,15 @@ export default function InterviewEdit() {
       });
 
       // 2. Se gerou fechamento ou negociação, cria a proposta comercial na API
-      if (['Fechou GIANTS', 'Downsell PAC', 'Fechou AE'].includes(ficha.resultado_comercial)) {
-        const prodMatch = catalogoProdutos.find(p => String(p.nome || '').toUpperCase() === String(ficha.produto_nome || 'GIANTS').toUpperCase());
+      if (['Fechou GIANTS', 'Fechou PAC', 'Downsell PAC', 'Fechou AE'].includes(ficha.resultado_comercial)) {
+        const prodMatch = catalogoProdutos.find(p => p.nome === ficha.produto_nome)
+          || catalogoProdutos.find(p => String(p.categoria || '').toUpperCase() === String(ficha.categoria_produto || 'GIANTS').toUpperCase());
         await api.post('/propostas', {
           aplicacaoId: appTargetId,
           produtoId: prodMatch ? prodMatch.id : 3,
-          produtoNome: ficha.produto_nome || 'GIANTS',
+          produtoNome: ficha.produto_nome,
+          categoriaProduto: ficha.categoria_produto,
+          socios: Number(ficha.socios) || 1,
           valorTotal: calc.valorNegociado,
           valorEntrada: calc.entrada,
           cashback: 0,
