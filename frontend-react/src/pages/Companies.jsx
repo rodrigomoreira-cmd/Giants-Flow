@@ -421,6 +421,33 @@ export default function Companies() {
                             {g.sociosNaoGiants.length} sócios elegíveis
                           </span>
                         )}
+                          {(() => {
+                            const membros = g.membros || [];
+                            const cbAlmoco = membros.some((m) => Boolean(m.almoco_pago) || Number(m.valor_almoco || 0) >= 1000) ? 1000 : 0;
+                            const cbUpgrade = membros.reduce((mx, m) => Math.max(mx, Number(m.cashback_upgrade_90_pct || 0)), 0);
+                            const cbTotal = cbAlmoco + cbUpgrade;
+                            if (cbTotal <= 0) return null;
+                            const hist = (membros.find((m) => m.historico_produtos_elegiveis) || {}).historico_produtos_elegiveis || '';
+                            return (
+                              <span
+                                title={hist ? `Almoço + Upgrade 90%: ${hist}` : 'Crédito de Almoço Pago'}
+                                style={{
+                                  background: '#ecfdf5',
+                                  color: '#047857',
+                                  border: '1px solid #6ee7b7',
+                                  padding: '0.15rem 0.55rem',
+                                  borderRadius: '999px',
+                                  fontSize: '0.72rem',
+                                  fontWeight: '800',
+                                  marginLeft: '0.45rem',
+                                  display: 'inline-flex',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                Cashback Total: {cbTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                              </span>
+                            );
+                          })()}
                         {g.sociosGiants.length > 0 && (
                           <span style={{ fontSize: '0.72rem', fontWeight: '700', background: '#f3e8ff', color: '#7e22ce', padding: '0.15rem 0.5rem', borderRadius: '999px' }}>
                             {g.sociosGiants.length} GIANTS
