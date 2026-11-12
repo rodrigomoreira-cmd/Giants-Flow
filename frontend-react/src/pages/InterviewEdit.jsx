@@ -11,6 +11,7 @@ export default function InterviewEdit() {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
   const [catalogoProdutos, setCatalogoProdutos] = useState([]);
+  const [catalogoProdutos, setCatalogoProdutos] = useState([]);
 
   const [ficha, setFicha] = useState({
     aplicacao_id: id,
@@ -56,6 +57,10 @@ export default function InterviewEdit() {
         setErro('');
         
         // 0. Carregar tabela de preços oficial (GIANTS, PAC, AE)
+        const listaProds = await api.get('/produtos').catch(() => []);
+        if (Array.isArray(listaProds)) setCatalogoProdutos(listaProds);
+
+        // 0. Carregar catálogo oficial de produtos e subprodutos
         const listaProds = await api.get('/produtos').catch(() => []);
         if (Array.isArray(listaProds)) setCatalogoProdutos(listaProds);
 
@@ -331,7 +336,65 @@ export default function InterviewEdit() {
                 </select>
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Qtd. de Sócios *</label>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Linha de Produto *</label>
+                <select
+                  value={ficha.categoria_produto}
+                  onChange={(e) => {
+                    const novaCat = e.target.value;
+                    const primeiroSub = catalogoProdutos.find(p => String(p.categoria || '').toUpperCase() === novaCat && p.tipo_item === 'PRINCIPAL');
+                    const fallbackSub = {
+                      GIANTS: 'GIANTS - Titular (Empresa)',
+                      PAC: 'PAC - Completo',
+                      AE: 'AE - Condição Especial (Evento)'
+                    };
+                    const mapaResultado = { GIANTS: 'Fechou GIANTS', PAC: 'Fechou PAC', AE: 'Fechou AE' };
+                    setFicha(prev => ({
+                      ...prev,
+                      categoria_produto: novaCat,
+                      produto_nome: primeiroSub ? primeiroSub.nome : fallbackSub[novaCat],
+                      parcelas: primeiroSub ? Number(primeiroSub.parcelas_padrao || 12) : 12,
+                      socios: 1,
+                      resultado_comercial: mapaResultado[novaCat] || prev.resultado_comercial
+                    }));
+                  }}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: '700', boxSizing: 'border-box' }}
+                >
+                  <option value="GIANTS">GIANTS (Programa 360°)</option>
+                  <option value="PAC">PAC (Aceleração Pré-GIANTS)</option>
+                  <option value="AE">AE (Acelerador Empresarial)</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>Subproduto / Plano *</label>
+                <select
+                  value={ficha.produto_nome}
+                  onChange={(e) => {
+                    const novoSub = e.target.value;
+                    const objSub = catalogoProdutos.find(p => p.nome === novoSub);
+                    setFicha(prev => ({
+                      ...prev,
+                      produto_nome: novoSub,
+                      parcelas: objSub ? Number(objSub.parcelas_padrao || prev.parcelas) : prev.parcelas
+                    }));
+                  }}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: '600', boxSizing: 'border-box' }}
+                >
+                  {catalogoProdutos
+                    .filter(p => String(p.categoria || '').toUpperCase() === String(ficha.categoria_produto || 'GIANTS').toUpperCase() && p.tipo_item === 'PRINCIPAL')
+                    .map(p => (
+                      <option key={p.id} value={p.nome}>
+                        {p.nome} ({Number(p.valor_base).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})
+                      </option>
+                    ))}
+                  {catalogoProdutos.filter(p => String(p.categoria || '').toUpperCase() === String(ficha.categoria_produto || 'GIANTS').toUpperCase() && p.tipo_item === 'PRINCIPAL').length === 0 && (
+                    <option value={ficha.produto_nome}>{ficha.produto_nome}</option>
+                  )}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>
+                  {ficha.categoria_produto === 'AE' ? 'Qtd. Participantes (Vagas)' : ficha.categoria_produto === 'PAC' ? 'Qtd. Empresas' : 'Qtd. de Sócios *'}
+                </label>
                 <input type="number" min="1" max="10" value={ficha.socios} onChange={(e) => atualizarCampo('socios', Number(e.target.value))} style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
               </div>
               <div>
