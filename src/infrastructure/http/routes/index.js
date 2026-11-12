@@ -6,10 +6,12 @@ const fichasRoutes = require('./fichas.routes');
 const produtosRoutes = require('./produtos.routes');
 const adminRoutes = require('./admin.routes');
 const operacoesRoutes = require('./operacoes.routes');
+const auditoriaRoutes = require('./auditoria.routes');
 
 router.use('/auth', authRoutes);
 router.use('/fichas', fichasRoutes);
 router.use('/produtos', produtosRoutes);
+router.use('/auditoria', auditoriaRoutes);
 router.use('/', adminRoutes);
 router.use('/', operacoesRoutes); // <- O link que faltava!
 

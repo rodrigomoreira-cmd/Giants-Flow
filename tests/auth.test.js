@@ -14,7 +14,7 @@ const app = express();
 app.use(express.json());
 app.use('/auth', authRoutes);
 
-describe('Fluxo Crítico: Autenticação, JWT HS256 & Revogação Redis', () => {
+describe('Fluxo Crítico: Autenticação, JWT HS256, Rate Limit & Revogação Redis', () => {
   after(async () => {
     if (redisClient && redisClient.status !== 'end') {
       try { await redisClient.quit(); } catch {}
@@ -63,13 +63,45 @@ describe('Fluxo Crítico: Autenticação, JWT HS256 & Revogação Redis', () => 
       const res = await fetch(`http://127.0.0.1:${port}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'usuario.inexistente.999@teste.com', senha: '123' })
+        body: JSON.stringify({ email: `inexistente.${Date.now()}@teste.com`, senha: '123' })
       });
       const data = await res.json();
       assert.strictEqual(res.status, 401);
       assert.strictEqual(data.error, 'Credenciais inválidas.');
     } finally {
       server.close();
+    }
+  });
+
+  it('Deve bloquear tentativas consecutivas de força bruta com HTTP 429 via Redis', async () => {
+    const emailAlvo = `bruteforce.${Date.now()}@teste.com`;
+    const server = app.listen(0);
+    const { port } = server.address();
+    try {
+      for (let i = 1; i <= 5; i++) {
+        const res = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: emailAlvo, senha: 'senha-errada' })
+        });
+        assert.strictEqual(res.status, 401);
+      }
+
+      // 6ª tentativa deve ser barrada com 429 Too Many Requests
+      const blockedRes = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emailAlvo, senha: 'senha-errada' })
+      });
+      const blockedData = await blockedRes.json();
+      assert.strictEqual(blockedRes.status, 429);
+      assert.match(blockedData.error, /Muitas tentativas/i);
+    } finally {
+      server.close();
+      if (redisClient && redisClient.status === 'ready') {
+        const keys = await redisClient.keys(`auth:ratelimit:*:${emailAlvo}`);
+        if (keys.length > 0) await redisClient.del(...keys);
+      }
     }
   });
 
@@ -101,16 +133,13 @@ describe('Fluxo Crítico: Autenticação, JWT HS256 & Revogação Redis', () => 
       assert.strictEqual(res.status, 200);
       assert.ok(data.token && data.token.split('.').length === 3, 'Deve retornar JWT de 3 segmentos');
 
-      // Valida assinatura e claims
       const payload = verificarJWT(data.token);
       assert.strictEqual(payload.sub, criadoId);
       assert.strictEqual(payload.role, 'ADMIN');
 
-      // Garante que token adulterado ou previsível antigo é rejeitado
       assert.strictEqual(verificarJWT(`${data.token}x`), null);
       assert.strictEqual(verificarJWT(`token-admin-${criadoId}`), null);
 
-      // Executa logout e confirma revogação imediata no Redis
       const logoutRes = await fetch(`http://127.0.0.1:${port}/auth/logout`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${data.token}` }

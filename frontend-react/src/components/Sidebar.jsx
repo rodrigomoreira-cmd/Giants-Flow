@@ -45,9 +45,15 @@ export default function Sidebar() {
     };
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('sessao_operador');
-    window.location.href = '/login';
+  const handleLogout = async () => {
+    try {
+      await api.post('/auth/logout', {});
+    } catch (_) {
+      // Prossegue com limpeza local mesmo se o token já estiver expirado
+    } finally {
+      localStorage.removeItem('sessao_operador');
+      window.location.href = '/login';
+    }
   };
 
   
