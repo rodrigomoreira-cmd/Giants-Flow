@@ -1,16 +1,30 @@
 import { useSearchParams } from 'react-router-dom';
-﻿import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
 
+const normalizarChaveEmpresa = (emp) => {
+  const cnpjDigits = String(emp.cnpj || emp.cpf_cnpj || '').replace(/\D/g, '');
+  if (cnpjDigits.length >= 11) return `cnpj:${cnpjDigits}`;
+  const empNorm = String(emp.empresa || emp.razao_social || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  if (empNorm && empNorm !== 'empresa sga' && empNorm !== 'sem empresa' && empNorm !== 'empresa não informada') {
+    return `emp:${empNorm}`;
+  }
+  return `id:${emp.id}`;
+};
+
 export default function Lunch() {
   const [searchParams] = useSearchParams();
-    const [turmas, setTurmas] = useState([]);
+  const [turmas, setTurmas] = useState([]);
   const { turmaSelecionada } = useTurma();
   const [mesas, setMesas] = useState([]);
   const [clientesBase, setClientesBase] = useState([]);
   const [entrevistadores, setEntrevistadores] = useState([]);
-  const [cortesiasLocais, setCortesiasLocais] = useState({}); // { [clienteId]: true }
+  const [cortesiasLocais, setCortesiasLocais] = useState({});
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
 
@@ -18,24 +32,8 @@ export default function Lunch() {
   const [filtroParticipantes, setFiltroParticipantes] = useState('pendentes'); // 'pendentes' | 'sentados' | 'todos'
   const [termoBuscaLateral, setTermoBuscaLateral] = useState('');
 
-  // SeleÆ’§Æ’£o para alocaÆ’§Æ’£o
-  const [clienteSelecionadoAlocacao, setClienteSelecionadoAlocacao] = useState(null);
-
-  // Integração com tela de Empresas: ativa alocação imediata via query param
-  useEffect(() => {
-    const alocarId = searchParams.get('alocarId');
-    if (!alocarId || carregando) return;
-
-    // Busca na lista completa de participantes carregados no salão
-    const listaGeral = Array.isArray(clientesBase) ? clientesBase : [];
-    const alvo = listaGeral.find(p => String(p.id) === String(alocarId));
-    if (alvo) {
-      setClienteSelecionadoAlocacao(alvo);
-      // Remove o param da URL silenciosamente sem recarregar
-      window.history.replaceState({}, '', window.location.pathname);
-    }
-  }, [searchParams, carregando, clientesBase]);
-
+  // Grupo de empresa (CNPJ) selecionado para alocação em lote
+  const [grupoSelecionadoAlocacao, setGrupoSelecionadoAlocacao] = useState(null);
 
   // Zoom, Foco e Glow
   const [zoom, setZoom] = useState(100);
@@ -54,7 +52,7 @@ export default function Lunch() {
 
       const [aux, clientesDados] = await Promise.all([
         api.get('/auxiliares'),
-        api.get(`/clientes?turmaId=${turmaSelecionada || 1}`)
+        api.get(`/clientes?turmaId=${turmaSelecionada || localStorage.getItem('turma_ativa_id') || 1491}`)
       ]);
 
       setTurmas(aux.turmas || []);
@@ -63,14 +61,12 @@ export default function Lunch() {
       const listaClientes = Array.isArray(clientesDados) ? clientesDados : clientesDados.clientes || [];
       setClientesBase(listaClientes);
 
-      const tId = aux.turmas?.[0]?.id || 1;
-      // Seleção mantida pelo Header Global
-
-      const mesasFormatadas = (aux.mesas || []).map(m => {
+      const mesasFormatadas = (aux.mesas || []).map((m) => {
         const ocupantesLista = [];
         (m.ocupantes_detalhes || []).forEach((det, idx) => {
           let nome = 'Participante';
           let nomeCracha = '';
+          let empresa = '';
           let entrevistaId = idx + 1;
           let aplicacaoId = null;
           let tipoParticipante = 'cliente';
@@ -80,13 +76,16 @@ export default function Lunch() {
             const mCracha = det.match(/nome_cracha=([^;]+)/);
             const mId = det.match(/entrevista_id=([^;]+)/);
             const mAppId = det.match(/aplicacao_id=([^;]+)/);
+            const mEmp = det.match(/empresa=([^;]+)/);
             if (mNome) nome = mNome[1].trim();
             if (mCracha && mCracha[1].trim()) nomeCracha = mCracha[1].trim();
             if (mId) entrevistaId = mId[1].trim();
             if (mAppId) aplicacaoId = mAppId[1].trim();
-          } else if (typeof det === 'object') {
+            if (mEmp) empresa = mEmp[1].trim();
+          } else if (typeof det === 'object' && det !== null) {
             nome = det.nome || det.cliente_nome || nome;
             nomeCracha = det.nome_cracha || '';
+            empresa = det.empresa || '';
             entrevistaId = det.entrevista_id || det.id || entrevistaId;
             aplicacaoId = det.aplicacao_id || det.cliente_id || null;
             tipoParticipante = det.tipo || 'cliente';
@@ -97,13 +96,13 @@ export default function Lunch() {
             aplicacaoId: aplicacaoId || entrevistaId,
             nome,
             nomeCracha: nomeCracha || nome.split(' ')[0],
+            empresa,
             tipoParticipante,
             mesaId: m.id,
             mesaNumero: m.numero
           });
         });
 
-        
         let entrevistadoresEscalados = m.entrevistadores_escalados || [];
         let entrevistadoresIds = m.entrevistadores_ids || [];
 
@@ -112,10 +111,10 @@ export default function Lunch() {
         }
 
         if (entrevistadoresEscalados.length === 0 && entrevistadoresIds.length > 0) {
-          entrevistadoresEscalados = (aux.entrevistadores || []).filter(e => entrevistadoresIds.includes(e.id));
+          entrevistadoresEscalados = (aux.entrevistadores || []).filter((e) => entrevistadoresIds.includes(e.id));
         }
 
-        let entrevistadorNome = entrevistadoresEscalados.map(e => e.nome).join(', ') || null;
+        let entrevistadorNome = entrevistadoresEscalados.map((e) => e.nome).join(', ') || null;
         if (!entrevistadorNome && m.tem_entrevistador) {
           entrevistadorNome = 'Entrevistador';
         }
@@ -138,154 +137,246 @@ export default function Lunch() {
     }
   };
 
-  useEffect(() => { if (turmaSelecionada) carregarDados(); }, [turmaSelecionada]);
+  useEffect(() => {
+    if (turmaSelecionada) carregarDados();
+  }, [turmaSelecionada]);
 
-  // Consolidação e Filtragem Estrita do Salão de Almoço
-  const idsSentados = new Set();
-  mesas.forEach(m => {
-    (m.ocupantesLista || []).forEach(o => {
-      if (o.aplicacaoId) idsSentados.add(String(o.aplicacaoId));
-      if (o.id) idsSentados.add(String(o.id));
+  // Mapeamento de assentos já ocupados
+  const idsSentados = useMemo(() => {
+    const set = new Set();
+    mesas.forEach((m) => {
+      (m.ocupantesLista || []).forEach((o) => {
+        if (o.aplicacaoId) set.add(String(o.aplicacaoId));
+        if (o.id) set.add(String(o.id));
+      });
     });
-  });
+    return set;
+  }, [mesas]);
 
-  // Mapeamento de CNPJs Pagantes na Turma Ativa
-  const cnpjsPagantesSalao = new Set(
-    (clientesBase || [])
-      .filter(e => {
-        const isGiant = Boolean(e.membro_giants) || String(e.origem || '').toUpperCase().includes('GIAN');
-        return !isGiant && (Number(e.valor_almoco || 0) >= 1000 || Boolean(e.almoco_pago));
+  // 1. Filtra unicamente quem possui direito garantido ao almoço (checklist marcado, cortesia ou GIANTS)
+  const todosParticipantes = useMemo(() => {
+    return (clientesBase || [])
+      .filter((c) => {
+        const isGiant =
+          Boolean(c.membro_giants) ||
+          String(c.origem || '').toUpperCase().includes('GIAN') ||
+          Boolean(c.perfil_giants) ||
+          (c.perfil || '').toLowerCase().includes('giants') ||
+          (c.tipo || '').toLowerCase().includes('giants');
+
+        const isCortesia = Boolean(c.cortesia_almoco || c.cortesia || cortesiasLocais[c.id]);
+        const isPago = !isGiant && (Number(c.valor_almoco || 0) >= 1000 || Boolean(c.almoco_pago));
+
+        return isGiant || isCortesia || isPago;
       })
-      .map(e => (e.cnpj || e.cpf_cnpj || e.empresa || '').trim().toLowerCase())
-      .filter(Boolean)
-  );
+      .map((c) => {
+        const sentado = idsSentados.has(String(c.id)) || idsSentados.has(String(c.aplicacao_id));
+        let mesaNumero = null;
+        let mesaId = null;
+        let entrevistaId = null;
 
-  // 1. Unicamente quem possui direito garantido entra no Salão
-  const clientesElegiveisSalao = (clientesBase || []).filter(c => {
-    const isGiant = Boolean(c.membro_giants) || 
-                    String(c.origem || '').toUpperCase().includes('GIAN') || 
-                    Boolean(c.perfil_giants) || 
-                    (c.perfil || '').toLowerCase().includes('giants') || 
-                    (c.tipo || '').toLowerCase().includes('giants');
-
-    const isCortesia = Boolean(c.cortesia_almoco || c.cortesia || cortesiasLocais[c.id]);
-    const docChave = (c.cnpj || c.cpf_cnpj || c.empresa || '').trim().toLowerCase();
-    const isPagoOuMesmoCnpj = !isGiant && (Number(c.valor_almoco || 0) >= 1000 || Boolean(c.almoco_pago) || (docChave && cnpjsPagantesSalao.has(docChave)));
-
-    return isGiant || isCortesia || isPagoOuMesmoCnpj;
-  });
-
-  // 2. Mapeia propriedades reais preservando os dados originais
-  const todosParticipantes = clientesElegiveisSalao.map(c => {
-    const sentado = idsSentados.has(String(c.id)) || idsSentados.has(String(c.aplicacao_id));
-    let mesaNumero = null;
-    let entrevistaId = null;
-
-    if (sentado) {
-      for (const m of mesas) {
-        const achou = (m.ocupantesLista || []).find(o => String(o.aplicacaoId) === String(c.id) || String(o.id) === String(c.id));
-        if (achou) {
-          mesaNumero = m.numero;
-          entrevistaId = achou.id;
-          break;
+        if (sentado) {
+          for (const m of mesas) {
+            const achou = (m.ocupantesLista || []).find(
+              (o) => String(o.aplicacaoId) === String(c.id) || String(o.id) === String(c.id)
+            );
+            if (achou) {
+              mesaNumero = m.numero;
+              mesaId = m.id;
+              entrevistaId = achou.id;
+              break;
+            }
+          }
         }
+
+        const isMembroGiants =
+          Boolean(c.membro_giants) ||
+          String(c.origem || '').toUpperCase().includes('GIAN') ||
+          Boolean(c.perfil_giants) ||
+          (c.perfil || '').toLowerCase().includes('giants');
+
+        const temCortesia = Boolean(c.cortesia_almoco || c.cortesia || cortesiasLocais[c.id]);
+        const empresaPagou = !isMembroGiants && (Number(c.valor_almoco || 0) >= 1000 || Boolean(c.almoco_pago));
+
+        return {
+          ...c,
+          id: c.id,
+          entrevistaId: entrevistaId || c.id,
+          nome: c.nome_participante || c.nome_cracha || c.nome || c.nome_completo || 'Participante',
+          empresa: (c.empresa || c.razao_social || 'Empresa SGA').trim(),
+          cnpj: c.cnpj || c.cpf_cnpj || '',
+          isMembroGiants,
+          empresaPagou,
+          temCortesia,
+          liberadoAlmoco: true,
+          motivoLiberacao: isMembroGiants ? 'Membro GIANTS' : temCortesia ? 'Cortesia' : 'Almoço Pago',
+          sentado,
+          mesaNumero,
+          mesaId
+        };
+      });
+  }, [clientesBase, cortesiasLocais, idsSentados, mesas]);
+
+  // 2. Agrupa participantes elegíveis em 1 card único por Empresa (CNPJ)
+  const gruposEmpresasSalao = useMemo(() => {
+    const mapa = new Map();
+
+    todosParticipantes.forEach((p) => {
+      const chave = normalizarChaveEmpresa(p);
+      if (!mapa.has(chave)) {
+        mapa.set(chave, {
+          chave,
+          idPrincipal: p.id,
+          empresa: p.empresa,
+          cnpj: p.cnpj,
+          membros: [p]
+        });
+      } else {
+        const g = mapa.get(chave);
+        g.membros.push(p);
+        if (!g.cnpj && p.cnpj) g.cnpj = p.cnpj;
       }
+    });
+
+    return Array.from(mapa.values())
+      .map((g) => {
+        g.membros.sort((a, b) => {
+          const valDiff = Number(b.valor_almoco || 0) - Number(a.valor_almoco || 0);
+          if (valDiff !== 0) return valDiff;
+          return a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' });
+        });
+
+        const pendentesMesa = g.membros.filter((m) => !m.sentado);
+        const sentadosMesa = g.membros.filter((m) => m.sentado);
+        const isGiants = g.membros.every((m) => m.isMembroGiants);
+        const temGiants = g.membros.some((m) => m.isMembroGiants);
+        const temCortesia = g.membros.some((m) => m.temCortesia);
+        const empresaPagou = g.membros.some((m) => m.empresaPagou);
+
+        return {
+          ...g,
+          idPrincipal: g.membros[0].id,
+          pendentesMesa,
+          sentadosMesa,
+          todosSentados: pendentesMesa.length === 0 && sentadosMesa.length > 0,
+          temPendentes: pendentesMesa.length > 0,
+          isGiants,
+          temGiants,
+          temCortesia,
+          empresaPagou,
+          motivoLiberacao: isGiants
+            ? 'Membro GIANTS'
+            : temCortesia
+            ? 'Cortesia'
+            : temGiants
+            ? 'Almoço Pago + GIANTS'
+            : 'Almoço Pago'
+        };
+      })
+      .sort((a, b) => a.empresa.localeCompare(b.empresa, 'pt-BR', { sensitivity: 'base' }));
+  }, [todosParticipantes]);
+
+  // Integração com tela de Empresas: ativa alocação imediata do grupo CNPJ via ?alocarId=
+  useEffect(() => {
+    const alocarId = searchParams.get('alocarId');
+    if (!alocarId || carregando || gruposEmpresasSalao.length === 0) return;
+
+    const grupoAlvo = gruposEmpresasSalao.find(
+      (g) => String(g.idPrincipal) === String(alocarId) || g.membros.some((m) => String(m.id) === String(alocarId))
+    );
+    if (grupoAlvo && grupoAlvo.pendentesMesa.length > 0) {
+      setGrupoSelecionadoAlocacao(grupoAlvo);
+      window.history.replaceState({}, '', window.location.pathname);
     }
+  }, [searchParams, carregando, gruposEmpresasSalao]);
 
-    const isMembroGiants = Boolean(c.membro_giants) || 
-                           String(c.origem || '').toUpperCase().includes('GIAN') || 
-                           Boolean(c.perfil_giants) || 
-                           (c.perfil || '').toLowerCase().includes('giants');
-
-    const temCortesia = Boolean(c.cortesia_almoco || c.cortesia || cortesiasLocais[c.id]);
-    const docChave = (c.cnpj || c.cpf_cnpj || c.empresa || '').trim().toLowerCase();
-    const empresaPagou = !isMembroGiants && (Number(c.valor_almoco || 0) >= 1000 || Boolean(c.almoco_pago) || (docChave && cnpjsPagantesSalao.has(docChave)));
-
-    return {
-      ...c,
-      id: c.id,
-      entrevistaId: entrevistaId || c.id,
-      nome: c.nome_participante || c.nome_cracha || c.nome || c.nome_completo || 'Participante',
-      empresa: c.empresa || c.razao_social || 'Empresa SGA',
-      isMembroGiants,
-      empresaPagou,
-      temCortesia,
-      liberadoAlmoco: true,
-      motivoLiberacao: isMembroGiants ? 'Membro GIANTS' : (temCortesia ? 'Cortesia' : 'Almoço Pago'),
-      sentado,
-      mesaNumero
-    };
-  });
-
-  // 3. Aplicação das Abas e da Busca por Texto (sem rebloquear quem já é elegível)
-  const participantesFiltrados = todosParticipantes.filter(p => {
+  // 3. Filtragem dos cards de empresa na barra lateral
+  const gruposFiltrados = gruposEmpresasSalao.filter((g) => {
     const termo = (termoBuscaLateral || '').toLowerCase().trim();
-    const nome = (p.nome || '').toLowerCase();
-    const empresa = (p.empresa || '').toLowerCase();
-    const matchTermo = !termo || nome.includes(termo) || empresa.includes(termo);
+    const matchTermo =
+      !termo ||
+      g.empresa.toLowerCase().includes(termo) ||
+      String(g.cnpj || '').toLowerCase().includes(termo) ||
+      g.membros.some((m) => m.nome.toLowerCase().includes(termo) || `mesa ${m.mesaNumero}`.includes(termo));
+
     if (!matchTermo) return false;
 
-    if (filtroParticipantes === 'pendentes') return !p.sentado;
-    if (filtroParticipantes === 'sentados') return p.sentado;
+    if (filtroParticipantes === 'pendentes') return g.temPendentes;
+    if (filtroParticipantes === 'sentados') return g.sentadosMesa.length > 0;
     return true;
   });
 
-    // Marcar Almoço Pago R$ 1.000 para toda a empresa
-  const marcarEmpresaAlmoco = async (participante, e) => {
+  // Marcar Almoço Pago R$ 1.000 para a empresa
+  const marcarEmpresaAlmoco = async (grupo, e) => {
     e.stopPropagation();
-    const cv = prompt(`Confirmar pagamento de R$ 1.000,00 de almoço para a empresa "${participante.empresa}"?\n\nInforme o código/comprovante (CV) ou PIX:`, 'PIX-1000');
-    if (cv === null) return; // cancelou
+    const cv = prompt(
+      `Confirmar pagamento de R$ 1.000,00 de almoço para a empresa "${grupo.empresa}"?\n\nInforme o código/comprovante (CV) ou PIX:`,
+      'PIX-1000'
+    );
+    if (cv === null) return;
 
     try {
-      // Atualiza a empresa como almoço pago via API
-      await api.patch(`/clientes/${participante.id}`, {
-        almoco_pago: true,
-        cv_almoco: cv,
-        valor_almoco: 1000
+      await api.patch(`/clientes/${grupo.idPrincipal}/almoco`, {
+        tipo: 'pago',
+        cv_cartao: cv,
+        participantes_ids: grupo.membros.map((m) => m.id),
+        todos_empresa_ids: grupo.membros.map((m) => m.id)
       });
-
-      alert(`Almoço confirmado para ${participante.empresa}! Todos os sÂ³cios e acompanhantes foram liberados.`);
       carregarDados();
     } catch (err) {
-      // Fallback otimista local
-      setClientesBase(prev => prev.map(c => {
-        if (c.empresa === participante.empresa || c.id === participante.id) {
-          return { ...c, almoco_pago: true, valor_almoco: 1000 };
-        }
-        return c;
-      }));
-      alert(`Almoço confirmado localmente para a empresa ${participante.empresa}!`);
+      alert('Erro ao registrar pagamento: ' + err.message);
     }
   };
 
-  // Conceder ou Revogar Cortesia
-  const alternarCortesia = (clienteId, e) => {
+  // Conceder ou Revogar Cortesia para o grupo da empresa
+  const alternarCortesiaGrupo = (grupo, e) => {
     e.stopPropagation();
-    setCortesiasLocais(prev => ({
-      ...prev,
-      [clienteId]: !prev[clienteId]
-    }));
+    setCortesiasLocais((prev) => {
+      const novo = { ...prev };
+      const ativar = !grupo.temCortesia;
+      grupo.membros.forEach((m) => {
+        novo[m.id] = ativar;
+      });
+      return novo;
+    });
   };
 
-  // Alocar em Assento Livre (valida elegibilidade do almoço)
-  const alocarEmAssentoLivre = async (mesaId) => {
-    if (!clienteSelecionadoAlocacao) return;
+  // Alocar todos os sócios sem mesa da empresa selecionada nos assentos livres da mesa
+  const alocarGrupoEmMesa = async (mesaId) => {
+    if (!grupoSelecionadoAlocacao) return;
 
-    const almocoValido = Boolean(clienteSelecionadoAlocacao?.almoco_pago || clienteSelecionadoAlocacao?.cortesia || clienteSelecionadoAlocacao?.cortesia_almoco || clienteSelecionadoAlocacao?.almoco_liberado);
-    if (!almocoValido) {
-      alert(`O participante ${clienteSelecionadoAlocacao?.nome_cracha || clienteSelecionadoAlocacao?.nome_completo || clienteSelecionadoAlocacao?.nome || "Participante"} não possui almoço liberado.\nConceda uma cortesia ou confirme o pagamento de R$ 1.000,00 da empresa.`);
+    const pendentes = grupoSelecionadoAlocacao.pendentesMesa || [];
+    if (pendentes.length === 0) {
+      setGrupoSelecionadoAlocacao(null);
       return;
     }
 
+    const mesaAlvo = mesas.find((m) => Number(m.id) === Number(mesaId));
+    if (mesaAlvo) {
+      const capTotal = Number(mesaAlvo.capacidade_total || 5);
+      const ocupados = mesaAlvo.ocupantesLista.length + (mesaAlvo.tem_entrevistador ? 1 : 0);
+      const livres = Math.max(0, capTotal - ocupados);
+
+      if (livres < pendentes.length) {
+        alert(
+          `A Mesa ${mesaAlvo.numero} possui apenas ${livres} ${livres === 1 ? 'lugar livre' : 'lugares livres'}, mas a empresa "${grupoSelecionadoAlocacao.empresa}" precisa de ${pendentes.length} lugares para sentar todos os sócios juntos.\n\nAumente a capacidade da mesa (+) ou escolha outra mesa com espaço suficiente.`
+        );
+        return;
+      }
+    }
+
     try {
-      await api.post('/entrevistas/agendar', {
-        aplicacaoId: Number(clienteSelecionadoAlocacao.id),
-        mesaId: Number(mesaId)
-      });
-      setClienteSelecionadoAlocacao(null);
+      for (const socio of pendentes) {
+        await api.post('/entrevistas/agendar', {
+          aplicacaoId: Number(socio.id),
+          mesaId: Number(mesaId)
+        });
+      }
+      setGrupoSelecionadoAlocacao(null);
       carregarDados();
     } catch (err) {
-      alert('Erro ao alocar assento: ' + err.message);
+      alert('Erro ao alocar empresa na mesa: ' + err.message);
+      carregarDados();
     }
   };
 
@@ -317,7 +408,7 @@ export default function Lunch() {
   };
 
   const adicionarMesa = async () => {
-    const proximoNum = mesas.length > 0 ? Math.max(...mesas.map(m => Number(m.numero) || 0)) + 1 : 1;
+    const proximoNum = mesas.length > 0 ? Math.max(...mesas.map((m) => Number(m.numero) || 0)) + 1 : 1;
     try {
       await api.post('/mesas', {
         numero: proximoNum,
@@ -334,89 +425,71 @@ export default function Lunch() {
     const novaCap = Math.max(2, Math.min(12, Number(mesa.capacidade_total) + delta));
     try {
       await api.patch(`/mesas/${mesa.id}`, { capacidade_total: novaCap });
-      setMesas(prev => prev.map(m => m.id === mesa.id ? { ...m, capacidade_total: novaCap } : m));
+      setMesas((prev) => prev.map((m) => (m.id === mesa.id ? { ...m, capacidade_total: novaCap } : m)));
     } catch (e) {
-      setMesas(prev => prev.map(m => m.id === mesa.id ? { ...m, capacidade_total: novaCap } : m));
+      setMesas((prev) => prev.map((m) => (m.id === mesa.id ? { ...m, capacidade_total: novaCap } : m)));
     }
   };
 
-  
   const alternarEntrevistadorMesa = async (mesaId, entrevistadorId) => {
-    const mesa = mesas.find(m => m.id === mesaId);
+    const mesa = mesas.find((m) => m.id === mesaId);
     if (!mesa) return;
     const atuais = mesa.entrevistadores_ids || [];
     const jaTem = atuais.includes(entrevistadorId);
-    const novosIds = jaTem ? atuais.filter(id => id !== entrevistadorId) : [...atuais, entrevistadorId];
+    const novosIds = jaTem ? atuais.filter((id) => id !== entrevistadorId) : [...atuais, entrevistadorId];
 
     try {
       await api.patch(`/mesas/${mesaId}/entrevistadores`, {
         entrevistadores_ids: novosIds
       });
 
-      const novosEscalados = entrevistadores.filter(e => novosIds.includes(e.id));
-      const nomesStr = novosEscalados.map(e => e.nome).join(', ') || null;
+      const novosEscalados = entrevistadores.filter((e) => novosIds.includes(e.id));
+      const nomesStr = novosEscalados.map((e) => e.nome).join(', ') || null;
 
-      setMesas(prev => prev.map(m => {
-        if (m.id === mesaId) {
-          return {
-            ...m,
-            entrevistadores_ids: novosIds,
-            entrevistadores_escalados: novosEscalados,
-            tem_entrevistador: novosIds.length > 0,
-            entrevistadorNome: nomesStr
-          };
-        }
-        return m;
-      }));
+      setMesas((prev) =>
+        prev.map((m) => {
+          if (m.id === mesaId) {
+            return {
+              ...m,
+              entrevistadores_ids: novosIds,
+              entrevistadores_escalados: novosEscalados,
+              tem_entrevistador: novosIds.length > 0,
+              entrevistadorNome: nomesStr
+            };
+          }
+          return m;
+        })
+      );
 
-      setModalMesaAberta(prev => prev && prev.id === mesaId ? {
-        ...prev,
-        entrevistadores_ids: novosIds,
-        entrevistadores_escalados: novosEscalados,
-        tem_entrevistador: novosIds.length > 0,
-        entrevistadorNome: nomesStr
-      } : prev);
+      setModalMesaAberta((prev) =>
+        prev && prev.id === mesaId
+          ? {
+              ...prev,
+              entrevistadores_ids: novosIds,
+              entrevistadores_escalados: novosEscalados,
+              tem_entrevistador: novosIds.length > 0,
+              entrevistadorNome: nomesStr
+            }
+          : prev
+      );
     } catch (err) {
       alert('Erro ao atualizar entrevistadores da mesa: ' + err.message);
     }
   };
 
-  const selecionarEntrevistadorParaMesa = alternarEntrevistadorMesa;
-
   const totalMesas = mesas.length;
   let totalCapacidade = 0;
   let totalOcupados = 0;
 
-  mesas.forEach(m => {
+  mesas.forEach((m) => {
     totalCapacidade += Number(m.capacidade_total || 5);
     const entrevistadorOcupa = m.tem_entrevistador ? 1 : 0;
-    totalOcupados += (m.ocupantesLista.length + entrevistadorOcupa);
+    totalOcupados += m.ocupantesLista.length + entrevistadorOcupa;
   });
   const lugaresLivres = Math.max(0, totalCapacidade - totalOcupados);
 
-  const todasAsPessoasMesa = [];
-  mesas.forEach(m => {
-    if (m.tem_entrevistador) {
-      todasAsPessoasMesa.push({
-        id: `ent-${m.id}`,
-        nome: `${m.entrevistadorNome || 'Entrevistador'} (Mesa ${m.numero})`,
-        tipo: 'entrevistador',
-        mesaId: m.id
-      });
-    }
-    m.ocupantesLista.forEach(cli => {
-      todasAsPessoasMesa.push({
-        id: cli.id,
-        nome: `${cli.nomeCracha || cli.nome} (Mesa ${m.numero})`,
-        tipo: 'cliente',
-        mesaId: m.id
-      });
-    });
-  });
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100%', background: '#f8fafc', overflow: 'hidden' }}>
-      
       <style>{`
         @keyframes pulseGlow {
           0% { box-shadow: 0 0 0 0 rgba(255, 87, 34, 0.7), 0 0 25px rgba(255, 87, 34, 0.5); transform: scale(1.08); }
@@ -448,7 +521,9 @@ export default function Lunch() {
           <h1 style={{ fontSize: '1.25rem', fontWeight: '800', color: '#0f172a', margin: 0 }}>
             Salão de Mesas & Entrevistas
           </h1>
-          {/* Filtro de turma gerenciado pelo Header Global */}
+          <span style={{ background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', padding: '0.25rem 0.65rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700' }}>
+            Agrupado por Empresa (CNPJ)
+          </span>
         </div>
 
         <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#fff7ed', border: '1px solid #fed7aa', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ea580c' }}>
@@ -456,30 +531,30 @@ export default function Lunch() {
         </div>
       </div>
 
-      {/* Banner de Alocação Ativa */}
-      {clienteSelecionadoAlocacao && (
+      {/* Banner de Alocação Ativa por Empresa */}
+      {grupoSelecionadoAlocacao && (
         <div style={{ background: '#ff5722', color: '#fff', padding: '0.65rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(255, 87, 34, 0.3)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.9rem', fontWeight: '700' }}>
             <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>ads_click</span>
             <span>
-              Alocação: <u>{clienteSelecionadoAlocacao?.nome_cracha || clienteSelecionadoAlocacao?.nome_completo || clienteSelecionadoAlocacao?.nome || "Participante"}</u> ({clienteSelecionadoAlocacao.empresa}) — <strong>Clique em um assento livre (+ Livre) de qualquer mesa no salão</strong>
+              Alocando Empresa: <u>{grupoSelecionadoAlocacao.empresa}</u> ({grupoSelecionadoAlocacao.pendentesMesa.length}{' '}
+              {grupoSelecionadoAlocacao.pendentesMesa.length === 1 ? 'sócio' : 'sócios'}:{' '}
+              {grupoSelecionadoAlocacao.pendentesMesa.map((s) => s.nome.split(' ')[0]).join(', ')}) — Clique em um assento livre de qualquer mesa
             </span>
           </div>
           <button
-            onClick={() => setClienteSelecionadoAlocacao(null)}
-            style={{ background: '#fff', color: '#ff5722', border: 'none', padding: '0.35rem 0.85rem', borderRadius: '6px', fontWeight: '800', cursor: 'pointer', fontSize: '0.8rem' }}
+            onClick={() => setGrupoSelecionadoAlocacao(null)}
+            style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.4)', color: '#fff', borderRadius: '6px', padding: '0.25rem 0.7rem', fontWeight: '700', fontSize: '0.78rem', cursor: 'pointer' }}
           >
             Cancelar
           </button>
         </div>
       )}
 
-      {/* Æ’rea Central: Sidebar Lateral Esquerda + Canvas do Salão */}
+      {/* Área Central: Sidebar Lateral Esquerda + Canvas do Salão */}
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        
-        {/* Painel Esquerdo: Estrutura & Participantes */}
-        <div style={{ width: '330px', minWidth: '330px', background: '#fff', borderRight: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', padding: '1.25rem', boxSizing: 'border-box', gap: '1.25rem', flexShrink: 0, overflowY: 'hidden' }}>
-          
+        {/* Painel Esquerdo: Estrutura & Cards Consolidados por Empresa (CNPJ) */}
+        <div style={{ width: '350px', minWidth: '350px', background: '#fff', borderRight: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', padding: '1.25rem', boxSizing: 'border-box', gap: '1.25rem', flexShrink: 0, overflowY: 'hidden' }}>
           {/* Estrutura do Salão */}
           <div style={{ flexShrink: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', color: '#ea580c' }}>
@@ -517,20 +592,25 @@ export default function Lunch() {
             </button>
           </div>
 
-          {/* SeÆ’§Æ’£o Participantes com Abas e Regras de Almoço */}
+          {/* Seção Empresas (CNPJ) com Abas */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', color: '#ea580c', flexShrink: 0 }}>
-              <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>group</span>
-              <span style={{ fontSize: '0.9rem', fontWeight: '800', color: '#0f172a' }}>Participantes</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ea580c' }}>
+                <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>business</span>
+                <span style={{ fontSize: '0.9rem', fontWeight: '800', color: '#0f172a' }}>Empresas Elegíveis</span>
+              </div>
+              <span style={{ fontSize: '0.72rem', fontWeight: '700', color: '#64748b' }}>
+                {gruposFiltrados.length} {gruposFiltrados.length === 1 ? 'CNPJ' : 'CNPJs'}
+              </span>
             </div>
 
             {/* Abas */}
             <div style={{ display: 'flex', gap: '0.25rem', background: '#f1f5f9', padding: '0.2rem', borderRadius: '8px', marginBottom: '0.75rem', flexShrink: 0 }}>
               {[
-                { id: 'pendentes', label: 'Pendentes' },
-                { id: 'sentados', label: 'Sentados' },
-                { id: 'todos', label: 'Todos' }
-              ].map(aba => (
+                { id: 'pendentes', label: 'Sem Mesa' },
+                { id: 'sentados', label: 'Sentadas' },
+                { id: 'todos', label: 'Todas' }
+              ].map((aba) => (
                 <button
                   key={aba.id}
                   onClick={() => setFiltroParticipantes(aba.id)}
@@ -559,166 +639,226 @@ export default function Lunch() {
                 type="text"
                 value={termoBuscaLateral}
                 onChange={(e) => setTermoBuscaLateral(e.target.value)}
-                placeholder="Procurar participante ou mesa..."
+                placeholder="Buscar empresa, CNPJ, sócio ou mesa..."
                 style={{ width: '100%', padding: '0.45rem 0.5rem 0.45rem 2rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box' }}
               />
             </div>
 
-            {/* Lista com ValidaÆ’§Æ’£o de Almoço */}
-            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem', paddingRight: '0.25rem' }}>
-              {participantesFiltrados.length === 0 ? (
+            {/* Lista de Cards Únicos por Empresa (CNPJ) */}
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.6rem', paddingRight: '0.25rem' }}>
+              {gruposFiltrados.length === 0 ? (
                 <div style={{ padding: '2rem 1rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>
-                  Nenhum participante encontrado.
+                  Nenhuma empresa encontrada neste filtro.
                 </div>
               ) : (
-                participantesFiltrados.map((part) => {
-                  const estaSelecionado = clienteSelecionadoAlocacao?.id === part.id;
+                gruposFiltrados.map((grupo) => {
+                  const estaSelecionado = grupoSelecionadoAlocacao?.chave === grupo.chave;
+                  const mesasOcupadasGrupo = [...new Set(grupo.sentadosMesa.map((m) => m.mesaNumero))];
 
                   return (
                     <div
-                      key={part.id}
+                      key={grupo.chave}
                       onClick={() => {
-                        if (part.sentado) {
-                          const mesa = mesas.find(m => m.numero === part.mesaNumero);
-                          if (mesa) focarPessoaEMesa(part.entrevistaId, mesa.id);
-                          return;
+                        if (grupo.temPendentes) {
+                          setGrupoSelecionadoAlocacao(estaSelecionado ? null : grupo);
+                        } else if (grupo.sentadosMesa.length > 0) {
+                          const primeiroSentado = grupo.sentadosMesa[0];
+                          if (primeiroSentado.mesaId) {
+                            focarPessoaEMesa(primeiroSentado.entrevistaId, primeiroSentado.mesaId);
+                          }
                         }
-
-                        if (!part.liberadoAlmoco) {
-                          alert(`Almoço Bloqueado para ${part.nome}.\nCritério: R$ 1.000 pago por empresa, Cortesia ou Membro GIANTS.`);
-                          return;
-                        }
-
-                        setClienteSelecionadoAlocacao(clienteSelecionadoAlocacao?.id === part.id ? null : part);
                       }}
                       style={{
                         background: estaSelecionado
-                          ? (part.isMembroGiants ? '#f5f3ff' : '#fff7ed')
-                          : (part.isMembroGiants ? '#faf5ff' : '#f8fafc'),
+                          ? grupo.isGiants
+                            ? '#f5f3ff'
+                            : '#fff7ed'
+                          : grupo.isGiants
+                          ? '#faf5ff'
+                          : '#f8fafc',
                         border: '2px solid',
                         borderColor: estaSelecionado
-                          ? (part.isMembroGiants ? '#7c3aed' : '#ff5722')
-                          : (part.isMembroGiants ? '#c084fc' : '#e2e8f0'),
+                          ? grupo.isGiants
+                            ? '#7c3aed'
+                            : '#ff5722'
+                          : grupo.isGiants
+                          ? '#c084fc'
+                          : '#e2e8f0',
                         borderRadius: '10px',
                         padding: '0.75rem',
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '0.4rem',
-                        cursor: part.sentado || part.liberadoAlmoco ? 'pointer' : 'default',
+                        gap: '0.45rem',
+                        cursor: 'pointer',
                         transition: 'all 0.15s ease',
                         boxShadow: estaSelecionado
-                          ? (part.isMembroGiants ? '0 0 12px rgba(124, 58, 237, 0.45)' : '0 0 10px rgba(255,87,34,0.3)')
-                          : (part.isMembroGiants ? '0 2px 6px rgba(168, 85, 247, 0.12)' : 'none'),
-                        opacity: !part.liberadoAlmoco && !part.sentado ? 0.75 : 1
+                          ? grupo.isGiants
+                            ? '0 0 12px rgba(124, 58, 237, 0.4)'
+                            : '0 0 10px rgba(255,87,34,0.3)'
+                          : 'none'
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      {/* Cabeçalho do Card da Empresa */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.4rem' }}>
                         <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                            <span style={{ fontWeight: '700', fontSize: '0.85rem', color: estaSelecionado ? (part.isMembroGiants ? '#6b21a8' : '#ea580c') : (part.isMembroGiants ? '#581c87' : '#0f172a'), display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {part.nome}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                            <span
+                              style={{
+                                fontWeight: '800',
+                                fontSize: '0.86rem',
+                                color: estaSelecionado ? (grupo.isGiants ? '#6b21a8' : '#ea580c') : '#0f172a',
+                                lineHeight: 1.25
+                              }}
+                            >
+                              {grupo.empresa}
                             </span>
-                            {part.isMembroGiants && (
-                              <span style={{ background: '#7c3aed', color: '#fff', fontSize: '0.62rem', fontWeight: '800', padding: '0.1rem 0.35rem', borderRadius: '4px', letterSpacing: '0.5px', flexShrink: 0 }}>
+                            {grupo.temGiants && (
+                              <span style={{ background: '#7c3aed', color: '#fff', fontSize: '0.6rem', fontWeight: '800', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>
                                 GIANTS
                               </span>
                             )}
                           </div>
-                          <span style={{ fontSize: '0.72rem', color: '#64748b', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {part.empresa}
-                          </span>
+                          {grupo.cnpj && (
+                            <span style={{ fontSize: '0.68rem', fontFamily: 'monospace', color: '#64748b', display: 'block', marginTop: '0.1rem' }}>
+                              CNPJ: {grupo.cnpj}
+                            </span>
+                          )}
                         </div>
 
-                        {part.sentado ? (
+                        {grupo.temPendentes ? (
+                          <span
+                            style={{
+                              background: estaSelecionado ? '#ff5722' : '#fff7ed',
+                              color: estaSelecionado ? '#fff' : '#c2410c',
+                              border: '1px solid #fdba74',
+                              padding: '0.15rem 0.45rem',
+                              borderRadius: '5px',
+                              fontSize: '0.68rem',
+                              fontWeight: '800',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            {estaSelecionado
+                              ? 'Selecionada'
+                              : `${grupo.pendentesMesa.length} ${grupo.pendentesMesa.length === 1 ? 'lugar' : 'lugares'}`}
+                          </span>
+                        ) : (
                           <span
                             title="Clique para localizar no salão"
                             style={{
-                              background: '#fff7ed',
-                              color: '#ea580c',
-                              border: '1px solid #fed7aa',
+                              background: '#dcfce7',
+                              color: '#166534',
+                              border: '1px solid #86efac',
                               padding: '0.15rem 0.45rem',
-                              borderRadius: '4px',
-                              fontSize: '0.7rem',
-                              fontWeight: '700',
+                              borderRadius: '5px',
+                              fontSize: '0.68rem',
+                              fontWeight: '800',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '0.2rem'
+                              gap: '0.15rem',
+                              whiteSpace: 'nowrap'
                             }}
                           >
-                            <span className="material-symbols-outlined" style={{ fontSize: '0.8rem' }}>pin_drop</span>
-                            Mesa {part.mesaNumero}
-                          </span>
-                        ) : (
-                          <span style={{
-                            background: estaSelecionado ? '#ff5722' : '#f1f5f9',
-                            color: estaSelecionado ? '#fff' : '#64748b',
-                            padding: '0.15rem 0.45rem',
-                            borderRadius: '4px',
-                            fontSize: '0.7rem',
-                            fontWeight: '700'
-                          }}>
-                            {estaSelecionado ? 'Selecionado' : 'Sem mesa'}
+                            <span className="material-symbols-outlined" style={{ fontSize: '0.78rem' }}>pin_drop</span>
+                            Mesa {mesasOcupadasGrupo.join(', ')}
                           </span>
                         )}
                       </div>
 
-                      {/* Selos de ValidaÆ’§Æ’£o do Almoço e BotÆ’£o de Cortesia */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem', paddingTop: '0.35rem', borderTop: '1px solid #f1f5f9' }}>
-                        <span style={{
-                          fontSize: '0.68rem',
-                          fontWeight: '800',
-                          padding: '0.15rem 0.45rem',
-                          borderRadius: '4px',
-                          background: part.isMembroGiants ? '#fef3c7' : part.temCortesia ? '#e0f2fe' : part.empresaPagou ? '#dcfce7' : '#fee2e2',
-                          color: part.isMembroGiants ? '#b45309' : part.temCortesia ? '#0284c7' : part.empresaPagou ? '#16a34a' : '#ef4444',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.2rem'
-                        }}>
+                      {/* Lista de Sócios da Empresa dentro do Card */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', background: '#fff', padding: '0.45rem 0.55rem', borderRadius: '7px', border: '1px solid #e2e8f0' }}>
+                        {grupo.membros.map((socio) => (
+                          <div
+                            key={socio.id}
+                            onClick={(e) => {
+                              if (socio.sentado && socio.mesaId) {
+                                e.stopPropagation();
+                                focarPessoaEMesa(socio.entrevistaId, socio.mesaId);
+                              }
+                            }}
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              fontSize: '0.75rem',
+                              color: '#334155',
+                              gap: '0.35rem'
+                            }}
+                          >
+                            <span style={{ fontWeight: '600', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              • {socio.nome}
+                            </span>
+                            {socio.sentado ? (
+                              <span style={{ fontSize: '0.66rem', fontWeight: '700', color: '#ea580c', background: '#fff7ed', padding: '0.05rem 0.35rem', borderRadius: '4px', flexShrink: 0 }}>
+                                Mesa {socio.mesaNumero}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '0.66rem', fontWeight: '700', color: '#059669', background: '#ecfdf5', padding: '0.05rem 0.35rem', borderRadius: '4px', flexShrink: 0 }}>
+                                Aguardando
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Rodapé com Status do Almoço e Ações */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.25rem', borderTop: '1px solid #f1f5f9', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        <span
+                          style={{
+                            fontSize: '0.68rem',
+                            fontWeight: '800',
+                            padding: '0.15rem 0.45rem',
+                            borderRadius: '4px',
+                            background: grupo.isGiants ? '#fef3c7' : grupo.temCortesia ? '#e0f2fe' : '#dcfce7',
+                            color: grupo.isGiants ? '#b45309' : grupo.temCortesia ? '#0284c7' : '#16a34a',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.2rem'
+                          }}
+                        >
                           <span className="material-symbols-outlined" style={{ fontSize: '0.8rem' }}>
-                            {part.isMembroGiants ? 'stars' : part.temCortesia ? 'card_giftcard' : part.empresaPagou ? 'paid' : 'block'}
+                            {grupo.isGiants ? 'stars' : grupo.temCortesia ? 'card_giftcard' : 'paid'}
                           </span>
-                          {part.motivoLiberacao}
+                          {grupo.motivoLiberacao}
                         </span>
 
-                        {/* Ação Rápida de Cortesia */}
-                        {!part.sentado && (
-                          <button
-                            onClick={(e) => alternarCortesia(part.id, e)}
-                            title={part.temCortesia ? 'Remover Cortesia' : 'Conceder Almoço Cortesia'}
-                            style={{
-                              background: part.temCortesia ? '#fee2e2' : '#f8fafc',
-                              color: part.temCortesia ? '#ef4444' : '#475569',
-                              border: '1px solid #cbd5e1',
-                              padding: '0.15rem 0.45rem',
-                              borderRadius: '4px',
-                              fontSize: '0.68rem',
-                              fontWeight: '700',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            {part.temCortesia ? 'Revogar Cortesia' : '+ Cortesia'}
-                          </button>
-                        )}
+                        <div style={{ display: 'flex', gap: '0.3rem' }}>
+                          {grupo.temPendentes && !grupo.isGiants && (
+                            <button
+                              onClick={(e) => alternarCortesiaGrupo(grupo, e)}
+                              style={{
+                                background: grupo.temCortesia ? '#fee2e2' : '#f8fafc',
+                                color: grupo.temCortesia ? '#ef4444' : '#475569',
+                                border: '1px solid #cbd5e1',
+                                padding: '0.15rem 0.45rem',
+                                borderRadius: '4px',
+                                fontSize: '0.66rem',
+                                fontWeight: '700',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {grupo.temCortesia ? 'Revogar' : '+ Cortesia'}
+                            </button>
+                          )}
 
-                        {!part.sentado && !part.empresaPagou && !part.membro_giants && !part.isMembroGiants && !part.isMembroGiants && (
-                          <button
-                            onClick={(e) => marcarEmpresaAlmoco(part, e)}
-                            title="Registrar pagamento de R$ 1.000 para toda a empresa"
-                            style={{
-                              background: '#ecfdf5',
-                              color: '#059669',
-                              border: '1px solid #a7f3d0',
-                              padding: '0.15rem 0.45rem',
-                              borderRadius: '4px',
-                              fontSize: '0.68rem',
-                              fontWeight: '700',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            + R$ 1.000 Pago
-                          </button>
-                        )}
+                          {grupo.temPendentes && !grupo.empresaPagou && !grupo.isGiants && (
+                            <button
+                              onClick={(e) => marcarEmpresaAlmoco(grupo, e)}
+                              style={{
+                                background: '#ecfdf5',
+                                color: '#059669',
+                                border: '1px solid #a7f3d0',
+                                padding: '0.15rem 0.45rem',
+                                borderRadius: '4px',
+                                fontSize: '0.66rem',
+                                fontWeight: '700',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              + R$ 1.000
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -730,7 +870,6 @@ export default function Lunch() {
 
         {/* Salão de Mesas com Grid Pontilhado */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
-          
           {/* Barra Superior do Salão */}
           <div style={{ padding: '0.85rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, background: '#fff', borderBottom: '1px solid #f1f5f9' }}>
             <div style={{ fontSize: '0.95rem', fontWeight: '800', color: '#0f172a' }}>
@@ -738,26 +877,26 @@ export default function Lunch() {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              {/* Dropdown de Busca Direta */}
-              {/* Filtro de turma gerenciado pelo Header Global */}
-
-              {/* Controles de Zoom */}
               <div style={{ display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '10px', overflow: 'hidden' }}>
                 <button
-                  onClick={() => setZoom(z => Math.max(50, z - 10))}
+                  onClick={() => setZoom((z) => Math.max(50, z - 10))}
                   style={{ border: 'none', background: 'transparent', padding: '0.45rem 0.75rem', cursor: 'pointer', color: '#475569', fontWeight: '800' }}
                 >
                   -
                 </button>
                 <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#334155', padding: '0 0.5rem' }}>{zoom}%</span>
                 <button
-                  onClick={() => setZoom(z => Math.min(160, z + 10))}
+                  onClick={() => setZoom((z) => Math.min(160, z + 10))}
                   style={{ border: 'none', background: 'transparent', padding: '0.45rem 0.75rem', cursor: 'pointer', color: '#475569', fontWeight: '800' }}
                 >
                   +
                 </button>
                 <button
-                  onClick={() => { setZoom(100); setMesaFocadaId(null); setDestaquePessoaId(null); }}
+                  onClick={() => {
+                    setZoom(100);
+                    setMesaFocadaId(null);
+                    setDestaquePessoaId(null);
+                  }}
                   style={{ borderLeft: '1px solid #cbd5e1', borderRight: 'none', borderTop: 'none', borderBottom: 'none', background: 'transparent', padding: '0.45rem 0.75rem', cursor: 'pointer', color: '#ea580c', fontWeight: '700', fontSize: '0.8rem' }}
                 >
                   Reset
@@ -782,7 +921,6 @@ export default function Lunch() {
             }}
           >
             <div style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center', transition: 'transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
-              
               {/* PALCO / TELÃO */}
               <div
                 style={{
@@ -816,7 +954,7 @@ export default function Lunch() {
                   const isMesaFocada = mesaFocadaId === mesa.id;
 
                   const assentosAoRedor = [
-                    ...mesa.ocupantesLista.map(c => ({ tipo: 'cliente', ...c })),
+                    ...mesa.ocupantesLista.map((c) => ({ tipo: 'cliente', ...c })),
                     ...Array.from({ length: assentosLivresQtd }).map((_, i) => ({ tipo: 'livre', id: `livre-${mesa.id}-${i}`, mesaId: mesa.id }))
                   ];
 
@@ -944,7 +1082,7 @@ export default function Lunch() {
                         const anguloInicial = Math.PI * 0.25;
                         const anguloFinal = Math.PI * 1.75;
                         const passo = totalSlots > 1 ? (anguloFinal - anguloInicial) / (totalSlots - 1) : 0;
-                        const angulo = anguloInicial + (idx * passo);
+                        const angulo = anguloInicial + idx * passo;
 
                         const x = Math.sin(angulo) * raio;
                         const y = Math.cos(angulo) * raio;
@@ -957,6 +1095,7 @@ export default function Lunch() {
                           return (
                             <div
                               key={assento.id}
+                              title={`${assento.nome}${assento.empresa ? ` (${assento.empresa})` : ''}`}
                               style={{
                                 position: 'absolute',
                                 transform: `translate(${x}px, ${y}px)`,
@@ -988,7 +1127,10 @@ export default function Lunch() {
                                 </div>
 
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); removerParticipante(assento.id); }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removerParticipante(assento.id);
+                                  }}
                                   title="Retirar participante da mesa"
                                   style={{
                                     position: 'absolute',
@@ -1020,17 +1162,21 @@ export default function Lunch() {
                         }
 
                         // Assento Livre
-                        const estaAlocação = !!clienteSelecionadoAlocacao;
+                        const estaAlocacao = !!grupoSelecionadoAlocacao;
 
                         return (
                           <div
                             key={assento.id}
                             onClick={() => {
-                              if (estaAlocação) {
-                                alocarEmAssentoLivre(assento.mesaId);
+                              if (estaAlocacao) {
+                                alocarGrupoEmMesa(assento.mesaId);
                               }
                             }}
-                            title={estaAlocação ? `Clique para sentar ${clienteSelecionadoAlocacao?.nome_cracha || clienteSelecionadoAlocacao?.nome_completo || clienteSelecionadoAlocacao?.nome || "Participante"} aqui` : 'Assento livre'}
+                            title={
+                              estaAlocacao
+                                ? `Clique para sentar ${grupoSelecionadoAlocacao.empresa} (${grupoSelecionadoAlocacao.pendentesMesa.length} sócio(s)) aqui`
+                                : 'Assento livre'
+                            }
                             style={{
                               position: 'absolute',
                               transform: `translate(${x}px, ${y}px)`,
@@ -1041,7 +1187,7 @@ export default function Lunch() {
                             }}
                           >
                             <div
-                              className={estaAlocação ? 'assento-livre-alocavel' : ''}
+                              className={estaAlocacao ? 'assento-livre-alocavel' : ''}
                               style={{
                                 width: '32px',
                                 height: '32px',
@@ -1056,11 +1202,11 @@ export default function Lunch() {
                               }}
                             >
                               <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>
-                                {estaAlocação ? 'how_to_reg' : 'add'}
+                                {estaAlocacao ? 'how_to_reg' : 'add'}
                               </span>
                             </div>
-                            <span style={{ fontSize: '0.65rem', fontWeight: '700', color: estaAlocação ? '#059669' : '#94a3b8', marginTop: '0.2rem' }}>
-                              {estaAlocação ? 'Ocupar' : 'Livre'}
+                            <span style={{ fontSize: '0.65rem', fontWeight: '700', color: estaAlocacao ? '#059669' : '#94a3b8', marginTop: '0.2rem' }}>
+                              {estaAlocacao ? 'Sentar CNPJ' : 'Livre'}
                             </span>
                           </div>
                         );
@@ -1141,7 +1287,11 @@ export default function Lunch() {
 
             <div style={{ maxHeight: '280px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {entrevistadores
-                .filter(e => (e.nome || '').toLowerCase().includes(buscaEntrevistadorModal.toLowerCase()) || (e.email || '').toLowerCase().includes(buscaEntrevistadorModal.toLowerCase()))
+                .filter(
+                  (e) =>
+                    (e.nome || '').toLowerCase().includes(buscaEntrevistadorModal.toLowerCase()) ||
+                    (e.email || '').toLowerCase().includes(buscaEntrevistadorModal.toLowerCase())
+                )
                 .map((ent) => {
                   const idsMesa = modalMesaAberta.entrevistadores_ids || (modalMesaAberta.entrevistador_id ? [modalMesaAberta.entrevistador_id] : []);
                   const jaSelecionado = idsMesa.includes(ent.id);
@@ -1164,18 +1314,20 @@ export default function Lunch() {
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                        <div style={{
-                          width: '32px',
-                          height: '32px',
-                          borderRadius: '50%',
-                          background: jaSelecionado ? '#0284c7' : '#f1f5f9',
-                          color: jaSelecionado ? '#fff' : '#475569',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontWeight: '700',
-                          fontSize: '0.85rem'
-                        }}>
+                        <div
+                          style={{
+                            width: '32px',
+                            height: '32px',
+                            borderRadius: '50%',
+                            background: jaSelecionado ? '#0284c7' : '#f1f5f9',
+                            color: jaSelecionado ? '#fff' : '#475569',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: '700',
+                            fontSize: '0.85rem'
+                          }}
+                        >
                           {ent.nome.charAt(0)}
                         </div>
                         <div>
@@ -1184,14 +1336,16 @@ export default function Lunch() {
                         </div>
                       </div>
 
-                      <div style={{
-                        padding: '0.25rem 0.6rem',
-                        borderRadius: '6px',
-                        fontSize: '0.75rem',
-                        fontWeight: '700',
-                        background: jaSelecionado ? '#0284c7' : '#f1f5f9',
-                        color: jaSelecionado ? '#fff' : '#64748b'
-                      }}>
+                      <div
+                        style={{
+                          padding: '0.25rem 0.6rem',
+                          borderRadius: '6px',
+                          fontSize: '0.75rem',
+                          fontWeight: '700',
+                          background: jaSelecionado ? '#0284c7' : '#f1f5f9',
+                          color: jaSelecionado ? '#fff' : '#64748b'
+                        }}
+                      >
                         {jaSelecionado ? '✓ Escalado' : '+ Escalar'}
                       </div>
                     </div>
