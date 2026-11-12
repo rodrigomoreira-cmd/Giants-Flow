@@ -403,7 +403,7 @@ const [ficha, setFicha] = useState({
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>
-                  {ficha.categoria_produto === 'AE' ? 'Qtd. Participantes (Vagas)' : ficha.categoria_produto === 'PAC' ? 'Qtd. Empresas' : 'Qtd. de Sócios *'}
+                  {ficha.categoria_produto === 'GIANTS' ? 'Qtd. de Sócios *' : 'Qtd. Participantes (Vagas) *'}
                 </label>
                 <input type="number" min="1" max="10" value={ficha.socios} onChange={(e) => atualizarCampo('socios', Number(e.target.value))} style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
               </div>

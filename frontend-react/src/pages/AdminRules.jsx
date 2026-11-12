@@ -103,7 +103,7 @@ export default function AdminRules() {
     {
       chave: 'PAC',
       titulo: 'Linha PAC — Programa de Aceleração Pré-GIANTS',
-      subtitulo: 'Opções de downsell / aceleração intermediária (Completo e Compacto).',
+      subtitulo: 'Opções de aceleração intermediária (Completo, Compacto e Vaga Adicional).',
       corBorda: '#bfdbfe',
       corHeader: '#eff6ff',
       corTitulo: '#1e40af'

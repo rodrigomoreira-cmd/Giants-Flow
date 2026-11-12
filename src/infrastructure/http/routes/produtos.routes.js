@@ -86,6 +86,12 @@ router.put('/:id', async (req, res) => {
     if (rows.length === 0) {
       return res.status(404).json({ erro: 'Produto não encontrado.' });
     }
+    if (rows[0].tipo_item === 'ADICIONAL') {
+      await pool.query(
+        "UPDATE produtos SET valor_adicional_unitario = $1 WHERE categoria = $2 AND tipo_item = 'PRINCIPAL'",
+        [Number(valor_base) || 0, rows[0].categoria]
+      );
+    }
     res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ erro: 'Erro ao atualizar produto: ' + err.message });
