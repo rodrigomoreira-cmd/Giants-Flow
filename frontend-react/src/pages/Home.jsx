@@ -13,9 +13,36 @@ const ROTAS_SISTEMA = {
   "cohorts": "/admin/cohorts"
 };
 
+const isMembroGiants = (emp) =>
+  Boolean(emp?.membro_giants) || String(emp?.origem || '').toUpperCase().includes('GIAN');
+
+const extrairCpfCliente = (emp) => {
+  const cpfCol = String(emp?.cpf || '').replace(/\D/g, '');
+  if (cpfCol.length === 11) return cpfCol;
+  const docCol = String(emp?.cpf_cnpj || '').replace(/\D/g, '');
+  if (docCol.length === 11) return docCol;
+  return '';
+};
+
+const extrairCnpjEmpresa = (emp) => {
+  const cnpjCol = String(emp?.cnpj || '').replace(/\D/g, '');
+  if (cnpjCol.length >= 11) return cnpjCol;
+  const docCol = String(emp?.cpf_cnpj || '').replace(/\D/g, '');
+  if (docCol.length >= 11) return docCol;
+  return '';
+};
+
 const normalizarChaveEmpresa = (emp) => {
-  const cnpjDigits = String(emp.cnpj || emp.cpf_cnpj || '').replace(/\D/g, '');
+  // Membro GIANTS: vínculo individual por CPF (1 cliente apenas, não agrupa por CNPJ)
+  if (isMembroGiants(emp)) {
+    const cpfDigits = extrairCpfCliente(emp);
+    return cpfDigits ? `giants:cpf:${cpfDigits}` : `giants:id:${emp.id}`;
+  }
+
+  // AE e PAC: vínculo agrupado por CNPJ da empresa
+  const cnpjDigits = extrairCnpjEmpresa(emp);
   if (cnpjDigits.length >= 11) return `cnpj:${cnpjDigits}`;
+
   const empNorm = String(emp.empresa || emp.razao_social || '')
     .trim()
     .toLowerCase()

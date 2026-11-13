@@ -3,15 +3,42 @@ import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 
+const isMembroGiants = (emp) =>
+  Boolean(emp?.membro_giants) || String(emp?.origem || '').toUpperCase().includes('GIAN');
+
+const extrairCpfCliente = (emp) => {
+  const cpfCol = String(emp?.cpf || '').replace(/\D/g, '');
+  if (cpfCol.length === 11) return cpfCol;
+  const docCol = String(emp?.cpf_cnpj || '').replace(/\D/g, '');
+  if (docCol.length === 11) return docCol;
+  return '';
+};
+
+const extrairCnpjEmpresa = (emp) => {
+  const cnpjCol = String(emp?.cnpj || '').replace(/\D/g, '');
+  if (cnpjCol.length >= 11) return cnpjCol;
+  const docCol = String(emp?.cpf_cnpj || '').replace(/\D/g, '');
+  if (docCol.length >= 11) return docCol;
+  return '';
+};
+
 const normalizarChaveEmpresa = (emp) => {
-  const cnpjDigits = String(emp.cnpj || emp.cpf_cnpj || '').replace(/\D/g, '');
+  // Membro GIANTS: vínculo individual por CPF (1 cliente apenas, não agrupa por CNPJ)
+  if (isMembroGiants(emp)) {
+    const cpfDigits = extrairCpfCliente(emp);
+    return cpfDigits ? `giants:cpf:${cpfDigits}` : `giants:id:${emp.id}`;
+  }
+
+  // AE e PAC: vínculo agrupado por CNPJ da empresa
+  const cnpjDigits = extrairCnpjEmpresa(emp);
   if (cnpjDigits.length >= 11) return `cnpj:${cnpjDigits}`;
+
   const empNorm = String(emp.empresa || emp.razao_social || '')
     .trim()
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
-  if (empNorm && empNorm !== 'empresa sga' && empNorm !== 'sem empresa' && empNorm !== 'empresa não informada') {
+  if (empNorm && !['empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada'].includes(empNorm)) {
     return `emp:${empNorm}`;
   }
   return `id:${emp.id}`;
@@ -711,7 +738,7 @@ export default function Companies() {
                     </td>
 
                     <td style={{ padding: '1rem', color: '#64748b', fontSize: '0.85rem', fontFamily: 'monospace' }}>
-                      {g.cnpj || '-'}
+                      {g.apenasGiants ? (g.titular?.cpf || (String(g.titular?.cpf_cnpj || '').replace(/\D/g, '').length === 11 ? g.titular.cpf_cnpj : g.cnpj || 'CPF não informado')) : (g.cnpj || '-')}
                     </td>
 
                     {/* 1. Almoço */}

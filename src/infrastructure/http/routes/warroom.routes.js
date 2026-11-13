@@ -115,6 +115,7 @@ router.get('/war-room/resumo', async (req, res) => {
          f.nome_participante,
          f.empresa,
          COALESCE(NULLIF(TRIM(f.cnpj), ''), NULLIF(TRIM(f.cpf_cnpj), '')) AS cnpj_doc,
+         COALESCE(NULLIF(TRIM(f.cpf), ''), CASE WHEN LENGTH(regexp_replace(COALESCE(f.cpf_cnpj, ''), '\D', '', 'g')) = 11 THEN TRIM(f.cpf_cnpj) ELSE '' END) AS cpf_doc,
          f.almoco_pago,
          f.cortesia_almoco,
          f.membro_giants,
@@ -159,6 +160,10 @@ router.get('/war-room/resumo', async (req, res) => {
       Boolean(row.membro_giants) || String(row.origem || '').trim().toUpperCase() === 'GIANTS';
 
     const gerarChaveEmpresa = (r) => {
+      if (isCadastradoGiants(r)) {
+        const cpfLimpo = String(r.cpf_doc || '').replace(/\D/g, '');
+        return cpfLimpo.length === 11 ? `giants:cpf:${cpfLimpo}` : `giants:id:${r.id}`;
+      }
       const cnpjLimpo = String(r.cnpj_doc || '').replace(/\D/g, '');
       const empNorm = String(r.empresa || '').trim().toLowerCase();
       if (cnpjLimpo.length >= 11) return `cnpj:${cnpjLimpo}`;

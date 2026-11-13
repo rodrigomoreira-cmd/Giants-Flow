@@ -306,6 +306,12 @@ router.get('/financeiro/propostas', async (req, res) => {
             'GIANTS'
           ) AS produto_nome,
           CASE
+            WHEN COALESCE(f.membro_giants, false) = true OR UPPER(TRIM(COALESCE(f.origem, ''))) = 'GIANTS'
+              THEN CASE
+                WHEN LENGTH(regexp_replace(COALESCE(f.cpf, f.cpf_cnpj, ''), '\D', '', 'g')) = 11
+                  THEN 'giants:cpf:' || regexp_replace(COALESCE(f.cpf, f.cpf_cnpj, ''), '\D', '', 'g')
+                ELSE 'giants:id:' || f.id::text
+              END
             WHEN LENGTH(regexp_replace(COALESCE(f.cnpj, f.cpf_cnpj, ''), '\D', '', 'g')) >= 11
               THEN 'cnpj:' || regexp_replace(COALESCE(f.cnpj, f.cpf_cnpj, ''), '\D', '', 'g')
             WHEN LOWER(TRIM(COALESCE(f.empresa, ''))) NOT IN ('', 'empresa sga', 'sem empresa')

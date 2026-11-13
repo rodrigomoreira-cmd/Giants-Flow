@@ -7,18 +7,23 @@ const fmtBRL = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency'
 const unificarPorEmpresa = (lista) => {
   const mapa = new Map();
   for (const item of lista) {
+    const isGiant = Boolean(item.membro_giants) || String(item.origem || '').toUpperCase().includes('GIAN');
+    const cpfDigits = String(item.cpf || '').replace(/\D/g, '') ||
+      (String(item.cpf_cnpj || '').replace(/\D/g, '').length === 11 ? String(item.cpf_cnpj || '').replace(/\D/g, '') : '');
     const cnpjDigits = String(item.cnpj || item.cpf_cnpj || item.dados_proposta?.cnpj || '').replace(/\D/g, '');
     const empNorm = String(item.empresa || item.cliente_empresa || '')
       .trim()
       .toLowerCase()
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '');
-    const chave =
-      cnpjDigits.length >= 11
-        ? `${item.turma_id || 0}:cnpj:${cnpjDigits}`
-        : empNorm && empNorm !== 'empresa sga'
-        ? `${item.turma_id || 0}:emp:${empNorm}`
-        : `${item.turma_id || 0}:id:${item.id}`;
+
+    const chave = isGiant
+      ? (cpfDigits.length === 11 ? `${item.turma_id || 0}:giants:cpf:${cpfDigits}` : `${item.turma_id || 0}:giants:id:${item.id}`)
+      : cnpjDigits.length >= 11
+      ? `${item.turma_id || 0}:cnpj:${cnpjDigits}`
+      : empNorm && empNorm !== 'empresa sga'
+      ? `${item.turma_id || 0}:emp:${empNorm}`
+      : `${item.turma_id || 0}:id:${item.id}`;
 
     const temContrato = Boolean(item.dados_proposta || item.proposta_real_id || Number(item.valor_negociado || 0) > 0);
     if (!mapa.has(chave)) {
