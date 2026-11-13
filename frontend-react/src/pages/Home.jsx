@@ -1,442 +1,815 @@
-﻿import { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
 
+const ROTAS_SISTEMA = {
+  "companies": "/companies",
+  "lunch": "/lunch",
+  "interviews": "/interviews",
+  "interviewEdit": "/interviews/:id/edit",
+  "approvals": "/approvals",
+  "warRoom": "/war-room",
+  "cohorts": "/admin/cohorts"
+};
+
+const normalizarChaveEmpresa = (emp) => {
+  const cnpjDigits = String(emp.cnpj || emp.cpf_cnpj || '').replace(/\D/g, '');
+  if (cnpjDigits.length >= 11) return `cnpj:${cnpjDigits}`;
+  const empNorm = String(emp.empresa || emp.razao_social || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  if (empNorm && !['empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada'].includes(empNorm)) {
+    return `emp:${empNorm}`;
+  }
+  return `id:${emp.id}`;
+};
+
+const isCadastradoGiants = (p) =>
+  Boolean(p.membro_giants) || String(p.origem || '').trim().toUpperCase() === 'GIANTS';
+
 export default function Home() {
-  const [metricas, setMetricas] = useState(null);
+  const navigate = useNavigate();
+  const { turmaSelecionada, turmaAtual, turmaEncerrada, isAdmin } = useTurma();
+
+  const [clientes, setClientes] = useState([]);
+  const [mesas, setMesas] = useState([]);
+  const [propostas, setPropostas] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
-  const navigate = useNavigate();
+  const [buscaRapida, setBuscaRapida] = useState('');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [atualizadoEm, setAtualizadoEm] = useState(null);
 
-  const { turmaSelecionada, turmaAtual } = useTurma();
-
-  const carregarMetricas = async (tId = turmaSelecionada) => {
+  const carregarCockpit = useCallback(async (silencioso = false) => {
     try {
-      setCarregando(true);
+      if (!silencioso) setCarregando(true);
       setErro('');
-      const params = {};
-      const idFinal = tId || turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491';
-      if (idFinal && idFinal !== 'todas') {
-        params.turma_id = idFinal;
-      }
-      const dados = await api.get('/hub/metricas', { params });
-      setMetricas(dados);
+      const tId = turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491';
+
+      const [cliRes, auxRes, propRes] = await Promise.all([
+        api.get(`/clientes?turmaId=${tId}`),
+        api.get(`/auxiliares?turmaId=${tId}`).catch(() => ({ mesas: [] })),
+        api.get(`/financeiro/propostas?turmaId=${tId}`).catch(() => [])
+      ]);
+
+      setClientes(Array.isArray(cliRes) ? cliRes : cliRes?.clientes || []);
+      setMesas(Array.isArray(auxRes?.mesas) ? auxRes.mesas : []);
+      setPropostas(Array.isArray(propRes) ? propRes : propRes?.propostas || []);
+      setAtualizadoEm(new Date());
     } catch (err) {
-      setErro(err.message || 'Erro ao carregar indicadores executivos.');
+      setErro(err.message || 'Erro ao carregar indicadores operacionais.');
     } finally {
-      setCarregando(false);
+      if (!silencioso) setCarregando(false);
+    }
+  }, [turmaSelecionada]);
+
+  useEffect(() => {
+    if (turmaSelecionada) {
+      carregarCockpit(false);
+    }
+  }, [turmaSelecionada, carregarCockpit]);
+
+  useEffect(() => {
+    if (!autoRefresh || !turmaSelecionada) return;
+    const timer = setInterval(() => carregarCockpit(true), 15000);
+    return () => clearInterval(timer);
+  }, [autoRefresh, turmaSelecionada, carregarCockpit]);
+
+  const abrirFichaEmpresa = (idFicha) => {
+    if (ROTAS_SISTEMA.interviewEdit && ROTAS_SISTEMA.interviewEdit.includes(':id')) {
+      navigate(ROTAS_SISTEMA.interviewEdit.replace(':id', String(idFicha)));
+    } else {
+      navigate(ROTAS_SISTEMA.companies);
     }
   };
 
-  // Recarrega sempre que o seletor do Header trocar a turma
-  useEffect(() => {
-    carregarMetricas(turmaSelecionada);
-  }, [turmaSelecionada]);
+  // Consolidação operacional por Empresa (CNPJ) da turma selecionada
+  const resumoSalao = useMemo(() => {
+    const gruposMap = new Map();
+    let giantsPresentes = 0;
 
-  const formatarMoeda = (val) => {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(val || 0);
-  };
+    for (const c of clientes) {
+      if (isCadastradoGiants(c)) {
+        giantsPresentes += 1;
+        continue;
+      }
 
-  const faturamentoLista = metricas?.faturamentoMensal || [];
-  const maxFaturamento = Math.max(...faturamentoLista.map(f => f.valor), 1);
-  const totalFaturamento = faturamentoLista.reduce((acc, cur) => acc + (cur.valor || 0), 0);
+      const chave = normalizarChaveEmpresa(c);
+      if (!gruposMap.has(chave)) {
+        gruposMap.set(chave, {
+          chave,
+          idPrincipal: c.id,
+          empresa: c.empresa || 'Empresa sem nome',
+          cnpj: c.cnpj || c.cpf_cnpj || '',
+          titular: c.nome_participante || c.nome || 'Participante',
+          membros: [],
+          almocoPago: false,
+          cortesia: false,
+          mesaAlocada: null,
+          fechada: false,
+          etapaFunil: c.etapa_funil || 'novo',
+          statusAprovacao: c.status_aprovacao || '',
+          updatedAt: c.updated_at || null
+        });
+      }
+
+      const g = gruposMap.get(chave);
+      g.membros.push(c);
+      if (Boolean(c.almoco_pago) || Number(c.valor_almoco || 0) > 0) g.almocoPago = true;
+      if (Boolean(c.cortesia_almoco)) g.cortesia = true;
+      if (c.mesa_alocada !== null && c.mesa_alocada !== undefined) g.mesaAlocada = c.mesa_alocada;
+      if (
+        Boolean(c.ficha_fechada) ||
+        ['aguardando_aprovacao', 'fechamento', 'concluido', 'reprovado'].includes(
+          String(c.etapa_funil || '').toLowerCase()
+        )
+      ) {
+        g.fechada = true;
+      }
+      if (c.status_aprovacao) g.statusAprovacao = c.status_aprovacao;
+      if (c.updated_at && (!g.updatedAt || new Date(c.updated_at) > new Date(g.updatedAt))) {
+        g.updatedAt = c.updated_at;
+      }
+    }
+
+    const empresasElegiveis = Array.from(gruposMap.values());
+    const fichasPreenchidas = empresasElegiveis.filter((e) => e.almocoPago || e.cortesia);
+    const aguardandoMesa = fichasPreenchidas.filter((e) => !e.fechada && e.mesaAlocada === null);
+    const emAtendimentoMesa = empresasElegiveis.filter((e) => !e.fechada && e.mesaAlocada !== null);
+
+    const mesasOcupadas = mesas.filter((m) => Number(m.ocupantes || 0) > 0).length;
+    const assentosOcupados = mesas.reduce((acc, m) => acc + Number(m.ocupantes || 0), 0);
+
+    const propPendentes = propostas.filter(
+      (p) => !p.status_aprovacao || String(p.status_aprovacao).toLowerCase() === 'pendente'
+    );
+    const propAlertas = propostas.filter((p) =>
+      ['recusada', 'recusado', 'negado', 'aprovada_com_ressalva'].includes(
+        String(p.status_aprovacao || '').toLowerCase()
+      )
+    );
+
+    const ultimasMovimentacoes = [...empresasElegiveis]
+      .filter((e) => e.almocoPago || e.cortesia || e.fechada || e.mesaAlocada !== null)
+      .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+      .slice(0, 7);
+
+    return {
+      totalAlunosLinhas: clientes.length,
+      giantsPresentes,
+      totalEmpresasElegiveis: empresasElegiveis.length,
+      fichasPreenchidasQtd: fichasPreenchidas.length,
+      aguardandoMesa,
+      emAtendimentoMesaQtd: emAtendimentoMesa.length,
+      mesasTotal: mesas.length,
+      mesasOcupadas,
+      assentosOcupados,
+      propPendentesQtd: propPendentes.length,
+      propAlertas,
+      empresasElegiveis,
+      ultimasMovimentacoes
+    };
+  }, [clientes, mesas, propostas]);
+
+  // Busca global instantânea por empresa, CNPJ ou participante
+  const resultadosBusca = useMemo(() => {
+    const q = buscaRapida.trim().toLowerCase();
+    if (!q) return [];
+    const qDigits = q.replace(/\D/g, '');
+
+    return resumoSalao.empresasElegiveis
+      .filter((g) => {
+        const matchEmp = String(g.empresa || '').toLowerCase().includes(q);
+        const matchCnpj = qDigits.length >= 3 && String(g.cnpj || '').replace(/\D/g, '').includes(qDigits);
+        const matchMembro = g.membros.some((m) =>
+          String(m.nome_participante || m.nome || '').toLowerCase().includes(q)
+        );
+        return matchEmp || matchCnpj || matchMembro;
+      })
+      .slice(0, 8);
+  }, [buscaRapida, resumoSalao.empresasElegiveis]);
+
+  const atalhosRapidos = [
+    {
+      titulo: 'Base de Empresas',
+      subtitulo: 'Check-in de almoço (R$ 1.000 / Cortesia) e abertura de fichas',
+      icone: 'domain',
+      cor: '#ff5722',
+      bgIcone: '#fff7ed',
+      rota: ROTAS_SISTEMA.companies,
+      badge: `${resumoSalao.fichasPreenchidasQtd} fichas liberadas`
+    },
+    {
+      titulo: 'Salão de Lunch',
+      subtitulo: 'Alocar casais/sócios nas mesas e acompanhar ocupação ao vivo',
+      icone: 'table_restaurant',
+      cor: '#0369a1',
+      bgIcone: '#f0f9ff',
+      rota: ROTAS_SISTEMA.lunch,
+      badge: `${resumoSalao.aguardandoMesa.length} aguardando mesa`
+    },
+    {
+      titulo: 'Entrevistas & Fechamento',
+      subtitulo: 'Conduzir negociação comercial, cashback e emissão de proposta',
+      icone: 'assignment',
+      cor: '#7c3aed',
+      bgIcone: '#f5f3ff',
+      rota: ROTAS_SISTEMA.interviews,
+      badge: `${resumoSalao.emAtendimentoMesaQtd} em mesa agora`
+    },
+    {
+      titulo: 'Aprovações (Financeiro)',
+      subtitulo: 'Análise de crédito/Serasa, aprovação de contratos e CSV',
+      icone: 'verified',
+      cor: '#059669',
+      bgIcone: '#f0fdf4',
+      rota: ROTAS_SISTEMA.approvals,
+      badge: `${resumoSalao.propPendentesQtd} pendente(s)`
+    },
+    {
+      titulo: 'War Room Executivo',
+      subtitulo: 'Placar Caixa vs. Competência, GIANTS/PAC e Panorama PDF',
+      icone: 'monitoring',
+      cor: '#0f172a',
+      bgIcone: '#f1f5f9',
+      rota: ROTAS_SISTEMA.warRoom,
+      badge: 'Tempo real'
+    }
+  ];
+
+  if (isAdmin) {
+    atalhosRapidos.push({
+      titulo: 'Turmas & Eventos',
+      subtitulo: 'Ativar/encerrar edições, configurar metas e mesas do salão',
+      icone: 'event_available',
+      cor: '#b45309',
+      bgIcone: '#fffbeb',
+      rota: ROTAS_SISTEMA.cohorts,
+      badge: 'Administração'
+    });
+  }
 
   return (
-    <div style={{ padding: '2rem', width: '100%', boxSizing: 'border-box', background: '#f8fafc', minHeight: '100vh' }}>
-      {/* Cabeçalho */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#16a34a', display: 'inline-block', boxShadow: '0 0 10px #16a34a' }}></span>
-            <span style={{ fontSize: '0.85rem', fontWeight: '700', color: '#16a34a', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Painel Operacional em Tempo Real
-            </span>
+    <div style={{ padding: '1.5rem 2rem', maxWidth: '1480px', margin: '0 auto', boxSizing: 'border-box' }}>
+      {/* 1. FAIXA DE STATUS DA TURMA + BUSCA GLOBAL INSTANTÂNEA */}
+      <div
+        style={{
+          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
+          borderRadius: '16px',
+          padding: '1.5rem 1.75rem',
+          color: '#ffffff',
+          marginBottom: '1.5rem',
+          boxShadow: '0 10px 25px rgba(15, 23, 42, 0.14)'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.15rem' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span
+                style={{
+                  background: turmaEncerrada ? '#475569' : '#ff5722',
+                  color: '#ffffff',
+                  padding: '0.2rem 0.6rem',
+                  borderRadius: '6px',
+                  fontSize: '0.72rem',
+                  fontWeight: '800',
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase'
+                }}
+              >
+                {turmaEncerrada ? 'Turma Encerrada (Consulta)' : '● Operação Ao Vivo'}
+              </span>
+              {turmaAtual?.codigo && (
+                <span style={{ fontSize: '0.78rem', fontWeight: '800', color: '#fb923c' }}>
+                  {turmaAtual.codigo} • ID #{turmaAtual.id}
+                </span>
+              )}
+              {atualizadoEm && (
+                <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                  • Sincronizado às {atualizadoEm.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              )}
+            </div>
+
+            <h1 style={{ margin: '0.35rem 0 0', fontSize: '1.55rem', fontWeight: '800', color: '#ffffff' }}>
+              {turmaAtual?.nome || 'Cockpit Operacional do Evento'}
+            </h1>
+            <p style={{ margin: '0.2rem 0 0', fontSize: '0.84rem', color: '#cbd5e1' }}>
+              {resumoSalao.totalAlunosLinhas} participantes inscritos • {resumoSalao.totalEmpresasElegiveis} empresas elegíveis • {resumoSalao.giantsPresentes} membros GIANTS na turma
+            </p>
           </div>
-          <h1 style={{ fontSize: '1.9rem', fontWeight: '800', color: '#0f172a', margin: '0.35rem 0 0' }}>
-            Visão Geral do Evento
-          </h1>
-          <p style={{ color: '#64748b', margin: '0.25rem 0 0', fontSize: '0.95rem' }}>
-            Acompanhamento de fluxo de participantes, empresas e faturamento comercial
-          </p>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+            <button
+              type="button"
+              onClick={() => setAutoRefresh((v) => !v)}
+              style={{
+                background: autoRefresh ? 'rgba(34, 197, 94, 0.16)' : 'rgba(255, 255, 255, 0.08)',
+                color: autoRefresh ? '#86efac' : '#cbd5e1',
+                border: autoRefresh ? '1px solid rgba(134, 239, 172, 0.4)' : '1px solid rgba(255,255,255,0.15)',
+                padding: '0.48rem 0.85rem',
+                borderRadius: '8px',
+                fontSize: '0.78rem',
+                fontWeight: '700',
+                cursor: 'pointer'
+              }}
+            >
+              {autoRefresh ? '● Auto-sync 15s' : '○ Pausado'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => carregarCockpit(false)}
+              style={{
+                background: 'rgba(255, 255, 255, 0.1)',
+                color: '#ffffff',
+                border: '1px solid rgba(255, 255, 255, 0.18)',
+                padding: '0.48rem 0.9rem',
+                borderRadius: '8px',
+                fontSize: '0.78rem',
+                fontWeight: '700',
+                cursor: 'pointer'
+              }}
+            >
+              Atualizar
+            </button>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button
-            onClick={() => navigate('/companies')}
-            style={{
-              background: '#fff',
-              border: '1px solid #cbd5e1',
-              padding: '0.65rem 1.15rem',
-              borderRadius: '8px',
-              fontSize: '0.85rem',
-              fontWeight: '600',
-              color: '#334155',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
-            }}
+        {/* CAMPO DE BUSCA GLOBAL INSTANTÂNEA */}
+        <div style={{ position: 'relative' }}>
+          <span
+            className="material-symbols-outlined"
+            style={{ position: 'absolute', left: '14px', top: '12px', color: '#64748b', fontSize: '1.25rem' }}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>domain</span>
-            Empresas & Triagem
-          </button>
-
-          <button
-            onClick={() => carregarMetricas(turmaSelecionada)}
+            search
+          </span>
+          <input
+            type="text"
+            value={buscaRapida}
+            onChange={(e) => setBuscaRapida(e.target.value)}
+            placeholder="Busca rápida na turma: digite o nome da empresa, CNPJ ou nome do participante..."
             style={{
-              background: '#0284c7',
+              width: '100%',
+              padding: '0.75rem 2.5rem 0.75rem 2.75rem',
+              borderRadius: '10px',
               border: 'none',
-              padding: '0.65rem 1.15rem',
-              borderRadius: '8px',
-              fontSize: '0.85rem',
+              background: '#ffffff',
+              color: '#0f172a',
+              fontSize: '0.92rem',
               fontWeight: '600',
-              color: '#fff',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              boxShadow: '0 2px 4px rgba(2, 132, 199, 0.25)'
+              outline: 'none',
+              boxSizing: 'border-box'
             }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>sync</span>
-            Atualizar Dados
-          </button>
+          />
+          {buscaRapida && (
+            <button
+              type="button"
+              onClick={() => setBuscaRapida('')}
+              style={{
+                position: 'absolute',
+                right: '12px',
+                top: '10px',
+                background: '#f1f5f9',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '0.2rem 0.5rem',
+                fontWeight: '800',
+                color: '#475569',
+                cursor: 'pointer'
+              }}
+            >
+              ✕
+            </button>
+          )}
+
+          {/* RESULTADOS INSTANTÂNEOS DA BUSCA */}
+          {buscaRapida.trim().length > 0 && (
+            <div
+              style={{
+                marginTop: '0.6rem',
+                background: '#ffffff',
+                borderRadius: '10px',
+                border: '1px solid #cbd5e1',
+                color: '#0f172a',
+                overflow: 'hidden',
+                boxShadow: '0 12px 28px rgba(0, 0, 0, 0.25)'
+              }}
+            >
+              {resultadosBusca.length === 0 ? (
+                <div style={{ padding: '0.9rem 1.1rem', fontSize: '0.84rem', color: '#64748b' }}>
+                  Nenhuma empresa ou participante encontrado para "{buscaRapida}" nesta turma.
+                </div>
+              ) : (
+                resultadosBusca.map((item) => (
+                  <div
+                    key={item.chave}
+                    style={{
+                      padding: '0.75rem 1.1rem',
+                      borderBottom: '1px solid #f1f5f9',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      flexWrap: 'wrap'
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: '800', fontSize: '0.9rem', color: '#0f172a' }}>
+                        {item.empresa}{' '}
+                        {item.cnpj && (
+                          <span style={{ fontSize: '0.75rem', color: '#64748b', fontFamily: 'monospace', fontWeight: '600' }}>
+                            ({item.cnpj})
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: '#475569' }}>
+                        {item.membros.map((m) => m.nome_participante || m.nome).join(' • ')}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                      <span
+                        style={{
+                          padding: '0.2rem 0.55rem',
+                          borderRadius: '6px',
+                          fontSize: '0.72rem',
+                          fontWeight: '800',
+                          background: item.almocoPago ? '#dcfce7' : item.cortesia ? '#fef3c7' : '#f1f5f9',
+                          color: item.almocoPago ? '#166534' : item.cortesia ? '#92400e' : '#475569'
+                        }}
+                      >
+                        {item.almocoPago ? 'Almoço Pago' : item.cortesia ? 'Cortesia' : 'Almoço Pendente'}
+                      </span>
+
+                      {item.mesaAlocada !== null && (
+                        <span style={{ padding: '0.2rem 0.55rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: '800', background: '#e0f2fe', color: '#0369a1' }}>
+                          Mesa {item.mesaAlocada}
+                        </span>
+                      )}
+
+                      {item.fechada && (
+                        <span style={{ padding: '0.2rem 0.55rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: '800', background: '#0f172a', color: '#fb923c' }}>
+                          Ficha Encerrada
+                        </span>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => abrirFichaEmpresa(item.idPrincipal)}
+                        style={{
+                          background: '#ff5722',
+                          color: '#ffffff',
+                          border: 'none',
+                          padding: '0.35rem 0.75rem',
+                          borderRadius: '6px',
+                          fontSize: '0.76rem',
+                          fontWeight: '800',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Abrir Ficha
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       {erro && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '0.85rem 1rem', borderRadius: '10px', marginBottom: '1.25rem', fontWeight: '600' }}>
           {erro}
         </div>
       )}
 
-      {/* BLOCO SUPERIOR: PRESENTES AGORA E NO SHOW */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 1.3fr) minmax(200px, 0.7fr)', gap: '1.5rem', marginBottom: '1.5rem' }}>
-        
-        {/* Card Destaque: Total de Aplicações */}
-        <div style={{
-          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-          borderRadius: '16px',
-          padding: '1.75rem',
-          color: '#fff',
-          position: 'relative',
-          overflow: 'hidden',
-          boxShadow: '0 4px 14px rgba(15, 23, 42, 0.12)'
-        }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: 'rgba(255, 255, 255, 0.1)', padding: '0.25rem 0.65rem', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#4ade80', marginBottom: '1rem' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4ade80' }}></span>
-            Fluxo Ativo
+      {/* 2. QUATRO INDICADORES DE FLUXO DO SALÃO */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(235px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+        <div
+          onClick={() => navigate(ROTAS_SISTEMA.companies)}
+          style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1.2rem', cursor: 'pointer' }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.74rem', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>
+              Fichas Preenchidas (Almoço)
+            </span>
+            <span className="material-symbols-outlined" style={{ color: '#ff5722', fontSize: '1.3rem' }}>assignment_turned_in</span>
           </div>
-          <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.05rem', fontWeight: '600', color: '#94a3b8' }}>
-            Total de Aplicações
-          </h3>
-          <div style={{ fontSize: '3.2rem', fontWeight: '900', lineHeight: 1, letterSpacing: '-0.02em', color: '#fff' }}>
-            {carregando ? '...' : (metricas?.empresasPagantesAlmoco || 0).toLocaleString('pt-BR')}
+          <div style={{ fontSize: '1.8rem', fontWeight: '900', color: '#0f172a', marginTop: '0.3rem' }}>
+            {carregando ? '...' : resumoSalao.fichasPreenchidasQtd}
+            <span style={{ fontSize: '0.95rem', fontWeight: '700', color: '#64748b' }}>
+              {' '}/ {resumoSalao.totalEmpresasElegiveis}
+            </span>
           </div>
-          <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem', color: '#94a3b8' }}>
-            CNPJs que pagaram os R$ 1.000 de almoço
-          </p>
+          <div style={{ fontSize: '0.76rem', color: '#475569', marginTop: '0.2rem' }}>
+            Almoço pago ou cortesia (exclui GIANTS)
+          </div>
         </div>
 
-        {/* Card Menor: No Show (%) */}
-        <div style={{
-          background: '#fff',
-          borderRadius: '16px',
-          padding: '1.75rem',
-          border: '1px solid #e2e8f0',
-          boxShadow: '0 2px 6px rgba(0, 0, 0, 0.02)',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center'
-        }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', background: '#fee2e2', padding: '0.25rem 0.65rem', borderRadius: '20px', fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#dc2626', marginBottom: '1rem', width: 'fit-content' }}>
-            Absenteísmo
+        <div
+          onClick={() => navigate(ROTAS_SISTEMA.lunch)}
+          style={{
+            background: resumoSalao.aguardandoMesa.length > 0 ? '#fff7ed' : '#ffffff',
+            border: resumoSalao.aguardandoMesa.length > 0 ? '1.5px solid #fdba74' : '1px solid #e2e8f0',
+            borderRadius: '14px',
+            padding: '1.2rem',
+            cursor: 'pointer'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.74rem', fontWeight: '800', color: '#c2410c', textTransform: 'uppercase' }}>
+              Fila do Salão (Sem Mesa)
+            </span>
+            <span className="material-symbols-outlined" style={{ color: '#ea580c', fontSize: '1.3rem' }}>hourglass_top</span>
           </div>
-          <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.05rem', fontWeight: '600', color: '#64748b' }}>
-            No Show (%)
-          </h3>
-          <div style={{ fontSize: '2.5rem', fontWeight: '900', lineHeight: 1, color: '#dc2626' }}>
-            {carregando ? '...' : metricas?.noShowPct || '0.0%'}
+          <div style={{ fontSize: '1.8rem', fontWeight: '900', color: '#ff5722', marginTop: '0.3rem' }}>
+            {carregando ? '...' : resumoSalao.aguardandoMesa.length}
           </div>
-          <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem', color: '#64748b' }}>
-            {metricas?.noShowQtd || 0} participantes não compareceram
-          </p>
+          <div style={{ fontSize: '0.76rem', color: '#9a3412', marginTop: '0.2rem', fontWeight: '600' }}>
+            Liberados no almoço aguardando alocação
+          </div>
+        </div>
+
+        <div
+          onClick={() => navigate(ROTAS_SISTEMA.lunch)}
+          style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1.2rem', cursor: 'pointer' }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.74rem', fontWeight: '800', color: '#0369a1', textTransform: 'uppercase' }}>
+              Ocupação das Mesas
+            </span>
+            <span className="material-symbols-outlined" style={{ color: '#0284c7', fontSize: '1.3rem' }}>table_restaurant</span>
+          </div>
+          <div style={{ fontSize: '1.8rem', fontWeight: '900', color: '#0f172a', marginTop: '0.3rem' }}>
+            {carregando ? '...' : resumoSalao.mesasOcupadas}
+            <span style={{ fontSize: '0.95rem', fontWeight: '700', color: '#64748b' }}>
+              {' '}/ {resumoSalao.mesasTotal} mesas
+            </span>
+          </div>
+          <div style={{ fontSize: '0.76rem', color: '#475569', marginTop: '0.2rem' }}>
+            {resumoSalao.assentosOcupados} participante(s) sentado(s) agora
+          </div>
+        </div>
+
+        <div
+          onClick={() => navigate(ROTAS_SISTEMA.approvals)}
+          style={{
+            background: resumoSalao.propAlertas.length > 0 ? '#fef2f2' : '#ffffff',
+            border: resumoSalao.propAlertas.length > 0 ? '1.5px solid #fca5a5' : '1px solid #e2e8f0',
+            borderRadius: '14px',
+            padding: '1.2rem',
+            cursor: 'pointer'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.74rem', fontWeight: '800', color: '#047857', textTransform: 'uppercase' }}>
+              Fila do Financeiro
+            </span>
+            <span className="material-symbols-outlined" style={{ color: '#059669', fontSize: '1.3rem' }}>verified</span>
+          </div>
+          <div style={{ fontSize: '1.8rem', fontWeight: '900', color: '#059669', marginTop: '0.3rem' }}>
+            {carregando ? '...' : resumoSalao.propPendentesQtd}
+            <span style={{ fontSize: '0.88rem', fontWeight: '700', color: '#64748b' }}> em análise</span>
+          </div>
+          <div style={{ fontSize: '0.76rem', color: resumoSalao.propAlertas.length > 0 ? '#b91c1c' : '#475569', marginTop: '0.2rem', fontWeight: resumoSalao.propAlertas.length > 0 ? '800' : '500' }}>
+            {resumoSalao.propAlertas.length > 0
+              ? `⚠ ${resumoSalao.propAlertas.length} proposta(s) recusada/com ressalva`
+              : 'Nenhuma pendência crítica de crédito'}
+          </div>
         </div>
       </div>
 
-      {/* BLOCO INTERMEDIÁRIO: OS 4 INDICADORES CENTRAIS */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
-        
-        {/* 1. Total de Empresas na Turma */}
-        <div style={{ background: '#fff', borderRadius: '16px', padding: '1.35rem', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem' }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: '700', color: '#64748b' }}>Total de Empresas na Turma</span>
-            <div style={{ background: '#eff6ff', color: '#2563eb', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: '1.35rem' }}>domain</span>
-            </div>
-          </div>
-          <div style={{ fontSize: '2.1rem', fontWeight: '900', color: '#0f172a', lineHeight: 1 }}>
-            {carregando ? '...' : (metricas?.totalEmpresas || 653).toLocaleString('pt-BR')}
-          </div>
-          <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span style={{ background: '#dbeafe', color: '#1e40af', padding: '0.15rem 0.5rem', borderRadius: '6px', fontWeight: '700', fontSize: '0.72rem' }}>Total</span>
-            <span>empresas na turma</span>
-          </div>
-        </div>
-
-        {/* 2. Total de Alunos */}
-        <div style={{ background: '#fff', borderRadius: '16px', padding: '1.35rem', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem' }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: '700', color: '#64748b' }}>Total de Alunos</span>
-            <div style={{ background: '#e0e7ff', color: '#4f46e5', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: '1.35rem' }}>groups</span>
-            </div>
-          </div>
-          <div style={{ fontSize: '2.1rem', fontWeight: '900', color: '#0f172a', lineHeight: 1 }}>
-            {carregando ? '...' : (metricas?.totalAlunos || 0).toLocaleString('pt-BR')}
-          </div>
-          <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span style={{ background: '#e0e7ff', color: '#3730a3', padding: '0.15rem 0.5rem', borderRadius: '6px', fontWeight: '700', fontSize: '0.72rem' }}>Qtde de Linhas</span>
-            <span>participantes no evento</span>
-          </div>
-        </div>
-
-        {/* 3. Fichas Preenchidas (Almoço Pago) */}
-        <div style={{ background: '#fff', borderRadius: '16px', padding: '1.35rem', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem' }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: '700', color: '#64748b' }}>Fichas Preenchidas</span>
-            <div style={{ background: '#fef3c7', color: '#d97706', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: '1.35rem' }}>restaurant</span>
-            </div>
-          </div>
-          <div style={{ fontSize: '2.1rem', fontWeight: '900', color: '#0f172a', lineHeight: 1 }}>
-            {carregando ? '...' : (metricas?.fichasPreenchidas || 0).toLocaleString('pt-BR')}
-          </div>
-          <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span style={{ background: '#dcfce7', color: '#166534', padding: '0.15rem 0.5rem', borderRadius: '6px', fontWeight: '700', fontSize: '0.72rem' }}>Almoço Pago</span>
-            <span>
-              {metricas?.empresasPagantesAlmoco || 0} CNPJ(s) pagantes
-            </span>
-          </div>
-        </div>
-
-        {/* 4. Valor Total (Almoço + Fechados) */}
-        <div style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)', borderRadius: '16px', padding: '1.35rem', border: '1px solid #334155', boxShadow: '0 4px 14px rgba(15, 23, 42, 0.15)', color: '#fff' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem' }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: '700', color: '#94a3b8' }}>Valor Total</span>
-            <div style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: '1.35rem' }}>payments</span>
-            </div>
-          </div>
-          <div style={{ fontSize: '2.1rem', fontWeight: '900', color: '#22c55e', lineHeight: 1 }}>
-            {carregando ? '...' : formatarMoeda(metricas?.valorTotal || 0)}
-          </div>
-          <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-            <span style={{ background: 'rgba(255,255,255,0.08)', padding: '0.2rem 0.5rem', borderRadius: '6px', color: '#cbd5e1' }}>
-              Almoço: {formatarMoeda(metricas?.valorAlmoco || 0)}
-            </span>
-            <span>+</span>
-            <span style={{ background: 'rgba(255,255,255,0.08)', padding: '0.2rem 0.5rem', borderRadius: '6px', color: '#cbd5e1' }}>
-              Fechados: {formatarMoeda(metricas?.valorFechados || 0)}
-            </span>
-          </div>
-        </div>
-
-      </div>
-
-      
-        {/* ============================================================== */}
-        {/* RESUMO DE FECHAMENTO COMERCIAL (GIANTS, PAC E CONSOLIDADO)    */}
-        {/* ============================================================== */}
-        <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #e2e8f0', padding: '1.75rem', marginBottom: '1.75rem', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <span className="material-symbols-outlined" style={{ color: '#0f172a', fontSize: '1.5rem' }}>assignment_turned_in</span>
-              <h3 style={{ fontSize: '1.85rem', fontWeight: '800', color: '#0f172a', margin: '0 0 0.35rem 0' }}>{carregando ? '...' : (metricas?.fichasPreenchidas ?? 28).toLocaleString('pt-BR')}</h3>
-            </div>
-            <span style={{ fontSize: '0.8rem', background: '#f8fafc', padding: '0.35rem 0.75rem', borderRadius: '6px', color: '#64748b', fontWeight: '600', border: '1px solid #e2e8f0' }}>
-              Conversão Comercial em Tempo Real
-            </span>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: '1.25rem' }}>
-            {/* Bloco 1: GIANTS */}
-            <div style={{ background: 'linear-gradient(180deg, #faf5ff 0%, #ffffff 100%)', borderRadius: '14px', border: '1.5px solid #e9d5ff', padding: '1.4rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <span className="material-symbols-outlined" style={{ color: '#9333ea', fontSize: '1.3rem' }}>bolt</span>
-                    <span style={{ fontWeight: '900', fontSize: '1.05rem', color: '#6b21a8', letterSpacing: '0.02em' }}>GIANTS</span>
-                  </div>
-                  <span style={{ fontSize: '0.72rem', background: '#f3e8ff', color: '#7e22ce', padding: '0.2rem 0.5rem', borderRadius: '6px', fontWeight: '800' }}>PROGRAMA OFICIAL</span>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', fontSize: '0.88rem', color: '#334155', marginBottom: '1.2rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #f3e8ff', paddingBottom: '0.35rem' }}>
-                    <span>Total de Empresas:</span>
-                    <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>{metricas?.resumoFechamento?.giants?.totalEmpresas ?? 0}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #f3e8ff', paddingBottom: '0.35rem' }}>
-                    <span>Total de Pessoas:</span>
-                    <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>{metricas?.resumoFechamento?.giants?.totalPessoas ?? 0}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '0.35rem' }}>
-                    <span>Empresas com sócio:</span>
-                    <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>{metricas?.resumoFechamento?.giants?.empresasComSocio ?? 0}</strong>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ background: '#fff', borderRadius: '10px', padding: '0.85rem', border: '1px solid #f3e8ff', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.82rem', color: '#16a34a', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    💰 Caixa:
-                  </span>
-                  <strong style={{ color: '#15803d', fontSize: '1rem' }}>
-                    {formatarMoeda(metricas?.resumoFechamento?.giants?.caixa || 0)}
-                  </strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.82rem', color: '#6b21a8', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    📅 Competência:
-                  </span>
-                  <strong style={{ color: '#581c87', fontSize: '1rem' }}>
-                    {formatarMoeda(metricas?.resumoFechamento?.giants?.competencia || 0)}
-                  </strong>
-                </div>
-              </div>
-            </div>
-
-            {/* Bloco 2: PAC */}
-            <div style={{ background: 'linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%)', borderRadius: '14px', border: '1.5px solid #bbf7d0', padding: '1.4rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <span className="material-symbols-outlined" style={{ color: '#16a34a', fontSize: '1.3rem' }}>ads_click</span>
-                    <span style={{ fontWeight: '900', fontSize: '1.05rem', color: '#166534', letterSpacing: '0.02em' }}>PAC</span>
-                  </div>
-                  <span style={{ fontSize: '0.72rem', background: '#dcfce7', color: '#15803d', padding: '0.2rem 0.5rem', borderRadius: '6px', fontWeight: '800' }}>DOWNSELL COMERCIAL</span>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', fontSize: '0.88rem', color: '#334155', marginBottom: '1.2rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #dcfce7', paddingBottom: '0.35rem' }}>
-                    <span>Total de Empresas:</span>
-                    <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>{metricas?.resumoFechamento?.pac?.totalEmpresas ?? 0}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed transparent', paddingBottom: '0.35rem', color: '#94a3b8' }}>
-                    <span>Funil Comercial:</span>
-                    <span style={{ fontSize: '0.8rem', fontWeight: '600' }}>Conversão Ativa</span>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ background: '#fff', borderRadius: '10px', padding: '0.85rem', border: '1px solid #dcfce7', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.82rem', color: '#16a34a', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    💰 Caixa:
-                  </span>
-                  <strong style={{ color: '#15803d', fontSize: '1rem' }}>
-                    {formatarMoeda(metricas?.resumoFechamento?.pac?.caixa || 0)}
-                  </strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.82rem', color: '#0369a1', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    📅 Competência:
-                  </span>
-                  <strong style={{ color: '#075985', fontSize: '1rem' }}>
-                    {formatarMoeda(metricas?.resumoFechamento?.pac?.competencia || 0)}
-                  </strong>
-                </div>
-              </div>
-            </div>
-
-            {/* Bloco 3: TOTAL DE FATURAMENTO COM GIANTS & PAC */}
-            <div style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)', borderRadius: '14px', border: '1.5px solid #334155', padding: '1.4rem', color: '#fff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 8px 20px rgba(15, 23, 42, 0.12)' }}>
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <span className="material-symbols-outlined" style={{ color: '#f59e0b', fontSize: '1.3rem' }}>workspace_premium</span>
-                    <span style={{ fontWeight: '900', fontSize: '0.98rem', color: '#f8fafc', letterSpacing: '0.02em' }}>TOTAL CONSOLIDADO</span>
-                  </div>
-                  <span style={{ fontSize: '0.72rem', background: 'rgba(255,255,255,0.1)', color: '#cbd5e1', padding: '0.2rem 0.5rem', borderRadius: '6px', fontWeight: '700' }}>GIANTS & PAC</span>
-                </div>
-
-                <p style={{ fontSize: '0.82rem', color: '#94a3b8', margin: '0 0 1.2rem 0', lineHeight: 1.4 }}>
-                  Faturamento geral de fechamentos combinados da turma selecionada.
-                </p>
-              </div>
-
-              <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '10px', padding: '0.85rem', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.85rem', color: '#4ade80', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    💰 Caixa:
-                  </span>
-                  <strong style={{ color: '#4ade80', fontSize: '1.15rem', fontWeight: '900' }}>
-                    {formatarMoeda(metricas?.resumoFechamento?.total?.caixa || 0)}
-                  </strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed rgba(255,255,255,0.1)', paddingTop: '0.4rem' }}>
-                  <span style={{ fontSize: '0.85rem', color: '#38bdf8', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    📅 Competência:
-                  </span>
-                  <strong style={{ color: '#38bdf8', fontSize: '1.15rem', fontWeight: '900' }}>
-                    {formatarMoeda(metricas?.resumoFechamento?.total?.competencia || 0)}
-                  </strong>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* GRÁFICO: FATURAMENTO MENSAL DO EVENTO */}
-      <div style={{ background: '#fff', borderRadius: '16px', padding: '1.75rem', border: '1px solid #e2e8f0', boxShadow: '0 2px 6px rgba(0, 0, 0, 0.02)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: '800', color: '#0f172a' }}>
-              Faturamento Mensal do Evento
-            </h3>
-            <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#64748b' }}>
-              Evolução do volume de propostas comerciais fechadas
-            </p>
-          </div>
-          <div style={{ background: '#fff7ed', padding: '0.4rem 0.85rem', borderRadius: '8px', border: '1px solid #ffedd5' }}>
-            <span style={{ fontSize: '0.85rem', color: '#9a3412', fontWeight: '600' }}>Faturamento Acumulado: </span>
-            <span style={{ fontSize: '1.1rem', fontWeight: '800', color: '#ff5722' }}>
-              {formatarMoeda(totalFaturamento)}
-            </span>
-          </div>
-        </div>
-
-        {/* Barras do Gráfico */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: '220px', gap: '1rem', paddingTop: '1.5rem' }}>
-          {faturamentoLista.map((item, idx) => {
-            const alturaPorcentagem = maxFaturamento > 0 ? (item.valor / maxFaturamento) * 100 : 0;
-            const alturaFinal = Math.max(alturaPorcentagem, 8);
-
-            return (
-              <div key={item.chave || idx} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end' }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: '800', color: '#0f172a', marginBottom: '0.45rem', whiteSpace: 'nowrap' }}>
-                  {formatarMoeda(item.valor)}
-                </div>
+      {/* 3. ATALHOS RÁPIDOS DE 1 CLIQUE */}
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h2 style={{ fontSize: '1rem', fontWeight: '800', color: '#0f172a', margin: '0 0 0.85rem' }}>
+          Acesso Rápido por Frente de Operação
+        </h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0.9rem' }}>
+          {atalhosRapidos.map((card) => (
+            <button
+              key={card.titulo}
+              type="button"
+              onClick={() => navigate(card.rota)}
+              style={{
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderRadius: '13px',
+                padding: '1.05rem 1.15rem',
+                textAlign: 'left',
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                gap: '0.65rem',
+                boxShadow: '0 1px 2px rgba(15, 23, 42, 0.03)'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                 <div
                   style={{
-                    width: '100%',
-                    maxWidth: '48px',
-                    height: String(alturaFinal) + '%',
-                    background: '#ff5722',
-                    borderRadius: '6px 6px 0 0',
-                    transition: 'height 0.4s ease'
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '10px',
+                    background: card.bgIcone,
+                    color: card.cor,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
                   }}
-                  title={item.mes + ': ' + formatarMoeda(item.valor)}
-                />
-                <div style={{ fontSize: '0.75rem', fontWeight: '700', color: '#64748b', marginTop: '0.65rem' }}>
-                  {item.mes}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '1.3rem' }}>{card.icone}</span>
+                </div>
+                <span style={{ fontSize: '0.72rem', fontWeight: '800', color: card.cor, background: card.bgIcone, padding: '0.2rem 0.55rem', borderRadius: '6px' }}>
+                  {card.badge}
+                </span>
+              </div>
+
+              <div>
+                <div style={{ fontSize: '0.98rem', fontWeight: '800', color: '#0f172a' }}>{card.titulo}</div>
+                <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '0.2rem', lineHeight: 1.35 }}>
+                  {card.subtitulo}
                 </div>
               </div>
-            );
-          })}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 4. RADAR DE AÇÃO IMEDIATA (FILA DE MESA + ALERTAS DO FINANCEIRO / ÚLTIMAS MOVIMENTAÇÕES) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1.25rem' }}>
+        {/* COLUNA ESQUERDA: LIBERADOS NO ALMOÇO AGUARDANDO MESA */}
+        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1.3rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem' }}>
+            <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: '800', color: '#0f172a' }}>
+              Liberados no Almoço Aguardando Mesa ({resumoSalao.aguardandoMesa.length})
+            </h3>
+            <button
+              type="button"
+              onClick={() => navigate(ROTAS_SISTEMA.lunch)}
+              style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fdba74', padding: '0.32rem 0.7rem', borderRadius: '7px', fontSize: '0.75rem', fontWeight: '800', cursor: 'pointer' }}
+            >
+              Ir para Salão →
+            </button>
+          </div>
+
+          {resumoSalao.aguardandoMesa.length === 0 ? (
+            <p style={{ fontSize: '0.84rem', color: '#64748b', margin: 0 }}>
+              Nenhuma empresa liberada aguardando mesa no momento.
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+              {resumoSalao.aguardandoMesa.slice(0, 7).map((item) => (
+                <div
+                  key={item.chave}
+                  style={{
+                    border: '1px solid #f1f5f9',
+                    background: '#f8fafc',
+                    borderRadius: '9px',
+                    padding: '0.7rem 0.85rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '0.65rem'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: '800', fontSize: '0.88rem', color: '#0f172a' }}>{item.empresa}</div>
+                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                      {item.titular} {item.membros.length > 1 ? `(+ ${item.membros.length - 1} sócio)` : ''}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                    <span
+                      style={{
+                        fontSize: '0.7rem',
+                        fontWeight: '800',
+                        padding: '0.18rem 0.5rem',
+                        borderRadius: '5px',
+                        background: item.almocoPago ? '#dcfce7' : '#fef3c7',
+                        color: item.almocoPago ? '#166534' : '#92400e'
+                      }}
+                    >
+                      {item.almocoPago ? 'Pago' : 'Cortesia'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => navigate(ROTAS_SISTEMA.lunch)}
+                      style={{ background: '#0f172a', color: '#fff', border: 'none', padding: '0.32rem 0.65rem', borderRadius: '6px', fontSize: '0.74rem', fontWeight: '700', cursor: 'pointer' }}
+                    >
+                      Alocar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* COLUNA DIREITA: ALERTAS DO FINANCEIRO & ÚLTIMAS MOVIMENTAÇÕES */}
+        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1.3rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem' }}>
+            <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: '800', color: '#0f172a' }}>
+              Alertas do Financeiro & Últimas Movimentações
+            </h3>
+            <button
+              type="button"
+              onClick={() => navigate(ROTAS_SISTEMA.approvals)}
+              style={{ background: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1', padding: '0.32rem 0.7rem', borderRadius: '7px', fontSize: '0.75rem', fontWeight: '700', cursor: 'pointer' }}
+            >
+              Ver Fila →
+            </button>
+          </div>
+
+          {resumoSalao.propAlertas.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.85rem' }}>
+              {resumoSalao.propAlertas.map((alerta) => {
+                const isRecusada = ['recusada', 'recusado', 'negado'].includes(
+                  String(alerta.status_aprovacao || '').toLowerCase()
+                );
+                return (
+                  <div
+                    key={alerta.id}
+                    style={{
+                      background: isRecusada ? '#fef2f2' : '#fffbeb',
+                      border: isRecusada ? '1px solid #fecaca' : '1px solid #fde68a',
+                      borderRadius: '9px',
+                      padding: '0.7rem 0.85rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '0.6rem'
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: '0.72rem', fontWeight: '800', color: isRecusada ? '#b91c1c' : '#b45309', textTransform: 'uppercase' }}>
+                        {isRecusada ? '⚠ Crédito Recusado — Abordar Empresa' : '⚠ Aprovado com Ressalva'}
+                      </div>
+                      <div style={{ fontWeight: '800', fontSize: '0.88rem', color: '#0f172a' }}>{alerta.empresa}</div>
+                      {alerta.parecer_financeiro && (
+                        <div style={{ fontSize: '0.74rem', color: '#475569' }}>{alerta.parecer_financeiro}</div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => abrirFichaEmpresa(alerta.id)}
+                      style={{ background: isRecusada ? '#dc2626' : '#d97706', color: '#fff', border: 'none', padding: '0.35rem 0.7rem', borderRadius: '6px', fontSize: '0.74rem', fontWeight: '800', cursor: 'pointer' }}
+                    >
+                      Ver Ficha
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {resumoSalao.ultimasMovimentacoes.length === 0 ? (
+            <p style={{ fontSize: '0.84rem', color: '#64748b', margin: 0 }}>
+              Nenhuma movimentação registrada nesta turma ainda.
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {resumoSalao.ultimasMovimentacoes.map((mov) => (
+                <div
+                  key={mov.chave}
+                  style={{
+                    border: '1px solid #f1f5f9',
+                    borderRadius: '8px',
+                    padding: '0.62rem 0.85rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: '800', fontSize: '0.85rem', color: '#0f172a' }}>{mov.empresa}</div>
+                    <div style={{ fontSize: '0.73rem', color: '#64748b' }}>{mov.titular}</div>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: '0.7rem',
+                      fontWeight: '800',
+                      padding: '0.2rem 0.55rem',
+                      borderRadius: '6px',
+                      background: mov.fechada ? '#dcfce7' : mov.mesaAlocada !== null ? '#e0f2fe' : '#fff7ed',
+                      color: mov.fechada ? '#166534' : mov.mesaAlocada !== null ? '#0369a1' : '#c2410c'
+                    }}
+                  >
+                    {mov.fechada
+                      ? 'Ficha Finalizada'
+                      : mov.mesaAlocada !== null
+                      ? `Na Mesa ${mov.mesaAlocada}`
+                      : 'Almoço Liberado'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
