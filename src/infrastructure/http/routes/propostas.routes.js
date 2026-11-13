@@ -448,7 +448,7 @@ router.post('/financeiro/analisar', async (req, res) => {
 
     if (propRows.length > 0) {
       const propId = propRows[0].id;
-      const statusPropEnum = novoStatus === 'recusada' ? 'reprovada' : 'aprovada';
+      const statusPropEnum = novoStatus === 'recusada' ? 'recusado' : 'aprovado';
       await client.query(
         `UPDATE propostas
          SET status = $1::status_prop,
