@@ -2,6 +2,8 @@
 import { api } from '../services/api';
 
 const fmtBRL = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const fmtNum = (v) => Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+const fmtPct = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
 
 const BADGE_ACAO = {
   CORTESIA_ALMOCO: { label: 'Cortesia Almoço', bg: '#fef3c7', color: '#92400e' },
@@ -18,6 +20,10 @@ export default function WarRoom() {
   const [erro, setErro] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [exportandoCsv, setExportandoCsv] = useState(false);
+
+  const [modalPanoramaPdf, setModalPanoramaPdf] = useState(false);
+  const [tituloPanoramaCustom, setTituloPanoramaCustom] = useState('');
+  const [dataPanoramaCustom, setDataPanoramaCustom] = useState('');
 
   const carregarResumo = useCallback(async (silencioso = false) => {
     try {
@@ -43,6 +49,18 @@ export default function WarRoom() {
     }, 12000);
     return () => clearInterval(interval);
   }, [autoRefresh, carregarResumo]);
+
+  const abrirPanoramaPdf = () => {
+    const pan = dados?.panoramaExecutivo || {};
+    const nomeSalvo = localStorage.getItem('turma_ativa_nome') || '';
+    if (!tituloPanoramaCustom) {
+      setTituloPanoramaCustom(nomeSalvo || pan.tituloEvento || 'Casais Empreendedores');
+    }
+    if (!dataPanoramaCustom) {
+      setDataPanoramaCustom(pan.dataEvento || new Date().toLocaleDateString('pt-BR').replace(/\//g, '.'));
+    }
+    setModalPanoramaPdf(true);
+  };
 
   const baixarPlanilhaCsv = async () => {
     try {
@@ -143,6 +161,28 @@ export default function WarRoom() {
             style={{ background: '#fff', color: '#0f172a', border: '1px solid #cbd5e1', padding: '0.55rem 0.95rem', borderRadius: '8px', fontWeight: '700', fontSize: '0.8rem', cursor: 'pointer' }}
           >
             Atualizar
+          </button>
+
+          <button
+            type="button"
+            onClick={abrirPanoramaPdf}
+            style={{
+              background: '#ff5722',
+              color: '#ffffff',
+              border: 'none',
+              padding: '0.58rem 1.1rem',
+              borderRadius: '8px',
+              fontWeight: '800',
+              fontSize: '0.82rem',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              boxShadow: '0 2px 8px rgba(255, 87, 34, 0.28)'
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: '1.05rem' }}>picture_as_pdf</span>
+            Exportar Panorama PDF
           </button>
 
           <button
@@ -377,6 +417,423 @@ export default function WarRoom() {
           </div>
         </>
       )}
+
+      {/* MODAL PANORAMA EXECUTIVO (IDENTIDADE DARK SLATE #0F172A + LARANJA #FF5722 DO SISTEMA) */}
+      {modalPanoramaPdf && (() => {
+        const pan = dados?.panoramaExecutivo || {};
+        const pessoasPres = pan.pessoasPresentes ?? 0;
+        const empresasPres = pan.empresasPresentes ?? 0;
+        const pessoasComp = pan.pessoasCompraram ?? 0;
+        const empresasComp = pan.empresasCompraram ?? (funil.fechamentos || 0);
+        const caixaVal = pan.caixa ?? (kpis.caixaImediatoEvento || 0);
+        const compVal = pan.competencia ?? (kpis.faturamentoLiquido || 0);
+        const txPessoas = pan.txConversaoPessoas ?? (pessoasPres > 0 ? (pessoasComp / pessoasPres) * 100 : 0);
+        const txEmpresas = pan.txConversaoEmpresas ?? (empresasPres > 0 ? (empresasComp / empresasPres) * 100 : 0);
+        const fppVal = pan.fpp ?? (pessoasPres > 0 ? compVal / pessoasPres : 0);
+        const fpeVal = pan.fpe ?? (empresasPres > 0 ? compVal / empresasPres : 0);
+
+        return (
+          <div
+            onClick={() => setModalPanoramaPdf(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(2, 6, 23, 0.85)',
+              backdropFilter: 'blur(4px)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 10000,
+              padding: '1rem',
+              overflowY: 'auto'
+            }}
+          >
+            <style>{
+              '@media print {' +
+              '  @page { size: A4 landscape; margin: 0; }' +
+              '  html, body { margin: 0 !important; padding: 0 !important; background: #090d16 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }' +
+              '  body * { visibility: hidden; }' +
+              '  #panorama-executivo-sheet, #panorama-executivo-sheet * { visibility: visible; }' +
+              '  #panorama-executivo-sheet {' +
+              '    position: fixed !important;' +
+              '    inset: 0 !important;' +
+              '    width: 100vw !important;' +
+              '    height: 100vh !important;' +
+              '    max-width: none !important;' +
+              '    border-radius: 0 !important;' +
+              '    box-shadow: none !important;' +
+              '    margin: 0 !important;' +
+              '    padding: 22px 28px !important;' +
+              '    box-sizing: border-box !important;' +
+              '  }' +
+              '  .no-print-panorama { display: none !important; }' +
+              '}'
+            }</style>
+
+            {/* Barra superior de edição rápida de título/data antes de gerar PDF */}
+            <div
+              className="no-print-panorama"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: '100%',
+                maxWidth: '1060px',
+                background: '#1e293b',
+                border: '1px solid #334155',
+                borderRadius: '12px',
+                padding: '0.75rem 1.1rem',
+                marginBottom: '0.75rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '0.75rem',
+                flexWrap: 'wrap',
+                color: '#f8fafc'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.78rem', fontWeight: '800', color: '#fb923c' }}>Evento:</span>
+                <input
+                  type="text"
+                  value={tituloPanoramaCustom}
+                  onChange={(e) => setTituloPanoramaCustom(e.target.value)}
+                  style={{ background: '#0f172a', border: '1px solid #475569', color: '#fff', padding: '0.35rem 0.65rem', borderRadius: '6px', fontSize: '0.82rem', fontWeight: '700', width: '240px' }}
+                />
+                <span style={{ fontSize: '0.78rem', fontWeight: '800', color: '#fb923c' }}>Data:</span>
+                <input
+                  type="text"
+                  value={dataPanoramaCustom}
+                  onChange={(e) => setDataPanoramaCustom(e.target.value)}
+                  style={{ background: '#0f172a', border: '1px solid #475569', color: '#fff', padding: '0.35rem 0.65rem', borderRadius: '6px', fontSize: '0.82rem', fontWeight: '700', width: '115px' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  style={{
+                    background: '#ff5722',
+                    color: '#ffffff',
+                    border: 'none',
+                    padding: '0.55rem 1.15rem',
+                    borderRadius: '8px',
+                    fontWeight: '800',
+                    fontSize: '0.84rem',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem'
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '1.05rem' }}>print</span>
+                  Salvar PDF / Imprimir
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalPanoramaPdf(false)}
+                  style={{ background: '#334155', color: '#e2e8f0', border: 'none', padding: '0.55rem 0.9rem', borderRadius: '8px', fontWeight: '700', fontSize: '0.82rem', cursor: 'pointer' }}
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+
+            {/* FOLHA DO PANORAMA EXECUTIVO */}
+            <div
+              id="panorama-executivo-sheet"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: '100%',
+                maxWidth: '1060px',
+                background: 'radial-gradient(circle at 18% 15%, #1e293b 0%, #0f172a 48%, #090d16 100%)',
+                borderRadius: '16px',
+                border: '1.5px solid rgba(255, 87, 34, 0.55)',
+                boxShadow: '0 25px 60px rgba(0, 0, 0, 0.65)',
+                padding: '1.75rem 2.1rem',
+                color: '#ffffff',
+                fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+                position: 'relative',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                gap: '1.1rem'
+              }}
+            >
+              {/* Barras decorativas no canto superior direito */}
+              <div style={{ position: 'absolute', top: '12px', right: '24px', display: 'flex', alignItems: 'flex-end', gap: '6px', opacity: 0.22, pointerEvents: 'none' }}>
+                {[26, 38, 52, 68, 84, 102].map((h, i) => (
+                  <div key={i} style={{ width: '10px', height: h + 'px', background: 'linear-gradient(180deg, #ff5722 0%, transparent 100%)', borderRadius: '3px 3px 0 0' }} />
+                ))}
+              </div>
+
+              {/* 1. CABEÇALHO DO PANORAMA */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', position: 'relative', zIndex: 1 }}>
+                <div>
+                  <div style={{ fontSize: '2.05rem', fontWeight: '900', lineHeight: '1.08', letterSpacing: '-0.02em' }}>
+                    <span style={{ color: '#ffffff' }}>{tituloPanoramaCustom || 'Casais Empreendedores'} </span>
+                    <span style={{ color: '#ff5722' }}>{dataPanoramaCustom}</span>
+                  </div>
+                  <div style={{ fontSize: '0.9rem', fontWeight: '600', letterSpacing: '0.38em', color: '#e2e8f0', marginTop: '0.35rem', textTransform: 'uppercase' }}>
+                    PANORAMA EXECUTIVO
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.6rem' }}>
+                    <div style={{ height: '1px', width: '75px', background: 'linear-gradient(90deg, transparent, rgba(255,87,34,0.75))' }} />
+                    <span style={{ fontSize: '0.64rem', fontWeight: '700', letterSpacing: '0.2em', color: '#cbd5e1', textTransform: 'uppercase' }}>
+                      RESULTADOS DE HOJE. PRÓXIMOS PASSOS DE AMANHÃ.
+                    </span>
+                    <div style={{ height: '1px', width: '75px', background: 'linear-gradient(90deg, rgba(255,87,34,0.75), transparent)' }} />
+                  </div>
+                </div>
+
+                <div style={{ borderLeft: '2.5px solid #ff5722', paddingLeft: '0.65rem', fontSize: '0.62rem', fontWeight: '800', letterSpacing: '0.14em', color: '#cbd5e1', lineHeight: '1.45', textTransform: 'uppercase', marginTop: '0.2rem' }}>
+                  <div>JUNTOS</div>
+                  <div>IDEIAS</div>
+                  <div>NEGÓCIOS</div>
+                  <div>CONQUISTAS</div>
+                </div>
+              </div>
+
+              {/* 2. BLOCO SUPERIOR: PRESENÇA + RESULTADOS */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.15rem', position: 'relative', zIndex: 1 }}>
+                {/* CARD ESQUERDO: PRESENÇA */}
+                <div style={{
+                  background: 'linear-gradient(180deg, rgba(255,87,34,0.14) 0%, rgba(15,23,42,0.9) 38%)',
+                  border: '1.5px solid rgba(255, 87, 34, 0.55)',
+                  borderRadius: '14px',
+                  padding: '1.1rem 1.35rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.8rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: '2rem', color: '#ff5722' }}>groups</span>
+                      <span style={{ fontSize: '1.45rem', fontWeight: '900', letterSpacing: '0.03em' }}>PRESENÇA</span>
+                    </div>
+                    <div style={{ borderLeft: '2px solid #ff5722', paddingLeft: '0.55rem', fontSize: '0.58rem', fontWeight: '700', letterSpacing: '0.1em', color: '#cbd5e1', lineHeight: '1.35', textTransform: 'uppercase' }}>
+                      <div>PESSOAS</div>
+                      <div>QUE CONSTROEM</div>
+                      <div>OPORTUNIDADES</div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '1.45rem', color: '#e2e8f0' }}>group</span>
+                        <div>
+                          <div style={{ fontSize: '0.84rem', fontWeight: '700', color: '#f8fafc' }}>Pessoas Presentes</div>
+                          <div style={{ fontSize: '0.68rem', color: '#94a3b8' }}>(base sem alunos AE e Giants):</div>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: '1.75rem', fontWeight: '900', color: '#ff5722', lineHeight: 1 }}>
+                        {fmtNum(pessoasPres)}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '1.45rem', color: '#e2e8f0' }}>apartment</span>
+                        <div>
+                          <div style={{ fontSize: '0.84rem', fontWeight: '700', color: '#f8fafc' }}>Empresas Presentes</div>
+                          <div style={{ fontSize: '0.68rem', color: '#94a3b8' }}>(base sem alunos AE e Giants):</div>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: '1.75rem', fontWeight: '900', color: '#ff5722', lineHeight: 1 }}>
+                        {fmtNum(empresasPres)}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '1.45rem', color: '#e2e8f0' }}>person_check</span>
+                        <div style={{ fontSize: '0.84rem', fontWeight: '700', color: '#f8fafc' }}>Pessoas que compraram:</div>
+                      </div>
+                      <span style={{ fontSize: '1.75rem', fontWeight: '900', color: '#ff5722', lineHeight: 1 }}>
+                        {fmtNum(pessoasComp)}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '1.45rem', color: '#e2e8f0' }}>domain_verification</span>
+                        <div style={{ fontSize: '0.84rem', fontWeight: '700', color: '#f8fafc' }}>Empresas que compraram:</div>
+                      </div>
+                      <span style={{ fontSize: '1.75rem', fontWeight: '900', color: '#ff5722', lineHeight: 1 }}>
+                        {fmtNum(empresasComp)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '0.75rem', paddingTop: '0.55rem', borderTop: '1px solid rgba(148, 163, 184, 0.2)', display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.68rem', color: '#cbd5e1' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '1rem', color: '#fb923c' }}>info</span>
+                    <span>Base considerada para presença e conversão: exclui alunos AE e Giants presentes.</span>
+                  </div>
+                </div>
+
+                {/* CARD DIREITO: RESULTADOS */}
+                <div style={{
+                  background: 'linear-gradient(180deg, rgba(255,87,34,0.14) 0%, rgba(15,23,42,0.9) 38%)',
+                  border: '1.5px solid rgba(255, 87, 34, 0.55)',
+                  borderRadius: '14px',
+                  padding: '1.1rem 1.35rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.8rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: '2rem', color: '#ff5722' }}>bar_chart</span>
+                      <span style={{ fontSize: '1.45rem', fontWeight: '900', letterSpacing: '0.03em' }}>RESULTADOS</span>
+                    </div>
+                    <div style={{ borderLeft: '2px solid #ff5722', paddingLeft: '0.55rem', fontSize: '0.58rem', fontWeight: '700', letterSpacing: '0.1em', color: '#cbd5e1', lineHeight: '1.35', textTransform: 'uppercase' }}>
+                      <div>NÚMEROS</div>
+                      <div>QUE IMPULSIONAM</div>
+                      <div>NOVAS HISTÓRIAS</div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem', margin: 'auto 0' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '1.75rem', color: '#e2e8f0' }}>payments</span>
+                        <span style={{ fontSize: '1.15rem', fontWeight: '700', color: '#f8fafc' }}>Caixa:</span>
+                      </div>
+                      <span style={{ fontSize: '1.95rem', fontWeight: '900', color: '#ff5722', letterSpacing: '-0.02em' }}>
+                        {fmtBRL(caixaVal)}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '1.75rem', color: '#e2e8f0' }}>track_changes</span>
+                        <span style={{ fontSize: '1.15rem', fontWeight: '700', color: '#f8fafc' }}>Competência:</span>
+                      </div>
+                      <span style={{ fontSize: '1.95rem', fontWeight: '900', color: '#ff5722', letterSpacing: '-0.02em' }}>
+                        {fmtBRL(compVal)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.75rem' }}>
+                    <div style={{ borderLeft: '2px solid #ff5722', paddingLeft: '0.55rem', fontSize: '0.58rem', fontWeight: '700', letterSpacing: '0.12em', color: '#cbd5e1', lineHeight: '1.35', textTransform: 'uppercase' }}>
+                      <div>PLANEJAMENTO</div>
+                      <div>EXECUÇÃO</div>
+                      <div>CRESCIMENTO</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. FAIXA CENTRAL: INDICADORES DE CONVERSÃO */}
+              <div style={{
+                background: 'linear-gradient(180deg, rgba(255,87,34,0.14) 0%, rgba(15,23,42,0.92) 35%)',
+                border: '1.5px solid rgba(255, 87, 34, 0.55)',
+                borderRadius: '14px',
+                padding: '1rem 1.35rem',
+                position: 'relative',
+                zIndex: 1
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.8rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '1.7rem', color: '#ff5722' }}>trending_up</span>
+                    <span style={{ fontSize: '1.3rem', fontWeight: '900' }}>Indicadores de Conversão</span>
+                  </div>
+                  <div style={{ borderLeft: '2px solid #ff5722', paddingLeft: '0.55rem', fontSize: '0.56rem', fontWeight: '700', letterSpacing: '0.1em', color: '#cbd5e1', lineHeight: '1.3', textTransform: 'uppercase' }}>
+                    <div>MAIS RELACIONAMENTOS</div>
+                    <div>MAIS NEGÓCIOS</div>
+                    <div>MAIS CONQUISTAS</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.85rem' }}>
+                  <div style={{ background: 'rgba(9, 13, 22, 0.75)', border: '1px solid rgba(255, 87, 34, 0.45)', borderRadius: '11px', padding: '0.85rem 0.75rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '1.55rem', color: '#f8fafc', marginBottom: '0.3rem' }}>groups</span>
+                    <div style={{ fontSize: '0.78rem', fontWeight: '700', color: '#f8fafc' }}>Tx de Conversão Pessoas</div>
+                    <div style={{ fontSize: '0.62rem', color: '#94a3b8' }}>(base sem alunos AE e Giants):</div>
+                    <div style={{ fontSize: '1.85rem', fontWeight: '900', color: '#ff5722', margin: '0.35rem 0', lineHeight: 1 }}>
+                      {fmtPct(txPessoas)}
+                    </div>
+                    <div style={{ width: '80%', borderTop: '1px solid rgba(148,163,184,0.25)', paddingTop: '0.3rem', fontSize: '0.76rem', fontWeight: '700', color: '#e2e8f0' }}>
+                      {fmtNum(pessoasComp)} / {fmtNum(pessoasPres)}
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'rgba(9, 13, 22, 0.75)', border: '1px solid rgba(255, 87, 34, 0.45)', borderRadius: '11px', padding: '0.85rem 0.75rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '1.55rem', color: '#f8fafc', marginBottom: '0.3rem' }}>apartment</span>
+                    <div style={{ fontSize: '0.78rem', fontWeight: '700', color: '#f8fafc' }}>Tx de Conversão Empresas</div>
+                    <div style={{ fontSize: '0.62rem', color: '#94a3b8' }}>(base sem alunos AE e Giants):</div>
+                    <div style={{ fontSize: '1.85rem', fontWeight: '900', color: '#ff5722', margin: '0.35rem 0', lineHeight: 1 }}>
+                      {fmtPct(txEmpresas)}
+                    </div>
+                    <div style={{ width: '80%', borderTop: '1px solid rgba(148,163,184,0.25)', paddingTop: '0.3rem', fontSize: '0.76rem', fontWeight: '700', color: '#e2e8f0' }}>
+                      {fmtNum(empresasComp)} / {fmtNum(empresasPres)}
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'rgba(9, 13, 22, 0.75)', border: '1px solid rgba(255, 87, 34, 0.45)', borderRadius: '11px', padding: '0.85rem 0.75rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '1.55rem', color: '#f8fafc', marginBottom: '0.3rem' }}>monetization_on</span>
+                    <div style={{ fontSize: '0.82rem', fontWeight: '800', color: '#f8fafc' }}>FPP:</div>
+                    <div style={{ fontSize: '1.55rem', fontWeight: '900', color: '#ff5722', margin: '0.45rem 0', lineHeight: 1 }}>
+                      {fmtBRL(fppVal)}
+                    </div>
+                    <div style={{ width: '85%', borderTop: '1px solid rgba(148,163,184,0.25)', paddingTop: '0.3rem', fontSize: '0.68rem', color: '#cbd5e1', lineHeight: '1.25' }}>
+                      Competência / Pessoas Presentes
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'rgba(9, 13, 22, 0.75)', border: '1px solid rgba(255, 87, 34, 0.45)', borderRadius: '11px', padding: '0.85rem 0.75rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '1.55rem', color: '#f8fafc', marginBottom: '0.3rem' }}>business</span>
+                    <div style={{ fontSize: '0.82rem', fontWeight: '800', color: '#f8fafc' }}>FPE:</div>
+                    <div style={{ fontSize: '1.55rem', fontWeight: '900', color: '#ff5722', margin: '0.45rem 0', lineHeight: 1 }}>
+                      {fmtBRL(fpeVal)}
+                    </div>
+                    <div style={{ width: '85%', borderTop: '1px solid rgba(148,163,184,0.25)', paddingTop: '0.3rem', fontSize: '0.68rem', color: '#cbd5e1', lineHeight: '1.25' }}>
+                      Competência / Empresas Presentes
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. FAIXA INFERIOR: COMPETÊNCIA TOTAL + CAIXA */}
+              <div style={{
+                background: 'linear-gradient(90deg, rgba(255,87,34,0.16) 0%, rgba(15,23,42,0.94) 50%, rgba(255,87,34,0.14) 100%)',
+                border: '1.5px solid rgba(255, 87, 34, 0.55)',
+                borderRadius: '14px',
+                padding: '0.9rem 1.5rem',
+                display: 'grid',
+                gridTemplateColumns: '1.2fr 1fr',
+                gap: '1.25rem',
+                alignItems: 'center',
+                position: 'relative',
+                zIndex: 1
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', borderRight: '1px solid rgba(148, 163, 184, 0.25)', paddingRight: '1rem' }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '2.1rem', color: '#ff5722' }}>toll</span>
+                  <div>
+                    <div style={{ fontSize: '0.82rem', fontWeight: '700', color: '#e2e8f0' }}>Competência Total:</div>
+                    <div style={{ fontSize: '2rem', fontWeight: '900', color: '#ff5722', lineHeight: 1.05, letterSpacing: '-0.02em' }}>
+                      {fmtBRL(compVal)}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', paddingLeft: '0.5rem' }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: '2.1rem', color: '#ff5722' }}>account_balance_wallet</span>
+                  <div>
+                    <div style={{ fontSize: '0.82rem', fontWeight: '700', color: '#e2e8f0' }}>Caixa:</div>
+                    <div style={{ fontSize: '1.9rem', fontWeight: '900', color: '#ff5722', lineHeight: 1.05, letterSpacing: '-0.02em' }}>
+                      {fmtBRL(caixaVal)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

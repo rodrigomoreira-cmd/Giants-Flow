@@ -87,6 +87,25 @@ router.get('/war-room/resumo', async (req, res) => {
     const digits = String(rawTurma).replace(/\D/g, '');
     const turmaId = digits ? parseInt(digits, 10) : 1491;
 
+    let nomeTurmaEvento = 'Casais Empreendedores';
+    let dataTurmaFormatada = new Date().toLocaleDateString('pt-BR').replace(/\//g, '.');
+    try {
+      const { rows: turmaRows } = await client.query(
+        'SELECT * FROM turmas WHERE id = $1::int LIMIT 1',
+        [turmaId]
+      );
+      if (turmaRows[0]) {
+        nomeTurmaEvento = turmaRows[0].nome || turmaRows[0].titulo || nomeTurmaEvento;
+        const dtRaw = turmaRows[0].data_inicio || turmaRows[0].data_evento || turmaRows[0].data;
+        if (dtRaw) {
+          const dtObj = new Date(dtRaw);
+          if (!isNaN(dtObj.getTime())) {
+            dataTurmaFormatada = dtObj.toLocaleDateString('pt-BR').replace(/\//g, '.');
+          }
+        }
+      }
+    } catch (_) {}
+
     // Fichas consolidadas por empresa/CNPJ na turma
     const { rows: fichasRows } = await client.query(
       `SELECT
@@ -98,6 +117,8 @@ router.get('/war-room/resumo', async (req, res) => {
          f.almoco_pago,
          f.cortesia_almoco,
          f.membro_giants,
+         f.historico_produtos_elegiveis,
+         f.origem,
          COALESCE(f.valor_almoco, 0) AS valor_almoco,
          f.mesa_alocada,
          f.assento_alocado,
@@ -291,8 +312,72 @@ router.get('/war-room/resumo', async (req, res) => {
     const baseConversao = funil.encerradasTotal > 0 ? funil.encerradasTotal : funil.aptasAlmoco;
     const taxaConversao = baseConversao > 0 ? Number(((funil.fechamentos / baseConversao) * 100).toFixed(1)) : 0;
 
-    res.json({
+    const isAlunoGiantsOuAE = (row) => {
+      if (row.membro_giants) return true;
+      const orig = String(row.origem || '').toUpperCase();
+      const hist = String(row.historico_produtos_elegiveis || '').toUpperCase();
+      if (orig.includes('GIANTS') || orig.includes('ACELERADOR') || orig === 'AE') return true;
+      if (/GIANTS|ACELERADOR|\bAE\b|ACE\d/i.test(hist)) return true;
+      return false;
+    };
+
+    const fichasBaseElegivel = fichasRows.filter((r) => !isAlunoGiantsOuAE(r));
+    const pessoasPresentes = fichasBaseElegivel.length;
+
+    const empresasElegiveisSet = new Set();
+    for (const r of fichasBaseElegivel) {
+      const cnpjLimpo = String(r.cnpj_doc || '').replace(/\D/g, '');
+      const empNorm = String(r.empresa || '').trim().toLowerCase();
+      const chave =
+        cnpjLimpo.length >= 11
+          ? `cnpj:${cnpjLimpo}`
+          : empNorm && !['empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada'].includes(empNorm)
+          ? `emp:${empNorm}`
+          : `id:${r.id}`;
+      empresasElegiveisSet.add(chave);
+    }
+
+    const empresasPresentes = empresasElegiveisSet.size > 0
+      ? empresasElegiveisSet.size
+      : Number((pessoasPresentes / 2).toFixed(1));
+
+    let pessoasCompraram = 0;
+    for (const r of fichasRows) {
+      const dp = r.dados_proposta && typeof r.dados_proposta === 'object' ? r.dados_proposta : null;
+      const gerouVenda = Boolean(dp || r.proposta_id || Number(r.prop_valor_total || 0) > 0);
+      if (gerouVenda) {
+        const qtdSociosContrato = Array.isArray(dp?.sociosDetalhes)
+          ? Math.max(1, dp.sociosDetalhes.filter((s) => s.entraNoContrato).length)
+          : Math.max(1, Number(dp?.socios || 1));
+        pessoasCompraram += qtdSociosContrato;
+      }
+    }
+
+    const empresasCompraram = funil.fechamentos;
+    const competenciaTotal = totais.liquido;
+    const caixaTotal = totais.entradas + totalAlmocoArrecadado;
+
+    const txConversaoPessoas = pessoasPresentes > 0 ? Number(((pessoasCompraram / pessoasPresentes) * 100).toFixed(2)) : 0;
+    const txConversaoEmpresas = empresasPresentes > 0 ? Number(((empresasCompraram / empresasPresentes) * 100).toFixed(2)) : 0;
+    const fpp = pessoasPresentes > 0 ? Number((competenciaTotal / pessoasPresentes).toFixed(2)) : 0;
+    const fpe = empresasPresentes > 0 ? Number((competenciaTotal / empresasPresentes).toFixed(2)) : 0;
+
+        res.json({
       turmaId,
+      panoramaExecutivo: {
+        tituloEvento: nomeTurmaEvento,
+        dataEvento: dataTurmaFormatada,
+        pessoasPresentes,
+        empresasPresentes,
+        pessoasCompraram,
+        empresasCompraram,
+        caixa: caixaTotal,
+        competencia: competenciaTotal,
+        txConversaoPessoas,
+        txConversaoEmpresas,
+        fpp,
+        fpe
+      },
       atualizadoEm: new Date().toISOString(),
       kpis: {
         faturamentoBruto: totais.bruto,
