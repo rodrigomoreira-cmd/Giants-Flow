@@ -266,6 +266,130 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
 
 }
 
+    const cv = (cv_cartao || '').trim() || null;
+
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+
+    const { rows: baseRows } = await client.query(
+      'SELECT id, turma_id, empresa, cnpj, cpf_cnpj, membro_giants FROM fichas WHERE id = $1::int FOR UPDATE',
+      [fichaId]
+    );
+
+    if (baseRows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Empresa/participante não encontrado.' });
+    }
+
+    const base = baseRows[0];
+    const cnpjLimpo = String(base.cnpj || base.cpf_cnpj || '').replace(/\D/g, '');
+    const empNorm = String(base.empresa || '').trim().toLowerCase();
+
+    const idsEnviados = Array.isArray(todos_empresa_ids)
+      ? todos_empresa_ids.map((x) => parseInt(x, 10)).filter((n) => !isNaN(n))
+      : [];
+
+    // Localiza todos os sócios não-GIANTS da empresa na turma
+    const { rows: sociosEmpresa } = await client.query(
+      `SELECT id, membro_giants
+       FROM fichas
+       WHERE turma_id = $1::int
+         AND COALESCE(membro_giants, false) = false
+         AND (
+           id = $2::int
+           OR id = ANY($3::int[])
+           OR ($4::text <> '' AND LENGTH($4::text) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $4::text)
+           OR ($5::text <> '' AND $5::text NOT IN ('empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada') AND LOWER(TRIM(COALESCE(empresa, ''))) = $5::text)
+         )
+       ORDER BY id ASC`,
+      [base.turma_id, fichaId, idsEnviados, cnpjLimpo, empNorm]
+    );
+
+    const todosIds = sociosEmpresa.length > 0
+      ? sociosEmpresa.map((s) => Number(s.id))
+      : [fichaId];
+
+    const marcadosRaw = Array.isArray(participantes_ids)
+      ? participantes_ids.map((x) => parseInt(x, 10)).filter((n) => !isNaN(n))
+      : [];
+    const idsParticipantes = marcadosRaw.length > 0 ? marcadosRaw : todosIds;
+    const titularPaganteId = idsParticipantes.includes(fichaId) ? fichaId : idsParticipantes[0];
+
+    if (tipo === 'pago') {
+      // Marca almoço pago para os sócios selecionados e cobra R$ 1.000,00 uma única vez no CNPJ
+      await client.query(
+        `UPDATE fichas
+         SET almoco_pago = CASE WHEN id = ANY($2::int[]) THEN true ELSE false END,
+             cortesia_almoco = false,
+             membro_giants = false,
+             valor_almoco = CASE WHEN id = $3::int THEN 1000.00 ELSE 0.00 END,
+             cv_cartao = CASE WHEN id = ANY($2::int[]) THEN COALESCE($4::varchar, cv_cartao) ELSE NULL END,
+             mesa_alocada = CASE WHEN id = ANY($2::int[]) THEN mesa_alocada ELSE NULL END,
+             assento_alocado = CASE WHEN id = ANY($2::int[]) THEN assento_alocado ELSE NULL END,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ANY($1::int[])`,
+        [todosIds, idsParticipantes, titularPaganteId, cv]
+      );
+    } else if (tipo === 'cortesia') {
+      // Debita os R$ 1.000,00 (valor_almoco = 0 e almoco_pago = false), mas garante o almoço e preserva a mesa dos sócios marcados
+      await client.query(
+        `UPDATE fichas
+         SET almoco_pago = false,
+             valor_almoco = 0.00,
+             cv_cartao = NULL,
+             cortesia_almoco = CASE WHEN id = ANY($2::int[]) THEN true ELSE false END,
+             membro_giants = false,
+             mesa_alocada = CASE WHEN id = ANY($2::int[]) THEN mesa_alocada ELSE NULL END,
+             assento_alocado = CASE WHEN id = ANY($2::int[]) THEN assento_alocado ELSE NULL END,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ANY($1::int[])`,
+        [todosIds, idsParticipantes]
+      );
+    } else if (tipo === 'giants') {
+      await client.query(
+        `UPDATE fichas
+         SET almoco_pago = false,
+             cortesia_almoco = false,
+             membro_giants = true,
+             valor_almoco = 0.00,
+             cv_cartao = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ANY($1::int[])`,
+        [todosIds]
+      );
+    } else {
+      // Pendente / Não vai ao almoço: debita R$ 1.000,00 e libera cadeira
+      await client.query(
+        `UPDATE fichas
+         SET almoco_pago = false,
+             cortesia_almoco = false,
+             valor_almoco = 0.00,
+             cv_cartao = NULL,
+             mesa_alocada = NULL,
+             assento_alocado = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ANY($1::int[])`,
+        [todosIds]
+      );
+    }
+
+    const { rows: atualizadas } = await client.query(
+      'SELECT id, empresa, nome_participante, almoco_pago, cortesia_almoco, membro_giants, valor_almoco, cv_cartao, mesa_alocada, etapa_funil FROM fichas WHERE id = ANY($1::int[]) ORDER BY id ASC',
+      [todosIds]
+    );
+
+    await client.query('COMMIT');
+    res.json(atualizadas[0] || { sucesso: true, atualizadas });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Erro ao validar almoço: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
+}
+
     await client.query('COMMIT');
     res.json(rows[0]);
   } catch (err) {
@@ -298,6 +422,10 @@ router.patch('/clientes/:id', async (req, res) => {
       [pagoFinal, cortesiaFinal, valorFinal, req.params.id]
     );
     res.json(rows[0] || { sucesso: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
