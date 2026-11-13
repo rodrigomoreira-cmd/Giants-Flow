@@ -17,33 +17,61 @@ const normalizarChaveEmpresa = (emp) => {
   return `id:${emp.id}`;
 };
 
-const isUsuarioAdmin = () => {
+const obterPapelUsuarioLogado = () => {
+  const papeisAdmin = ['admin', 'administrador', 'superadmin', 'master', 'system', 'diretor'];
   try {
-    const directRole = String(
-      localStorage.getItem('role') ||
-      localStorage.getItem('perfil') ||
-      localStorage.getItem('user_role') ||
-      ''
-    ).trim().toLowerCase();
-    if (['admin', 'administrador', 'superadmin', 'master'].includes(directRole)) return true;
-
-    for (const key of ['user', 'usuario', 'auth_user', 'giants_user', 'currentUser']) {
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      const parsed = JSON.parse(raw);
-      const r = String(parsed?.role || parsed?.perfil || parsed?.tipo || parsed?.nivel || '').trim().toLowerCase();
-      if (['admin', 'administrador', 'superadmin', 'master'].includes(r)) return true;
+    // 1. Verifica sessao_operador (padrão oficial do sistema)
+    const rawSessao = localStorage.getItem('sessao_operador') || sessionStorage.getItem('sessao_operador');
+    if (rawSessao) {
+      const s = JSON.parse(rawSessao);
+      const papelSessao = String(
+        s?.usuario?.papel || s?.usuario?.role || s?.usuario?.perfil || s?.papel || s?.role || ''
+      ).trim().toLowerCase();
+      if (papeisAdmin.includes(papelSessao) || s?.usuario?.is_admin === true || s?.is_admin === true) {
+        return papelSessao || 'admin';
+      }
     }
 
-    const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
-    if (token && token.split('.').length === 3) {
-      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      const r = String(payload?.role || payload?.perfil || payload?.tipo || '').trim().toLowerCase();
-      if (['admin', 'administrador', 'superadmin', 'master'].includes(r)) return true;
+    // 2. Verifica chaves diretas no storage
+    for (const storage of [localStorage, sessionStorage]) {
+      const directRole = String(
+        storage.getItem('role') ||
+        storage.getItem('perfil') ||
+        storage.getItem('papel') ||
+        storage.getItem('user_role') ||
+        ''
+      ).trim().toLowerCase();
+      if (papeisAdmin.includes(directRole)) return directRole;
+
+      // 3. Varre objetos JSON salvos no storage
+      for (let i = 0; i < storage.length; i++) {
+        const k = storage.key(i);
+        const val = storage.getItem(k);
+        if (!val || (!val.startsWith('{') && !val.startsWith('eyJ'))) continue;
+        if (val.startsWith('eyJ') && val.split('.').length === 3) {
+          try {
+            const payload = JSON.parse(atob(val.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+            const r = String(payload?.papel || payload?.role || payload?.perfil || payload?.tipo || '').trim().toLowerCase();
+            if (papeisAdmin.includes(r) || payload?.is_admin === true) return r || 'admin';
+          } catch (_) {}
+        } else if (val.startsWith('{')) {
+          try {
+            const obj = JSON.parse(val);
+            const r = String(
+              obj?.usuario?.papel || obj?.usuario?.role || obj?.papel || obj?.role || obj?.perfil || obj?.tipo || ''
+            ).trim().toLowerCase();
+            if (papeisAdmin.includes(r) || obj?.usuario?.is_admin === true || obj?.is_admin === true) {
+              return r || 'admin';
+            }
+          } catch (_) {}
+        }
+      }
     }
   } catch (_) {}
-  return false;
+  return '';
 };
+
+const isUsuarioAdmin = () => Boolean(obterPapelUsuarioLogado());
 
 export default function Companies() {
   const { turmaSelecionada } = useTurma();
@@ -291,7 +319,8 @@ export default function Companies() {
         fichaId: grupoReabrir.idPrincipal,
         turmaId: turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491',
         cnpj: grupoReabrir.cnpj,
-        empresa: grupoReabrir.empresa
+        empresa: grupoReabrir.empresa,
+        papel: obterPapelUsuarioLogado() || 'ADMIN'
       });
       const idDestino = grupoReabrir.idPrincipal;
       setGrupoReabrir(null);

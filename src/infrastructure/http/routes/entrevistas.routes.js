@@ -237,8 +237,8 @@ router.post('/entrevistas/:id/reabrir', async (req, res) => {
 
 // REABRIR FICHA DA EMPRESA (LIBERA EDIÇÃO APÓS FECHAMENTO / APROVAÇÃO)
 router.post('/entrevistas/reabrir', async (req, res) => {
-  const roleHeader = String(req.user?.role || req.user?.perfil || req.headers['x-user-role'] || '').trim().toLowerCase();
-  if (roleHeader && !['admin', 'administrador', 'superadmin', 'master'].includes(roleHeader)) {
+  const roleHeader = String(req.user?.papel || req.user?.role || req.user?.perfil || req.body?.papel || req.headers['x-user-role'] || '').trim().toLowerCase();
+  if (roleHeader && !['admin', 'administrador', 'superadmin', 'master', 'system', 'diretor'].includes(roleHeader)) {
     return res.status(403).json({ error: 'Acesso negado: somente administradores podem reabrir fichas encerradas.' });
   }
   const client = await pool.connect();

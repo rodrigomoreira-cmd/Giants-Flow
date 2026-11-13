@@ -33,7 +33,7 @@ export default function InterviewEdit() {
     }
   })();
   const papelUsuario = String(sessaoOperador?.usuario?.papel || '').toUpperCase();
-  const isAdmin = ['ADMIN', 'ADMINISTRADOR', 'SYSTEM'].includes(papelUsuario);
+  const isAdmin = ['ADMIN', 'ADMINISTRADOR', 'SUPERADMIN', 'MASTER', 'SYSTEM', 'DIRETOR'].includes(papelUsuario) || Boolean(sessaoOperador?.usuario?.is_admin);
 
   // Lista de sócios da empresa (cadastrados na turma + adicionados na hora do fechamento)
   const [sociosLista, setSociosLista] = useState([]);
@@ -330,6 +330,39 @@ export default function InterviewEdit() {
   if (!ficha.resultado_comercial) camposFaltantes.push('Resultado comercial');
 
   const podeSubmeter = camposFaltantes.length === 0;
+
+  const reabrirFichaDireto = async () => {
+    if (!isAdmin || reabrindoFicha) return;
+    try {
+      setReabrindoFicha(true);
+      await api.post('/entrevistas/reabrir', {
+        fichaId: Number(ficha.aplicacao_id || id),
+        turmaId: ficha.turma_id || 1491,
+        cnpj: ficha.cnpj,
+        empresa: ficha.razao_social,
+        papel: papelUsuario || 'ADMIN'
+      });
+      setFicha((prev) => ({
+        ...prev,
+        ficha_fechada: false,
+        status_aprovacao: '',
+        etapa_funil: 'entrevista'
+      }));
+      setModalAviso({
+        tipo: 'sucesso',
+        titulo: 'Ficha Reaberta (Administrador)',
+        mensagem: 'A ficha foi desbloqueada para edição. Após ajustar os dados, finalize novamente para gravar.'
+      });
+    } catch (err) {
+      setModalAviso({
+        tipo: 'erro',
+        titulo: 'Erro ao Reabrir Ficha',
+        mensagem: err.message || 'Não foi possível reabrir a ficha.'
+      });
+    } finally {
+      setReabrindoFicha(false);
+    }
+  };
 
   const submeterFicha = async () => {
     if (ficha.ficha_fechada) {
@@ -1474,8 +1507,34 @@ export default function InterviewEdit() {
                   color: isAprovadaFin ? '#166534' : '#92400e'
                 }}>
                   {isAprovadaFin
-                    ? 'Contrato aprovado pelo Financeiro — reabertura exclusiva por Administrador na aba Empresas.'
-                    : 'Ficha encerrada e bloqueada — somente um Administrador pode reabrir pela aba Empresas.'}
+                    ? 'Contrato aprovado pelo Financeiro — ficha bloqueada para edição.'
+                    : 'Ficha encerrada e bloqueada para edição.'}
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      disabled={reabrindoFicha}
+                      onClick={reabrirFichaDireto}
+                      style={{
+                        marginTop: '0.6rem',
+                        width: '100%',
+                        background: '#d97706',
+                        color: '#ffffff',
+                        border: 'none',
+                        padding: '0.55rem 0.85rem',
+                        borderRadius: '7px',
+                        fontWeight: '800',
+                        fontSize: '0.8rem',
+                        cursor: reabrindoFicha ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.35rem'
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>lock_open</span>
+                      {reabrindoFicha ? 'Reabrindo Ficha...' : 'Reabrir Ficha (Administrador)'}
+                    </button>
+                  )}
                 </div>
               )}
 
