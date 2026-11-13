@@ -16,6 +16,16 @@ const normalizarChaveEmpresa = (empresa, cnpj, fallbackId) => {
   return `id:${fallbackId}`;
 };
 
+const isAprovadaOuConcluida = (c) => {
+  if (!c) return false;
+  const stAprov = String(c.status_aprovacao || '').trim().toLowerCase();
+  const etapa = String(c.etapa_funil || '').trim().toLowerCase();
+  return (
+    ['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(stAprov) ||
+    ['fechamento', 'concluido', 'concluida', 'vendido'].includes(etapa)
+  );
+};
+
 export default function Interviews() {
   const navigate = useNavigate();
   const [sessoes, setSessoes] = useState([]);
@@ -83,6 +93,12 @@ export default function Interviews() {
           if (isGiants) return;
 
           const cnpjReal = cliRef?.cnpj || cliRef?.cpf_cnpj || '';
+          const empresaRealTmp = cliRef?.empresa || empresa;
+          const chaveTmp = normalizarChaveEmpresa(empresaRealTmp, cnpjReal, entrevistaId);
+          const empresaJaAprovadaMesa = listaClientes.some(
+            (s) => normalizarChaveEmpresa(s.empresa, s.cnpj || s.cpf_cnpj, s.id) === chaveTmp && isAprovadaOuConcluida(s)
+          );
+          if (empresaJaAprovadaMesa) return;
           const empresaReal = cliRef?.empresa || empresa;
           const almocoLiberado = Boolean(cliRef?.almoco_pago || cliRef?.cortesia_almoco) ? 'Pago / Liberado' : statusAlmoco;
           const chave = normalizarChaveEmpresa(empresaReal, cnpjReal, entrevistaId);
@@ -122,14 +138,20 @@ export default function Interviews() {
       // 2. Inclui empresas cujas fichas foram encerradas (mesa já liberada, aguardando financeiro)
       listaClientes.forEach((c) => {
         if (c.membro_giants) return;
+        if (isAprovadaOuConcluida(c)) return;
         const fechada =
           Boolean(c.ficha_fechada) ||
-          ['aguardando_aprovacao', 'fechamento', 'concluido', 'reprovado'].includes(String(c.etapa_funil || '').toLowerCase());
+          ['aguardando_aprovacao', 'reprovado'].includes(String(c.etapa_funil || '').toLowerCase());
         if (!fechada) return;
 
         const cnpjReal = c.cnpj || c.cpf_cnpj || '';
         const empresaReal = c.empresa || c.nome_participante || 'Empresa SGA';
         const chave = normalizarChaveEmpresa(empresaReal, cnpjReal, c.id);
+
+        const empresaJaAprovada = listaClientes.some(
+          (s) => normalizarChaveEmpresa(s.empresa, s.cnpj || s.cpf_cnpj, s.id) === chave && isAprovadaOuConcluida(s)
+        );
+        if (empresaJaAprovada) return;
 
         if (!gruposPorEmpresa.has(chave)) {
           const todosSociosTurma = listaClientes
@@ -226,7 +248,7 @@ export default function Interviews() {
           <div style={{ display: 'flex', gap: '0.3rem', background: '#f1f5f9', padding: '0.25rem', borderRadius: '10px' }}>
             {[
               { id: 'ATIVAS', label: 'Na Mesa (Em Entrevista)' },
-              { id: 'ENCERRADAS', label: 'Encerradas / Financeiro' },
+              { id: 'ENCERRADAS', label: 'Aguardando Financeiro' },
               { id: 'TODAS', label: 'Todas' }
             ].map((tab) => (
               <button

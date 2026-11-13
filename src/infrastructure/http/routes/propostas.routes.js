@@ -426,7 +426,9 @@ router.post('/financeiro/analisar', async (req, res) => {
     // Atualiza a ficha principal e sincroniza todos os sócios do mesmo CNPJ/Empresa na turma
     const { rows } = await client.query(
       `UPDATE fichas
-       SET status_aprovacao = $1::varchar,
+       SET mesa_alocada = NULL,
+           assento_alocado = NULL,
+           status_aprovacao = $1::varchar,
            etapa_funil = $2::varchar,
            analise_credito_status = $3::varchar,
            status_serasa_codigo = $4::varchar,
