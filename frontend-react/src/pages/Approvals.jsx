@@ -247,8 +247,9 @@ export default function Approvals() {
                 const valorNeg = Number(prop.valor_negociado ?? dp.valorTotal ?? prop.proposta_valor_total ?? 0);
                 const cbTotal = Number(prop.cashback ?? dp.cashback ?? prop.proposta_cashback ?? 0);
                 const descTotal = Number(prop.desconto_concedido ?? dp.desconto ?? prop.proposta_desconto ?? 0);
-                const saldoLiquido = Math.max(0, valorNeg - cbTotal - descTotal);
+                const saldoContrato = Math.max(0, valorNeg - cbTotal - descTotal);
                 const entrada = Number(dp.valorEntrada ?? prop.proposta_valor_entrada ?? 0);
+                const saldoFinal = Math.max(0, saldoContrato - entrada);
                 const parcelas = Number(dp.quantidadeParcelas ?? prop.proposta_parcelas ?? 12);
                 const valorParcela = Number(dp.valorParcela ?? prop.proposta_valor_parcela ?? 0);
                 const cnpjExibir = prop.cnpj || prop.cpf_cnpj || dp.cnpj || '';
@@ -293,15 +294,15 @@ export default function Approvals() {
                       )}
                     </td>
                     <td style={{ padding: '1rem' }}>
-                      <div style={{ fontWeight: '800', color: '#059669', fontSize: '0.9rem' }}>
-                        Líquido: {fmtBRL(saldoLiquido)}
+                      <div style={{ fontWeight: '900', color: '#ea580c', fontSize: '0.92rem' }}>
+                        Saldo Final: {fmtBRL(saldoFinal)}
                       </div>
-                      <div style={{ fontSize: '0.74rem', color: '#475569' }}>
-                        Negociado: {fmtBRL(valorNeg)}
+                      <div style={{ fontSize: '0.74rem', color: '#334155' }}>
+                        Líquido: <strong>{fmtBRL(saldoContrato)}</strong>
                         {cbTotal > 0 && <span style={{ color: '#047857', fontWeight: '700' }}> • CB: -{fmtBRL(cbTotal)}</span>}
                       </div>
                       <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
-                        Entr. {fmtBRL(entrada)} + {parcelas}x {fmtBRL(valorParcela)}
+                        (-) Entr. {fmtBRL(entrada)} • {parcelas}x {fmtBRL(valorParcela)}
                       </div>
                     </td>
                     <td style={{ padding: '1rem' }}>
@@ -342,8 +343,9 @@ export default function Approvals() {
         const valorNeg = Number(propSelecionada.valor_negociado ?? dp.valorTotal ?? propSelecionada.proposta_valor_total ?? 0);
         const cbTotal = Number(propSelecionada.cashback ?? dp.cashback ?? propSelecionada.proposta_cashback ?? 0);
         const descTotal = Number(propSelecionada.desconto_concedido ?? dp.desconto ?? propSelecionada.proposta_desconto ?? 0);
-        const saldoLiquido = Math.max(0, valorNeg - cbTotal - descTotal);
+        const saldoContrato = Math.max(0, valorNeg - cbTotal - descTotal);
         const entrada = Number(dp.valorEntrada ?? propSelecionada.proposta_valor_entrada ?? 0);
+        const saldoFinal = Math.max(0, saldoContrato - entrada);
         const parcelas = Number(dp.quantidadeParcelas ?? propSelecionada.proposta_parcelas ?? 12);
         const valorParcela = Number(dp.valorParcela ?? propSelecionada.proposta_valor_parcela ?? 0);
         const sociosContrato = Array.isArray(dp.sociosDetalhes)
@@ -388,16 +390,27 @@ export default function Approvals() {
                   </div>
                   <div>
                     <div style={{ fontSize: '0.7rem', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>Composição Financeira</div>
-                    <div style={{ fontSize: '0.82rem', color: '#334155', marginTop: '0.15rem' }}>
+                    <div style={{ fontSize: '0.8rem', color: '#334155', marginTop: '0.15rem' }}>
                       Negociado: <strong>{fmtBRL(valorNeg)}</strong>
                     </div>
                     {cbTotal > 0 && (
-                      <div style={{ fontSize: '0.8rem', color: '#047857', fontWeight: '700' }}>
+                      <div style={{ fontSize: '0.78rem', color: '#047857', fontWeight: '700' }}>
                         (-) Cashback CNPJ: -{fmtBRL(cbTotal)}
                       </div>
                     )}
-                    <div style={{ fontSize: '0.9rem', fontWeight: '900', color: '#ea580c', marginTop: '0.15rem' }}>
-                      Líquido: {fmtBRL(saldoLiquido)}
+                    {descTotal > 0 && (
+                      <div style={{ fontSize: '0.78rem', color: '#b91c1c', fontWeight: '700' }}>
+                        (-) Desconto: -{fmtBRL(descTotal)}
+                      </div>
+                    )}
+                    <div style={{ fontSize: '0.8rem', color: '#334155' }}>
+                      Líquido Contrato: <strong>{fmtBRL(saldoContrato)}</strong>
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: '#0284c7', fontWeight: '700' }}>
+                      (-) Entrada: -{fmtBRL(entrada)}
+                    </div>
+                    <div style={{ fontSize: '0.95rem', fontWeight: '900', color: '#ea580c', marginTop: '0.2rem', borderTop: '1px dashed #cbd5e1', paddingTop: '0.2rem' }}>
+                      Saldo Final: {fmtBRL(saldoFinal)}
                     </div>
                   </div>
                   <div>
@@ -405,8 +418,11 @@ export default function Approvals() {
                     <div style={{ fontSize: '0.82rem', color: '#0f172a', fontWeight: '700', marginTop: '0.15rem' }}>
                       Entrada: {fmtBRL(entrada)} ({dp.formaEntrada || 'Pix'})
                     </div>
+                    <div style={{ fontSize: '0.82rem', color: '#0f172a', fontWeight: '700', marginTop: '0.15rem' }}>
+                      A Parcelar: {fmtBRL(saldoFinal)}
+                    </div>
                     <div style={{ fontSize: '0.8rem', color: '#475569' }}>
-                      Saldo: {parcelas}x de {fmtBRL(valorParcela)} ({dp.formaRestante || 'Pix'})
+                      Parcelas: {parcelas}x de {fmtBRL(valorParcela)} ({dp.formaRestante || 'Pix'})
                     </div>
                   </div>
                 </div>
