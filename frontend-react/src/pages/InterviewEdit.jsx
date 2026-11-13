@@ -277,7 +277,7 @@ export default function InterviewEdit() {
 
     const valorNegociado = Math.max(0, contrato - desconto);
     const entrada = Math.max(0, Number(ficha.valor_entrada) || 0);
-    const cashback = Math.max(0, Number(ficha.cashback) || 0);
+    const cashback = catUpper === 'PAC' ? 0 : Math.max(0, Number(ficha.cashback) || 0);
     const entradaComplementar = Math.max(0, Number(ficha.valor_entrada_complementar) || 0);
     const permuta = Math.max(0, Number(ficha.valor_permuta) || 0);
     const saldo = Math.max(0, valorNegociado - entrada - entradaComplementar - permuta - cashback);
@@ -286,7 +286,14 @@ export default function InterviewEdit() {
 
     const motivosAprovacao = [];
     if (desconto > 0) motivosAprovacao.push(`Desconto concedido: R$ ${desconto.toLocaleString('pt-BR')}`);
-    if (entrada < 10000) motivosAprovacao.push(`Entrada de R$ ${entrada.toLocaleString('pt-BR')} abaixo do piso mínimo`);
+    const parcelaPadraoPAC = Math.floor((valorNegociado / 12) * 100) / 100;
+    if (catUpper === 'PAC') {
+      if (entrada + 0.05 < parcelaPadraoPAC) {
+        motivosAprovacao.push(`Entrada PAC de R$ ${entrada.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} abaixo de 1 parcela (R$ ${parcelaPadraoPAC.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`);
+      }
+    } else if (entrada < 10000) {
+      motivosAprovacao.push(`Entrada de R$ ${entrada.toLocaleString('pt-BR')} abaixo do piso mínimo`);
+    }
     if (ficha.forma_restante === 'Boleto') motivosAprovacao.push('Restante em Boleto bancário (requer 2 aprovadores)');
     if (ficha.desc_dif?.trim()) motivosAprovacao.push('Condição especial declarada');
 
@@ -493,6 +500,26 @@ export default function InterviewEdit() {
     { valor: 'Não fechou', titulo: 'Não Fechou', sub: 'Encerrar sem venda', cat: null, cor: '#475569', bg: '#f8fafc', borda: '#94a3b8' }
   ];
 
+  const obterValorBaseProduto = (cat, prodNome) => {
+    const catUpper = String(cat || 'GIANTS').toUpperCase();
+    const prod =
+      catalogoProdutos.find((p) => p.nome === prodNome) ||
+      catalogoProdutos.find((p) => String(p.categoria || '').toUpperCase() === catUpper && p.tipo_item === 'PRINCIPAL');
+    const defaults = {
+      'GIANTS - Titular (Empresa)': 279000,
+      'PAC - Completo': 69900,
+      'PAC - Compacto': 59900,
+      'AE - Condição Especial (Evento)': 29990,
+      'AE - Tabela Regular': 45990
+    };
+    return prod ? Number(prod.valor_base) : defaults[prodNome] || (catUpper === 'PAC' ? 69900 : 279000);
+  };
+
+  const calcularParcelaEntradaPAC = (valorTotal, totalParcelasPlano = 12) => {
+    const n = Math.max(1, Number(totalParcelasPlano) || 12);
+    return Math.floor((Math.max(0, Number(valorTotal) || 0) / n) * 100) / 100;
+  };
+
   const selecionarResultadoRapido = (op) => {
     if (op.cat) {
       const primeiroSub = catalogoProdutos.find(
@@ -503,7 +530,25 @@ export default function InterviewEdit() {
         PAC: 'PAC - Completo',
         AE: 'AE - Condição Especial (Evento)'
       };
+      const nomeSub = primeiroSub ? primeiroSub.nome : fallbackSub[op.cat] || ficha.produto_nome;
+      const totalPlano = primeiroSub ? Number(primeiroSub.parcelas_padrao || 12) : 12;
+
       setFicha((prev) => {
+        if (op.cat === 'PAC') {
+          const basePAC = obterValorBaseProduto('PAC', nomeSub);
+          const liquidoPAC = Math.max(0, basePAC - Math.max(0, Number(prev.desconto) || 0));
+          const entrada1Parcela = calcularParcelaEntradaPAC(liquidoPAC, totalPlano);
+          return {
+            ...prev,
+            resultado_comercial: op.valor,
+            categoria_produto: 'PAC',
+            produto_nome: nomeSub,
+            cashback: 0,
+            valor_entrada: entrada1Parcela,
+            parcelas: totalPlano > 1 ? totalPlano - 1 : 1
+          };
+        }
+
         const novoCashback =
           Number(prev.cashback_almoco_cnpj || 0) +
           (op.cat === 'GIANTS' ? Number(prev.cashback_upgrade_cnpj || 0) : 0);
@@ -511,8 +556,9 @@ export default function InterviewEdit() {
           ...prev,
           resultado_comercial: op.valor,
           categoria_produto: op.cat,
-          produto_nome: primeiroSub ? primeiroSub.nome : fallbackSub[op.cat] || prev.produto_nome,
-          parcelas: primeiroSub ? Number(primeiroSub.parcelas_padrao || prev.parcelas || 12) : prev.parcelas || 12,
+          produto_nome: nomeSub,
+          parcelas: totalPlano,
+          valor_entrada: prev.categoria_produto === 'PAC' ? 10000 : prev.valor_entrada,
           cashback: novoCashback
         };
       });
@@ -925,7 +971,16 @@ export default function InterviewEdit() {
                       2. Condições Comerciais & Pagamento
                     </h3>
 
-                    {(Number(ficha.cashback_almoco_cnpj || 0) > 0 || Number(ficha.cashback_upgrade_cnpj || 0) > 0) && (
+                    {ficha.categoria_produto === 'PAC' ? (
+                      <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '10px', padding: '0.7rem 0.95rem', marginBottom: '1rem', fontSize: '0.8rem', color: '#475569', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <span>
+                          <strong>Regra PAC:</strong> Não possui abatimento de cashback (créditos são exclusivos para GIANTS) e a entrada padrão equivale a <strong>1 parcela</strong> do plano.
+                        </span>
+                        <span style={{ background: '#e0f2fe', color: '#0369a1', fontWeight: '800', padding: '0.2rem 0.55rem', borderRadius: '6px', fontSize: '0.75rem' }}>
+                          1ª Parcela (Entrada): {fmtBRL(calcularParcelaEntradaPAC(calc.valorNegociado, 12))}
+                        </span>
+                      </div>
+                    ) : (Number(ficha.cashback_almoco_cnpj || 0) > 0 || Number(ficha.cashback_upgrade_cnpj || 0) > 0) && (
                       <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: '10px', padding: '0.75rem 0.95rem', marginBottom: '1rem', fontSize: '0.8rem', color: '#166534' }}>
                         <div style={{ fontWeight: '800', marginBottom: '0.2rem' }}>
                           ✔ Crédito de Cashback no CNPJ ({ficha.cnpj || ficha.razao_social}):
@@ -952,45 +1007,82 @@ export default function InterviewEdit() {
                     {/* ATALHOS DE ENTRADA E PARCELAMENTO */}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', marginBottom: '1rem', padding: '0.65rem 0.8rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', alignItems: 'center' }}>
                       <span style={{ fontSize: '0.74rem', fontWeight: '800', color: '#64748b', marginRight: '0.25rem' }}>Atalhos rápidos:</span>
-                      {[10000, 20000, 30000, 50000, 100000].map((vEnt) => (
-                        <button
-                          key={vEnt}
-                          type="button"
-                          onClick={() => atualizarCampo('valor_entrada', vEnt)}
-                          style={{
-                            padding: '0.25rem 0.55rem',
-                            borderRadius: '6px',
-                            border: Number(ficha.valor_entrada) === vEnt ? '1.5px solid #059669' : '1px solid #cbd5e1',
-                            background: Number(ficha.valor_entrada) === vEnt ? '#dcfce7' : '#fff',
-                            color: Number(ficha.valor_entrada) === vEnt ? '#166534' : '#334155',
-                            fontSize: '0.74rem',
-                            fontWeight: '700',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Entr. {(vEnt / 1000).toFixed(0)}k
-                        </button>
-                      ))}
-                      <span style={{ color: '#cbd5e1' }}>|</span>
-                      {[1, 6, 10, 12].map((qtdP) => (
-                        <button
-                          key={qtdP}
-                          type="button"
-                          onClick={() => atualizarCampo('parcelas', qtdP)}
-                          style={{
-                            padding: '0.25rem 0.55rem',
-                            borderRadius: '6px',
-                            border: Number(ficha.parcelas) === qtdP ? '1.5px solid #ff5722' : '1px solid #cbd5e1',
-                            background: Number(ficha.parcelas) === qtdP ? '#fff7ed' : '#fff',
-                            color: Number(ficha.parcelas) === qtdP ? '#c2410c' : '#334155',
-                            fontSize: '0.74rem',
-                            fontWeight: '700',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {qtdP === 1 ? 'À vista (1x)' : qtdP + 'x'}
-                        </button>
-                      ))}
+                      {ficha.categoria_produto === 'PAC' ? (
+                        [12, 10, 6, 1].map((totalPlano) => {
+                          const entParcela = calcularParcelaEntradaPAC(calc.valorNegociado, totalPlano);
+                          const ativo = Math.abs(Number(ficha.valor_entrada) - entParcela) < 0.05;
+                          return (
+                            <button
+                              key={totalPlano}
+                              type="button"
+                              onClick={() =>
+                                setFicha((prev) => ({
+                                  ...prev,
+                                  cashback: 0,
+                                  valor_entrada: entParcela,
+                                  parcelas: totalPlano > 1 ? totalPlano - 1 : 1
+                                }))
+                              }
+                              style={{
+                                padding: '0.28rem 0.65rem',
+                                borderRadius: '6px',
+                                border: ativo ? '1.5px solid #0369a1' : '1px solid #cbd5e1',
+                                background: ativo ? '#e0f2fe' : '#fff',
+                                color: ativo ? '#0369a1' : '#334155',
+                                fontSize: '0.75rem',
+                                fontWeight: '800',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {totalPlano === 1
+                                ? `À vista (${fmtBRL(entParcela)})`
+                                : `${totalPlano}x (Entr. ${fmtBRL(entParcela)} + ${totalPlano - 1}x)`}
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <>
+                          {[10000, 20000, 30000, 50000, 100000].map((vEnt) => (
+                            <button
+                              key={vEnt}
+                              type="button"
+                              onClick={() => atualizarCampo('valor_entrada', vEnt)}
+                              style={{
+                                padding: '0.25rem 0.55rem',
+                                borderRadius: '6px',
+                                border: Number(ficha.valor_entrada) === vEnt ? '1.5px solid #059669' : '1px solid #cbd5e1',
+                                background: Number(ficha.valor_entrada) === vEnt ? '#dcfce7' : '#fff',
+                                color: Number(ficha.valor_entrada) === vEnt ? '#166534' : '#334155',
+                                fontSize: '0.74rem',
+                                fontWeight: '700',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              Entr. {(vEnt / 1000).toFixed(0)}k
+                            </button>
+                          ))}
+                          <span style={{ color: '#cbd5e1' }}>|</span>
+                          {[1, 6, 10, 12].map((qtdP) => (
+                            <button
+                              key={qtdP}
+                              type="button"
+                              onClick={() => atualizarCampo('parcelas', qtdP)}
+                              style={{
+                                padding: '0.25rem 0.55rem',
+                                borderRadius: '6px',
+                                border: Number(ficha.parcelas) === qtdP ? '1.5px solid #ff5722' : '1px solid #cbd5e1',
+                                background: Number(ficha.parcelas) === qtdP ? '#fff7ed' : '#fff',
+                                color: Number(ficha.parcelas) === qtdP ? '#c2410c' : '#334155',
+                                fontSize: '0.74rem',
+                                fontWeight: '700',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {qtdP === 1 ? 'À vista (1x)' : qtdP + 'x'}
+                            </button>
+                          ))}
+                        </>
+                      )}
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '0.95rem' }}>
@@ -1009,15 +1101,33 @@ export default function InterviewEdit() {
                               AE: 'AE - Condição Especial (Evento)'
                             };
                             const mapaResultado = { GIANTS: 'Fechou GIANTS', PAC: 'Fechou PAC', AE: 'Fechou AE' };
+                            const nomeSub = primeiroSub ? primeiroSub.nome : fallbackSub[novaCat];
+                            const totalPlano = primeiroSub ? Number(primeiroSub.parcelas_padrao || 12) : 12;
+
                             setFicha((prev) => {
+                              if (novaCat === 'PAC') {
+                                const basePAC = obterValorBaseProduto('PAC', nomeSub);
+                                const liquidoPAC = Math.max(0, basePAC - Math.max(0, Number(prev.desconto) || 0));
+                                return {
+                                  ...prev,
+                                  categoria_produto: 'PAC',
+                                  produto_nome: nomeSub,
+                                  cashback: 0,
+                                  valor_entrada: calcularParcelaEntradaPAC(liquidoPAC, totalPlano),
+                                  parcelas: totalPlano > 1 ? totalPlano - 1 : 1,
+                                  resultado_comercial: mapaResultado.PAC
+                                };
+                              }
+
                               const novoCashback =
                                 Number(prev.cashback_almoco_cnpj || 0) +
                                 (novaCat === 'GIANTS' ? Number(prev.cashback_upgrade_cnpj || 0) : 0);
                               return {
                                 ...prev,
                                 categoria_produto: novaCat,
-                                produto_nome: primeiroSub ? primeiroSub.nome : fallbackSub[novaCat],
-                                parcelas: primeiroSub ? Number(primeiroSub.parcelas_padrao || 12) : 12,
+                                produto_nome: nomeSub,
+                                parcelas: totalPlano,
+                                valor_entrada: prev.categoria_produto === 'PAC' ? 10000 : prev.valor_entrada,
                                 cashback: novoCashback,
                                 resultado_comercial: mapaResultado[novaCat] || prev.resultado_comercial
                               };
@@ -1038,11 +1148,26 @@ export default function InterviewEdit() {
                           onChange={(e) => {
                             const novoSub = e.target.value;
                             const objSub = catalogoProdutos.find((p) => p.nome === novoSub);
-                            setFicha((prev) => ({
-                              ...prev,
-                              produto_nome: novoSub,
-                              parcelas: objSub ? Number(objSub.parcelas_padrao || prev.parcelas) : prev.parcelas
-                            }));
+                            const totalPlano = objSub ? Number(objSub.parcelas_padrao || 12) : 12;
+
+                            setFicha((prev) => {
+                              if (String(prev.categoria_produto || '').toUpperCase() === 'PAC') {
+                                const basePAC = obterValorBaseProduto('PAC', novoSub);
+                                const liquidoPAC = Math.max(0, basePAC - Math.max(0, Number(prev.desconto) || 0));
+                                return {
+                                  ...prev,
+                                  produto_nome: novoSub,
+                                  cashback: 0,
+                                  valor_entrada: calcularParcelaEntradaPAC(liquidoPAC, totalPlano),
+                                  parcelas: totalPlano > 1 ? totalPlano - 1 : 1
+                                };
+                              }
+                              return {
+                                ...prev,
+                                produto_nome: novoSub,
+                                parcelas: objSub ? Number(objSub.parcelas_padrao || prev.parcelas) : prev.parcelas
+                              };
+                            });
                           }}
                           style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: '600', boxSizing: 'border-box' }}
                         >
@@ -1130,22 +1255,40 @@ export default function InterviewEdit() {
                         />
                       </div>
 
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#047857', marginBottom: '0.3rem' }}>Cashback Abatido (R$)</label>
-                        <input
-                          type="number"
-                          value={ficha.cashback}
-                          onChange={(e) => atualizarCampo('cashback', Number(e.target.value))}
-                          style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #86efac', background: '#f0fdf4', boxSizing: 'border-box', fontWeight: '700' }}
-                        />
-                      </div>
+                      {ficha.categoria_produto !== 'PAC' && (
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#047857', marginBottom: '0.3rem' }}>Cashback Abatido (R$)</label>
+                          <input
+                            type="number"
+                            value={ficha.cashback}
+                            onChange={(e) => atualizarCampo('cashback', Number(e.target.value))}
+                            style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #86efac', background: '#f0fdf4', boxSizing: 'border-box', fontWeight: '700' }}
+                          />
+                        </div>
+                      )}
 
                       <div>
                         <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>Desconto Comercial (R$)</label>
                         <input
                           type="number"
                           value={ficha.desconto}
-                          onChange={(e) => atualizarCampo('desconto', Number(e.target.value))}
+                          onChange={(e) => {
+                            const novoDesc = Math.max(0, Number(e.target.value) || 0);
+                            setFicha((prev) => {
+                              if (String(prev.categoria_produto || '').toUpperCase() === 'PAC') {
+                                const basePAC = obterValorBaseProduto('PAC', prev.produto_nome);
+                                const liquidoPAC = Math.max(0, basePAC - novoDesc);
+                                const totalPlano = Number(prev.parcelas || 11) + 1;
+                                return {
+                                  ...prev,
+                                  desconto: novoDesc,
+                                  cashback: 0,
+                                  valor_entrada: calcularParcelaEntradaPAC(liquidoPAC, totalPlano)
+                                };
+                              }
+                              return { ...prev, desconto: novoDesc };
+                            });
+                          }}
                           style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
                         />
                       </div>
