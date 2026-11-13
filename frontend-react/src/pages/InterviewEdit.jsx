@@ -277,7 +277,9 @@ export default function InterviewEdit() {
     const valorNegociado = Math.max(0, contrato - desconto);
     const entrada = Math.max(0, Number(ficha.valor_entrada) || 0);
     const cashback = Math.max(0, Number(ficha.cashback) || 0);
-    const saldo = Math.max(0, valorNegociado - entrada - cashback);
+    const entradaComplementar = Math.max(0, Number(ficha.valor_entrada_complementar) || 0);
+    const permuta = Math.max(0, Number(ficha.valor_permuta) || 0);
+    const saldo = Math.max(0, valorNegociado - entrada - entradaComplementar - permuta - cashback);
     const parcelas = Math.max(1, Number(ficha.parcelas) || 1);
     const valorParcela = saldo > 0 ? saldo / parcelas : 0;
 
@@ -288,6 +290,8 @@ export default function InterviewEdit() {
     if (ficha.desc_dif?.trim()) motivosAprovacao.push('Condição especial declarada');
 
     return {
+      entradaComplementar,
+      permuta,
       valorBase,
       adicionalUnitario,
       totalAdicionais,
@@ -875,7 +879,62 @@ export default function InterviewEdit() {
                   <option value="Cartão de Crédito">Cartão de Crédito</option>
                   <option value="Cartão de Débito">Cartão de Débito</option>
                   <option value="Link de Pagamento">Link de Pagamento</option>
+                  <option value="Cheque">Cheque</option>
                 </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>
+                  Entrada Complementar / 2ª Data (R$)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="Ex: 30000"
+                  value={ficha.valor_entrada_complementar}
+                  onChange={(e) => atualizarCampo('valor_entrada_complementar', e.target.value === '' ? '' : Number(e.target.value))}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#475569', marginBottom: '0.35rem' }}>
+                  Data da 2ª Entrada
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: 11/11/2026 (Hoje)"
+                  value={ficha.data_entrada_complementar}
+                  onChange={(e) => atualizarCampo('data_entrada_complementar', e.target.value)}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#7e22ce', marginBottom: '0.35rem' }}>
+                  Valor em Permuta (R$)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="Ex: 90000"
+                  value={ficha.valor_permuta}
+                  onChange={(e) => atualizarCampo('valor_permuta', e.target.value === '' ? '' : Number(e.target.value))}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #d8b4fe', background: '#faf5ff', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#0369a1', marginBottom: '0.35rem' }}>
+                  Identificador de Pagamento (CV / Link / NSU)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: CV 849201, Link Pagamento, ID Pix..."
+                  value={ficha.identificador_pagamento}
+                  onChange={(e) => atualizarCampo('identificador_pagamento', e.target.value)}
+                  style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #bae6fd', background: '#f0f9ff', boxSizing: 'border-box' }}
+                />
               </div>
 
               <div>
