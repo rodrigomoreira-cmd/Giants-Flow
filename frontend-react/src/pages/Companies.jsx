@@ -36,6 +36,8 @@ export default function Companies() {
   const [cvCartao, setCvCartao] = useState('');
   const [sociosSelecionadosAlmoco, setSociosSelecionadosAlmoco] = useState([]);
   const [salvandoAlmoco, setSalvandoAlmoco] = useState(false);
+  const [grupoReabrir, setGrupoReabrir] = useState(null);
+  const [reabrindoFicha, setReabrindoFicha] = useState(false);
 
   const carregarDados = async () => {
     try {
@@ -242,6 +244,27 @@ export default function Companies() {
       setErro('Erro ao salvar validação de almoço da empresa: ' + err.message); setModalEmpresaAberto(false);
     } finally {
       setSalvandoAlmoco(false);
+    }
+  };
+
+  const executarReaberturaFicha = async () => {
+    if (!grupoReabrir) return;
+    try {
+      setReabrindoFicha(true);
+      await api.post('/entrevistas/reabrir', {
+        fichaId: grupoReabrir.idPrincipal,
+        turmaId: turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491',
+        cnpj: grupoReabrir.cnpj,
+        empresa: grupoReabrir.empresa
+      });
+      const idDestino = grupoReabrir.idPrincipal;
+      setGrupoReabrir(null);
+      navigate(`/interviews/${idDestino}/edit`);
+    } catch (err) {
+      setErro('Erro ao reabrir ficha: ' + err.message);
+      setGrupoReabrir(null);
+    } finally {
+      setReabrindoFicha(false);
     }
   };
 
@@ -690,12 +713,12 @@ export default function Companies() {
                     <td style={{ padding: '1rem', textAlign: 'right' }}>
                       {estagio.fechado ? (
                         <button
-                          onClick={() => navigate(`/interviews/${g.idPrincipal}/edit`)}
-                          title="Contrato fechado e aprovado pelo Financeiro"
+                          onClick={() => setGrupoReabrir(g)}
+                          title="Contrato aprovado pelo Financeiro — clique para reabrir a ficha e fazer alterações"
                           style={{
-                            background: '#15803d',
-                            color: '#fff',
-                            border: 'none',
+                            background: '#fffbeb',
+                            color: '#b45309',
+                            border: '1.5px solid #f59e0b',
                             padding: '0.45rem 0.95rem',
                             borderRadius: '6px',
                             fontSize: '0.8rem',
@@ -706,8 +729,8 @@ export default function Companies() {
                             gap: '0.35rem'
                           }}
                         >
-                          <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>verified</span>
-                          Fechado
+                          <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>lock_open</span>
+                          Reabrir
                         </button>
                       ) : estagio.aguardandoFinanceiro ? (
                         <button
@@ -1006,6 +1029,68 @@ export default function Companies() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* MODAL DE CONFIRMAÇÃO PARA REABRIR FICHA APROVADA */}
+      {grupoReabrir && (
+        <div
+          onClick={() => !reabrindoFicha && setGrupoReabrir(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: '14px', width: '100%', maxWidth: '480px', overflow: 'hidden', boxShadow: '0 20px 35px rgba(15, 23, 42, 0.25)', border: '1px solid #e2e8f0' }}
+          >
+            <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fffbeb' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span className="material-symbols-outlined">lock_open</span>
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '800', color: '#0f172a' }}>Reabrir Ficha da Empresa?</h3>
+                  <span style={{ fontSize: '0.75rem', color: '#92400e', fontWeight: '600' }}>Ficha #{grupoReabrir.idPrincipal} • {grupoReabrir.empresa}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={reabrindoFicha}
+                onClick={() => setGrupoReabrir(null)}
+                style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer' }}
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div style={{ padding: '1.35rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.85rem', fontSize: '0.84rem', color: '#334155', lineHeight: '1.5' }}>
+              <p style={{ margin: 0 }}>
+                Esta ficha já foi <strong>fechada e aprovada pelo Financeiro</strong>. Ao reabrir:
+              </p>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.8rem 0.95rem', fontSize: '0.8rem' }}>
+                <div>• Todos os campos comerciais e sócios voltarão a ficar <strong>liberados para edição</strong>.</div>
+                <div style={{ marginTop: '0.25rem' }}>• Após concluir as alterações, será necessário clicar em <strong>Finalizar Ficha da Empresa</strong> novamente para reenviar ao Financeiro.</div>
+              </div>
+            </div>
+
+            <div style={{ padding: '0.95rem 1.5rem', borderTop: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'flex-end', gap: '0.65rem' }}>
+              <button
+                type="button"
+                disabled={reabrindoFicha}
+                onClick={() => setGrupoReabrir(null)}
+                style={{ padding: '0.55rem 1rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', color: '#475569', fontWeight: '700', fontSize: '0.82rem', cursor: 'pointer' }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={reabrindoFicha}
+                onClick={executarReaberturaFicha}
+                style={{ padding: '0.55rem 1.2rem', borderRadius: '8px', border: 'none', background: '#d97706', color: '#fff', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>lock_open</span>
+                {reabrindoFicha ? 'Reabrindo...' : 'Sim, Reabrir Ficha'}
+              </button>
+            </div>
           </div>
         </div>
       )}

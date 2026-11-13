@@ -234,4 +234,77 @@ router.post('/entrevistas/:id/reabrir', async (req, res) => {
   }
 });
 
+
+// REABRIR FICHA DA EMPRESA (LIBERA EDIÇÃO APÓS FECHAMENTO / APROVAÇÃO)
+router.post('/entrevistas/reabrir', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const fichaId = Number(req.body.fichaId || req.body.id || 0);
+    const turmaId = Number(req.body.turmaId || 1491);
+    const cnpjLimpo = String(req.body.cnpj || '').replace(/\D/g, '');
+    const empNorm = String(req.body.empresa || '').trim().toLowerCase();
+
+    if (!fichaId && !cnpjLimpo && !empNorm) {
+      return res.status(400).json({ error: 'Informe a empresa ou ID da ficha para reabrir.' });
+    }
+
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+
+    const { rows: baseRows } = await client.query(
+      'SELECT id, turma_id, empresa, cnpj, cpf_cnpj FROM fichas WHERE id = $1::int LIMIT 1',
+      [fichaId]
+    );
+
+    const base = baseRows[0] || {};
+    const turmaAlvo = Number(base.turma_id || turmaId);
+    const cnpjAlvo = cnpjLimpo || String(base.cnpj || base.cpf_cnpj || '').replace(/\D/g, '');
+    const empAlvo = empNorm || String(base.empresa || '').trim().toLowerCase();
+
+    const { rows: reabertas } = await client.query(
+      `UPDATE fichas
+       SET ficha_fechada = false,
+           fechada_em = NULL,
+           status_aprovacao = NULL,
+           etapa_funil = 'entrevista',
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1::int
+          OR (
+            turma_id = $2::int
+            AND (
+              ($3::text <> '' AND LENGTH($3::text) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $3::text)
+              OR ($4::text <> '' AND $4::text NOT IN ('empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada') AND LOWER(TRIM(COALESCE(empresa, ''))) = $4::text)
+            )
+          )
+       RETURNING id, empresa, nome_participante, etapa_funil, ficha_fechada`,
+      [fichaId, turmaAlvo, cnpjAlvo, empAlvo]
+    );
+
+    const idsReabertos = reabertas.map((r) => Number(r.id)).filter((n) => Number.isInteger(n) && n > 0);
+    if (idsReabertos.length > 0) {
+      await client.query(
+        `UPDATE propostas
+         SET status = 'reaberta',
+             updated_at = CURRENT_TIMESTAMP
+         WHERE aplicacao_id = ANY($1::int[])
+           AND status IN ('aprovado', 'vendido', 'aprovada', 'aprovada_com_ressalva', 'pendente')`,
+        [idsReabertos]
+      ).catch(() => {});
+    }
+
+    await client.query('COMMIT');
+    res.json({
+      sucesso: true,
+      fichasReabertas: reabertas.length,
+      ids: idsReabertos
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Erro ao reabrir ficha:', err);
+    res.status(500).json({ error: 'Erro ao reabrir ficha da empresa: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;

@@ -398,6 +398,14 @@ export default function InterviewEdit() {
         status_aprovacao: 'pendente'
       }));
 
+      // Marca imediatamente a ficha como fechada em tela
+      setFicha((prev) => ({
+        ...prev,
+        ficha_fechada: true,
+        etapa_funil: gerouProposta ? 'aguardando_aprovacao' : 'concluido',
+        status_aprovacao: gerouProposta ? 'pendente' : prev.status_aprovacao
+      }));
+      setModalConfirmarFinalizacao(false);
       setModalConclusao({
         protocolo: propostaCriada?.id ? `PROP-${String(propostaCriada.id).padStart(3, '0')}` : `FICHA-${appTargetId}`,
         gerouProposta,
@@ -1399,8 +1407,8 @@ export default function InterviewEdit() {
 
                 const textoBotao = isFechada
                   ? isAprovadaFin
-                    ? 'Aprovado pelo Financeiro'
-                    : 'Aguardando Liberação Financeira'
+                    ? 'Ficha Fechada — Aprovada pelo Financeiro'
+                    : 'Ficha Fechada — Aguardando Liberação Financeira'
                   : salvando
                   ? 'Registrando...'
                   : 'Finalizar Ficha da Empresa';
