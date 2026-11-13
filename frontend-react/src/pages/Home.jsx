@@ -253,7 +253,7 @@ export default function Home() {
   }
 
   return (
-    <div style={{ padding: '1.5rem 2rem', maxWidth: '1480px', margin: '0 auto', boxSizing: 'border-box' }}>
+    <div style={{ padding: '1.75rem 2rem', width: '100%', boxSizing: 'border-box' }}>
       {/* 1. FAIXA DE STATUS DA TURMA + BUSCA GLOBAL INSTANTÂNEA */}
       <div
         style={{
@@ -489,7 +489,7 @@ export default function Home() {
       )}
 
       {/* 2. QUATRO INDICADORES DE FLUXO DO SALÃO */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(235px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '1rem', marginBottom: '1.5rem', width: '100%' }}>
         <div
           onClick={() => navigate(ROTAS_SISTEMA.companies)}
           style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1.2rem', cursor: 'pointer' }}

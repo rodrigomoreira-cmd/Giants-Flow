@@ -120,7 +120,7 @@ export default function WarRoom() {
   const statusFin = dados?.statusFinanceiro || {};
 
   return (
-    <div style={{ padding: '1.5rem 2rem', maxWidth: '1480px', margin: '0 auto', boxSizing: 'border-box' }}>
+    <div style={{ padding: '1.75rem 2rem', width: '100%', boxSizing: 'border-box' }}>
       {/* CABEÇALHO EXECUTIVO */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
         <div>
