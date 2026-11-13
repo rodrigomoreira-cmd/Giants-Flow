@@ -6,21 +6,25 @@ const pool = dbModule.pool || dbModule;
 // 2. AUXILIARES: MESAS COM SEUS ENTREVISTADORES ESCALADOS E OCUPANTES
 router.get('/auxiliares', async (req, res) => {
   try {
+    const rawTurma = req.query.turmaId || req.query.turma_id || '';
+    const digits = String(rawTurma).replace(/\D/g, '');
+    const turmaFiltro = digits ? parseInt(digits, 10) : null;
     const { rows: entrevistadores } = await pool.query(
       'SELECT  id, nome, email, papel, ativo FROM usuarios WHERE ativo = true ORDER BY nome ASC'
     );
     const { rows: turmas } = await pool.query(
-      'SELECT id, codigo, nome, ativa FROM turmas ORDER BY id ASC'
+      'SELECT id, codigo, nome, ativa, status_evento, data_inicio, data_fim, qtd_mesas, meta_caixa, meta_competencia FROM turmas ORDER BY ativa DESC, data_inicio DESC NULLS LAST, id DESC'
     );
 
     const { rows: ocupantes } = await pool.query(`
-      SELECT id, nome_participante AS nome, empresa,
+      SELECT id, turma_id, nome_participante AS nome, empresa,
              mesa_alocada, almoco_pago, cortesia_almoco, membro_giants, etapa_funil,
-             entrevistador_id, entrevistadores_ids, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae 
+             entrevistador_id, entrevistadores_ids, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae
       FROM fichas
       WHERE mesa_alocada IS NOT NULL
+        AND ($1::int IS NULL OR turma_id = $1::int)
       ORDER BY id ASC
-    `);
+    `, [turmaFiltro]);
 
     let listaMesas = [];
     try {

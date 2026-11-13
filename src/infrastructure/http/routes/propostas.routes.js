@@ -4,6 +4,7 @@ const dbModule = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
 const criarPropostaUseCase = require('../../../application/use-cases/proposta/CriarPropostaUseCase');
 const { verificarJWT } = require('../../security/jwt');
+const { exigirTurmaAtiva } = require('../../database/verificarTurmaAtiva');
 const { registrarAuditoria } = require('./warroom.routes');
 
 function extrairUsuarioRequisicao(req) {
@@ -40,6 +41,7 @@ router.post('/propostas', async (req, res) => {
     if (!aplicacaoId) {
       return res.status(400).json({ error: 'O participante (aplicacaoId) é obrigatório.' });
     }
+    await exigirTurmaAtiva({ fichaId: aplicacaoId, turmaId: dados.turmaId || dados.turma_id || null });
 
     // 1. Executa o caso de uso oficial (salva na tabela propostas com regras e cashback)
     const propostaSalva = await criarPropostaUseCase.execute({
@@ -224,6 +226,7 @@ router.patch('/propostas/:id/vender', async (req, res) => {
   const client = await pool.connect();
   try {
     const id = Number(req.params.id);
+    await exigirTurmaAtiva({ fichaId: id });
     await client.query('BEGIN');
     await client.query("SET LOCAL app.user_role = 'SYSTEM'");
 
@@ -383,6 +386,7 @@ router.post('/financeiro/analisar', async (req, res) => {
     if (!targetId || !decisao) {
       return res.status(400).json({ error: 'Parâmetros obrigatórios ausentes (ficha/proposta e decisão).' });
     }
+    await exigirTurmaAtiva({ fichaId: targetId });
 
     const decNorm = String(decisao).trim().toLowerCase();
     let novoStatus = 'aprovada';

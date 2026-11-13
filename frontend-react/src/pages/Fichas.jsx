@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { useTurma } from '../context/TurmaContext';
 
 export default function Fichas() {
   const [fichas, setFichas] = useState([]);
   const [auxiliares, setAuxiliares] = useState(null);
-  const [turmaSelecionada, setTurmaSelecionada] = useState(1);
+  const { turmaSelecionada: turmaGlobal, mudarTurma } = useTurma();
+  const [turmaSelecionada, setTurmaSelecionada] = useState(() => Number(turmaGlobal || localStorage.getItem('turma_ativa_id') || 1491));
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
   
@@ -26,7 +28,7 @@ export default function Fichas() {
       const aux = await api.get('/auxiliares');
       setAuxiliares(aux);
       
-      const tId = aux.turmas?.[0]?.id || turmaId;
+      const tId = Number(turmaGlobal || turmaId || aux.turmas?.[0]?.id || 1491);
       setTurmaSelecionada(tId);
 
       const dados = await api.get(`/clientes?turmaId=${tId}`);
@@ -39,12 +41,15 @@ export default function Fichas() {
   };
 
   useEffect(() => {
-    carregarDados();
-  }, []);
+    const idAlvo = Number(turmaGlobal || localStorage.getItem('turma_ativa_id') || 1491);
+    setTurmaSelecionada(idAlvo);
+    carregarDados(idAlvo);
+  }, [turmaGlobal]);
 
   const lidarComTrocaTurma = (e) => {
     const novoId = Number(e.target.value);
     setTurmaSelecionada(novoId);
+    mudarTurma(novoId);
     carregarDados(novoId);
   };
 

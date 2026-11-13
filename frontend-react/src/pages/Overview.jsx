@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { useTurma } from '../context/TurmaContext';
 
 export default function Overview() {
+  const { turmaSelecionada } = useTurma();
   const [metricas, setMetricas] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
@@ -10,7 +12,8 @@ export default function Overview() {
     async function carregar() {
       try {
         setCarregando(true);
-        const dados = await api.get('/hub/metricas');
+        const tIdAtiva = turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491';
+        const dados = await api.get(`/hub/metricas?turmaId=${tIdAtiva}`);
         setMetricas(dados);
       } catch (err) {
         setErro(err.message);
@@ -19,7 +22,7 @@ export default function Overview() {
       }
     }
     carregar();
-  }, []);
+  }, [turmaSelecionada]);
 
   if (carregando) {
     return <div style={{ padding: '2rem', color: '#64748b' }}>Carregando métricas da operação...</div>;

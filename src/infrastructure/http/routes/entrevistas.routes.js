@@ -2,6 +2,7 @@
 const router = express.Router();
 const dbModule = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
+const { exigirTurmaAtiva } = require('../../database/verificarTurmaAtiva');
 const { registrarAuditoria } = require('./warroom.routes');
 const { verificarJWT } = require('../../security/jwt');
 
@@ -34,6 +35,7 @@ router.post('/entrevistas/agendar', async (req, res) => {
   try {
     const b = req.body;
     const id = b.aplicacaoId || b.cliente_id || b.fichaId || b.id;
+    if (id) await exigirTurmaAtiva({ fichaId: id });
     const mesa = b.mesaId || b.mesa_id || b.mesa;
     const entrevistadorId = b.entrevistador_id
       ? Number(b.entrevistador_id)
@@ -92,6 +94,7 @@ router.post('/entrevistas/resultado', async (req, res) => {
   const client = await pool.connect();
   try {
     const id = req.body.entrevista_id || req.body.fichaId || req.body.participanteId || req.body.id || req.body.aplicacaoId;
+    if (id) await exigirTurmaAtiva({ fichaId: id, turmaId: req.body.turmaId || null });
     const sociosIdsExtra = Array.isArray(req.body.sociosIds)
       ? req.body.sociosIds.map((x) => Number(x)).filter((n) => Number.isInteger(n) && n > 0)
       : [];
@@ -238,6 +241,7 @@ router.post('/entrevistas/:id/reabrir', async (req, res) => {
 
 // REABRIR FICHA DA EMPRESA (LIBERA EDIÇÃO APÓS FECHAMENTO / APROVAÇÃO)
 router.post('/entrevistas/reabrir', async (req, res) => {
+  await exigirTurmaAtiva({ fichaId: req.body?.fichaId || null, turmaId: req.body?.turmaId || null });
   await registrarAuditoria(pool, {
     turmaId: req.body?.turmaId || 1491,
     fichaId: req.body?.fichaId || null,

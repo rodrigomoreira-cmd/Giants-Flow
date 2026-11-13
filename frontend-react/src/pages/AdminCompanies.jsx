@@ -1,16 +1,18 @@
 ﻿import { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { useTurma } from '../context/TurmaContext';
 
 export default function AdminCompanies() {
+  const { turmaSelecionada } = useTurma();
   const [empresas, setEmpresas] = useState([]);
   const [carregando, setCarregando] = useState(true);
 
   useEffect(() => {
-    api.get('/clientes?turmaId=${localStorage.getItem("turma_ativa_id") || "1491"}')
+    api.get(`/clientes?turmaId=${turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491'}`)
       .then(d => setEmpresas(Array.isArray(d) ? d : d.clientes || []))
       .catch(() => setEmpresas([]))
       .finally(() => setCarregando(false));
-  }, []);
+  }, [turmaSelecionada]);
 
   return (
     <div style={{ padding: '2rem', width: '100%', boxSizing: 'border-box' }}>

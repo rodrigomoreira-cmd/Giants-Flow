@@ -25,7 +25,7 @@ export default function CompanyDetail() {
       setCarregando(true);
       setErro('');
       // Obtém o catálogo de clientes/empresas da turma ativa para localizar o registro
-      const dados = await api.get('/clientes?turmaId=${localStorage.getItem("turma_ativa_id") || "1491"}');
+      const dados = await api.get(`/clientes?turmaId=${localStorage.getItem('turma_ativa_id') || '1491'}`);
       const lista = Array.isArray(dados) ? dados : dados.clientes || [];
       const encontrada = lista.find(c => String(c.id || c.cliente_id || c.empId) === String(id));
 

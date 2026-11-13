@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { useTurma } from '../context/TurmaContext';
 
 const fmtBRL = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -34,6 +35,7 @@ const unificarPorEmpresa = (lista) => {
 };
 
 export default function Approvals() {
+  const { turmaSelecionada } = useTurma();
   const [propostas, setPropostas] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
@@ -55,7 +57,8 @@ export default function Approvals() {
     try {
       setCarregando(true);
       setErro('');
-      const dados = await api.get('/financeiro/propostas');
+      const tIdAtiva = turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491';
+      const dados = await api.get(`/financeiro/propostas?turmaId=${tIdAtiva}`);
       const lista = Array.isArray(dados) ? dados : dados.propostas || [];
       setPropostas(unificarPorEmpresa(lista));
     } catch (err) {
@@ -67,7 +70,7 @@ export default function Approvals() {
 
   useEffect(() => {
     carregarAprovacoes();
-  }, []);
+  }, [turmaSelecionada]);
 
   const abrirModalAnalise = (prop) => {
     const temRestricaoPrev =
@@ -206,7 +209,7 @@ export default function Approvals() {
           </h1>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.85rem' }}>
         <a
-          href={`${import.meta.env.VITE_API_URL || '/api'}/financeiro/exportar-csv?turmaId=${localStorage.getItem('turma_ativa_id') || '1491'}`}
+          href={`${import.meta.env.VITE_API_URL || '/api'}/financeiro/exportar-csv?turmaId=${turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491'}`}
           target="_blank"
           rel="noreferrer"
           style={{

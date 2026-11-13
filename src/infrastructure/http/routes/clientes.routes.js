@@ -2,6 +2,7 @@
 const router = express.Router();
 const dbModule = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
+const { exigirTurmaAtiva } = require('../../database/verificarTurmaAtiva');
 const { registrarAuditoria } = require('./warroom.routes');
 
 // 1. LISTAGEM DE CLIENTES / PARTICIPANTES POR TURMA
@@ -54,6 +55,7 @@ router.get('/clientes', async (req, res) => {
 router.patch('/clientes/:id/mesa', async (req, res) => {
   const { id } = req.params;
   const fichaId = parseInt(id, 10);
+  await exigirTurmaAtiva({ fichaId });
   const { mesa, assento } = req.body;
   const mesaNum = mesa !== null && mesa !== undefined && mesa !== '' ? parseInt(mesa, 10) : null;
   const assentoNum = assento !== null && assento !== undefined && assento !== '' ? parseInt(assento, 10) : null;
@@ -172,6 +174,7 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
   const client = await pool.connect();
   try {
     const fichaId = parseInt(req.params.id, 10);
+    await exigirTurmaAtiva({ fichaId });
     const { tipo, cv_cartao, participantes_ids, todos_empresa_ids } = req.body;
 
     if (isNaN(fichaId)) {
@@ -310,6 +313,7 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
 // 4. ATUALIZAÇÃO RÁPIDA DE ALMOÇO/CORTESIA (ATALHO DO SALÃO DE LUNCH)
 router.patch('/clientes/:id', async (req, res) => {
   try {
+    await exigirTurmaAtiva({ fichaId: req.params.id });
     const { almoco_pago, cortesia_almoco, cortesia, valor_almoco } = req.body;
     const cortesiaFinal = cortesia_almoco !== undefined ? cortesia_almoco : cortesia;
     const pagoFinal = cortesiaFinal === true && almoco_pago === undefined ? false : almoco_pago;
@@ -341,6 +345,7 @@ router.put('/clientes/:id', async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
+    await exigirTurmaAtiva({ fichaId: id });
     let { empresa, nome_completo, email, telefone, cnpj, cashback } = req.body;
 
     if (cashback !== undefined && cashback !== null) {

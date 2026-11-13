@@ -1,6 +1,7 @@
 ﻿import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import { useTurma } from '../context/TurmaContext';
 
 const fmtBRL = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtNum = (v) => Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
@@ -27,6 +28,7 @@ const BADGE_STATUS = {
 
 export default function AdminCohorts() {
   const navigate = useNavigate();
+  const { turmaSelecionada, mudarTurma, recarregarTurmas } = useTurma();
   const [turmas, setTurmas] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [busca, setBusca] = useState('');
@@ -78,6 +80,7 @@ export default function AdminCohorts() {
     localStorage.setItem('turma_ativa_nome', t.nome);
     localStorage.setItem('turma_ativa_label', rotulo);
     setTurmaOperacionalId(idStr);
+    mudarTurma(idStr);
     window.dispatchEvent(new Event('storage'));
     if (irParaWarRoom) {
       navigate('/war-room');
@@ -144,6 +147,7 @@ export default function AdminCohorts() {
       }
       setModalAberto(false);
       await carregarTurmas();
+      await recarregarTurmas();
     } catch (err) {
       alert('Erro ao salvar turma: ' + err.message);
     } finally {
@@ -159,6 +163,7 @@ export default function AdminCohorts() {
       setTurmas((prev) =>
         prev.map((item) => (item.id === t.id ? { ...item, ativa: novaAtiva, status_evento: novoStatus } : item))
       );
+      await recarregarTurmas();
     } catch (err) {
       alert('Erro ao alterar status da turma: ' + err.message);
     }
@@ -169,6 +174,7 @@ export default function AdminCohorts() {
     try {
       await api.delete(`/turmas/${t.id}`);
       setTurmas((prev) => prev.filter((item) => item.id !== t.id));
+      await recarregarTurmas();
     } catch (err) {
       alert(err.message || 'Não foi possível excluir esta turma.');
     }

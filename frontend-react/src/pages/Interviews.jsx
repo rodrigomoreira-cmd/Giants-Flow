@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import { useTurma } from '../context/TurmaContext';
 
 const normalizarChaveEmpresa = (empresa, cnpj, fallbackId) => {
   const cnpjDigits = String(cnpj || '').replace(/\D/g, '');
@@ -28,6 +29,7 @@ const isAprovadaOuConcluida = (c) => {
 
 export default function Interviews() {
   const navigate = useNavigate();
+  const { turmaSelecionada } = useTurma();
   const [sessoes, setSessoes] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [busca, setBusca] = useState('');
@@ -52,9 +54,9 @@ export default function Interviews() {
     try {
       setCarregando(true);
       setErro('');
-      const turmaAtiva = localStorage.getItem('turma_ativa_id') || '1491';
+      const turmaAtiva = turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491';
       const [aux, clientes] = await Promise.all([
-        api.get('/auxiliares'),
+        api.get(`/auxiliares?turmaId=${turmaAtiva}`),
         api.get(`/clientes?turmaId=${turmaAtiva}`).catch(() => [])
       ]);
       const listaClientes = Array.isArray(clientes) ? clientes : (clientes?.data || []);
@@ -191,7 +193,7 @@ export default function Interviews() {
 
   useEffect(() => {
     carregarSessoes();
-  }, []);
+  }, [turmaSelecionada]);
 
   const abrirModalReabertura = (s) => {
     setMotivoReabrir('');

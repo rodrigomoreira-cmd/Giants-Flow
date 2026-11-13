@@ -119,7 +119,10 @@ export default function Companies() {
   };
 
   useEffect(() => {
-    if (turmaSelecionada) carregarDados();
+    if (turmaSelecionada) {
+      setPagina(1);
+      carregarDados();
+    }
   }, [turmaSelecionada]);
 
   // Agrupa todos os participantes em 1 linha única por Empresa (CNPJ)
@@ -448,7 +451,7 @@ export default function Companies() {
           </h1>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.85rem' }}>
         <a
-          href={`${import.meta.env.VITE_API_URL || '/api'}/financeiro/exportar-csv?turmaId=${localStorage.getItem('turma_ativa_id') || '1491'}`}
+          href={`${import.meta.env.VITE_API_URL || '/api'}/financeiro/exportar-csv?turmaId=${turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491'}`}
           target="_blank"
           rel="noreferrer"
           style={{

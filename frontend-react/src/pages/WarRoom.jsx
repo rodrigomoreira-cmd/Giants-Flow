@@ -1,5 +1,6 @@
 ﻿import { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
+import { useTurma } from '../context/TurmaContext';
 
 const fmtBRL = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtNum = (v) => Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
@@ -14,7 +15,16 @@ const BADGE_ACAO = {
 };
 
 export default function WarRoom() {
-  const [turmaId, setTurmaId] = useState(() => localStorage.getItem('turma_ativa_id') || '1491');
+  const { turmaSelecionada, turmaAtual, mudarTurma } = useTurma();
+  const [turmaId, setTurmaId] = useState(() => turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491');
+
+  useEffect(() => {
+    if (turmaSelecionada && String(turmaSelecionada) !== String(turmaId)) {
+      setTurmaId(String(turmaSelecionada));
+      setTituloPanoramaCustom('');
+      setDataPanoramaCustom('');
+    }
+  }, [turmaSelecionada]);
   const [dados, setDados] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
@@ -52,7 +62,7 @@ export default function WarRoom() {
 
   const abrirPanoramaPdf = () => {
     const pan = dados?.panoramaExecutivo || {};
-    const nomeSalvo = localStorage.getItem('turma_ativa_nome') || '';
+    const nomeSalvo = turmaAtual?.nome || localStorage.getItem('turma_ativa_nome') || '';
     if (!tituloPanoramaCustom) {
       setTituloPanoramaCustom(nomeSalvo || pan.tituloEvento || 'Casais Empreendedores');
     }
@@ -135,7 +145,11 @@ export default function WarRoom() {
             <input
               type="text"
               value={turmaId}
-              onChange={(e) => setTurmaId(e.target.value.replace(/\D/g, ''))}
+              onChange={(e) => {
+                const novo = e.target.value.replace(/\D/g, '');
+                setTurmaId(novo);
+                if (novo) mudarTurma(novo);
+              }}
               style={{ width: '64px', border: 'none', fontWeight: '800', color: '#0f172a', fontSize: '0.86rem', outline: 'none' }}
             />
           </div>

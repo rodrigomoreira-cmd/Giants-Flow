@@ -50,9 +50,10 @@ export default function Lunch() {
       setCarregando(true);
       setErro('');
 
+      const tIdAtiva = turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491';
       const [aux, clientesDados] = await Promise.all([
-        api.get('/auxiliares'),
-        api.get(`/clientes?turmaId=${turmaSelecionada || localStorage.getItem('turma_ativa_id') || 1491}`)
+        api.get(`/auxiliares?turmaId=${tIdAtiva}`),
+        api.get(`/clientes?turmaId=${tIdAtiva}`)
       ]);
 
       setTurmas(aux.turmas || []);
@@ -138,7 +139,11 @@ export default function Lunch() {
   };
 
   useEffect(() => {
-    if (turmaSelecionada) carregarDados();
+    if (turmaSelecionada) {
+      setGrupoSelecionadoAlocacao(null);
+      setMesaFocadaId(null);
+      carregarDados();
+    }
   }, [turmaSelecionada]);
 
   // Mapeamento de assentos já ocupados
