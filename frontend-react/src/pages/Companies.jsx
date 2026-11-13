@@ -907,7 +907,7 @@ export default function Companies() {
                     <input type="radio" name="tipoAlmoco" value="cortesia" checked={tipoAlmoco === 'cortesia'} onChange={() => setTipoAlmoco('cortesia')} />
                     <div>
                       <div style={{ fontWeight: '700', fontSize: '0.9rem', color: '#0284c7' }}>● Cortesia Autorizada</div>
-                      <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Isenção autorizada pela diretoria comercial</div>
+                      <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Isenção autorizada pela diretoria (debita os R$ 1.000,00 de cobrança/cashback e mantém o almoço garantido)</div>
                     </div>
                   </label>
 
