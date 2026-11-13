@@ -50,6 +50,7 @@ export default function App() {
           {/* Rotas Oficiais GIANTS Flow */}
           <Route path="/home" element={<RotaProtegida><LayoutComSidebar><Home /></LayoutComSidebar></RotaProtegida>} />
           <Route path="/companies" element={<RotaProtegida><LayoutComSidebar><Companies /></LayoutComSidebar></RotaProtegida>} />
+          <Route path="/war-room" element={<RotaProtegida><LayoutComSidebar><WarRoom /></LayoutComSidebar></RotaProtegida>} />
           <Route path="/companies/:id" element={<RotaProtegida><LayoutComSidebar><CompanyDetail /></LayoutComSidebar></RotaProtegida>} />
           <Route path="/interviews" element={<RotaProtegida><LayoutComSidebar><Interviews /></LayoutComSidebar></RotaProtegida>} />
           <Route path="/interviews/:id" element={<RotaProtegida><LayoutComSidebar><InterviewDetail /></LayoutComSidebar></RotaProtegida>} />

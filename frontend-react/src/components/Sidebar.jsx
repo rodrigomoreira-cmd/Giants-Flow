@@ -16,6 +16,7 @@ export default function Sidebar() {
   const menuGeral = [
     { label: 'Início', path: '/home', icon: 'home' },
     { label: 'Empresas', path: '/companies', icon: 'domain' },
+  { label: 'War Room', path: '/war-room', icon: 'monitoring' },
     { label: 'Entrevistas', path: '/interviews', icon: 'assignment' },
     { label: 'Aprovações', path: '/approvals', icon: 'verified' },
     { label: 'Almoço', path: '/lunch', icon: 'restaurant' },
