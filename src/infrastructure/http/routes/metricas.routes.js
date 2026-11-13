@@ -27,7 +27,7 @@ router.get('/hub/metricas', async (req, res) => {
           WHERE status ILIKE '%no_show%' 
              OR status ILIKE '%ausente%' 
              OR etapa_funil ILIKE '%no_show%'
-        )::INT AS no_show_qtd, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae 
+        )::INT AS no_show_qtd
       FROM fichas
       WHERE ($1::INT IS NULL OR turma_id = $1::INT);
 `;
@@ -92,8 +92,8 @@ router.get('/hub/metricas', async (req, res) => {
         SELECT 
           COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), ''), empresa) AS empresa_chave,
           COUNT(*) AS total_pessoas,
-          COUNT(*) FILTER (WHERE cargo ILIKE '%socio%' OR cargo ILIKE '%sócio%' OR cargo ILIKE '%propriet%' OR cargo ILIKE '%fundad%') AS qtd_socios, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae 
-        FROM fichas
+          COUNT(*) FILTER (WHERE cargo ILIKE '%socio%' OR cargo ILIKE '%sócio%' OR cargo ILIKE '%propriet%' OR cargo ILIKE '%fundad%') AS qtd_socios
+      FROM fichas
         WHERE ($1::INT IS NULL OR turma_id = $1::INT)
           AND COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), ''), empresa) = ANY($2::TEXT[])
         GROUP BY empresa_chave;
