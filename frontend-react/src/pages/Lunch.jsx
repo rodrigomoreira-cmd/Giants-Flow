@@ -434,7 +434,8 @@ export default function Lunch() {
       for (const socio of listaParaSentar) {
         await api.post('/entrevistas/agendar', {
           aplicacaoId: Number(socio.id),
-          mesaId: Number(mesaId)
+          mesaId: Number(mesaId),
+          mesaNumero: mesaAlvo ? Number(mesaAlvo.numero) : undefined
         });
       }
 

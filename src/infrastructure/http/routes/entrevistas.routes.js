@@ -68,6 +68,49 @@ router.post('/entrevistas/agendar', async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: participante não possui almoço pago nem cortesia ativa.' });
     }
 
+    // Converte id interno da mesa (ex: 36) para o número físico real (ex: 2)
+    let numeroMesaReal = null;
+    if (b.mesaNumero !== undefined && b.mesaNumero !== null && b.mesaNumero !== '') {
+      const { rows: mRows } = await client.query(
+        'SELECT numero FROM mesas WHERE numero = $1::int LIMIT 1',
+        [Number(b.mesaNumero)]
+      );
+      if (mRows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: `Mesa ${b.mesaNumero} não existe no cadastro do salão.` });
+      }
+      numeroMesaReal = Number(mRows[0].numero);
+    } else if (b.mesaId !== undefined && b.mesaId !== null && b.mesaId !== '') {
+      const { rows: mRows } = await client.query(
+        'SELECT numero FROM mesas WHERE id = $1::int LIMIT 1',
+        [Number(b.mesaId)]
+      );
+      if (mRows.length > 0) {
+        numeroMesaReal = Number(mRows[0].numero);
+      } else {
+        const { rows: mByNum } = await client.query(
+          'SELECT numero FROM mesas WHERE numero = $1::int LIMIT 1',
+          [Number(b.mesaId)]
+        );
+        if (mByNum.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Mesa selecionada não encontrada no salão.' });
+        }
+        numeroMesaReal = Number(mByNum[0].numero);
+      }
+    } else {
+      const rawM = Number(mesa);
+      const { rows: mRows } = await client.query(
+        'SELECT numero FROM mesas WHERE numero = $1::int OR id = $1::int ORDER BY CASE WHEN numero = $1::int THEN 0 ELSE 1 END LIMIT 1',
+        [rawM]
+      );
+      if (mRows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: `Mesa ${rawM} não encontrada no salão.` });
+      }
+      numeroMesaReal = Number(mRows[0].numero);
+    }
+
     const { rows } = await client.query(
       `UPDATE fichas
        SET etapa_funil = 'entrevista',
@@ -76,7 +119,7 @@ router.post('/entrevistas/agendar', async (req, res) => {
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $3
        RETURNING *`,
-      [mesa, entrevistadorId, id]
+      [numeroMesaReal, entrevistadorId, id]
     );
 
     await client.query('COMMIT');
