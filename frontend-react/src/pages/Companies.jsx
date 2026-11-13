@@ -20,6 +20,7 @@ const normalizarChaveEmpresa = (emp) => {
 export default function Companies() {
   const { turmaSelecionada } = useTurma();
   const [participantes, setParticipantes] = useState([]);
+  const [propostasFinanceiro, setPropostasFinanceiro] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
   const [busca, setBusca] = useState('');
@@ -40,9 +41,15 @@ export default function Companies() {
     try {
       setCarregando(true);
       setErro('');
-      const dados = await api.get(`/clientes?turmaId=${turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491'}`);
+      const turmaIdAtiva = turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491';
+      const [dados, propsRes] = await Promise.all([
+        api.get(`/clientes?turmaId=${turmaIdAtiva}`),
+        api.get(`/financeiro/propostas?turmaId=${turmaIdAtiva}`).catch(() => [])
+      ]);
       const lista = Array.isArray(dados) ? dados : dados.clientes || [];
+      const listaProps = Array.isArray(propsRes) ? propsRes : propsRes?.propostas || [];
       setParticipantes(lista);
+      setPropostasFinanceiro(listaProps);
     } catch (err) {
       setErro(err.message || 'Erro ao carregar dados de empresas.');
     } finally {
@@ -146,7 +153,7 @@ export default function Companies() {
         };
       })
       .sort((a, b) => a.empresa.localeCompare(b.empresa, 'pt-BR', { sensitivity: 'base' }));
-  }, [participantes]);
+  }, [participantes, propostasFinanceiro]);
 
   const empresasFiltradas = gruposEmpresas.filter((g) => {
     const termo = (busca || '').toLowerCase().trim();

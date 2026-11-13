@@ -28,7 +28,7 @@ router.get('/clientes', async (req, res) => {
         assento_alocado,
         status, 
         cargo,
-        origem, historico_produtos_elegiveis, valor_investido_pac_ae, cashback_upgrade_90_pct FROM fichas
+        origem, historico_produtos_elegiveis, valor_investido_pac_ae, cashback_upgrade_90_pct , WHERE.etapa_funil, WHERE.status_aprovacao, WHERE.ficha_fechada, WHERE.valor_negociado, WHERE.dados_proposta FROM fichas
       WHERE ($1::INT IS NULL OR turma_id = $1::INT)
       ORDER BY id ASC
     `, [turmaFiltro]);
