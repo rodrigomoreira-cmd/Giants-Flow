@@ -776,6 +776,11 @@ export default function InterviewEdit() {
                         {Number(ficha.cashback_upgrade_cnpj).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                       </strong>{' '}
                       {ficha.categoria_produto === 'GIANTS' ? '(Aplicado no GIANTS)' : '(Disponível apenas se fechar GIANTS)'}
+                      {Number(ficha.cashback_upgrade_cnpj || 0) > 0 && Number(ficha.cashback_upgrade_cnpj || 0) <= 1 && (
+                        <span style={{ display: 'inline-block', marginLeft: '0.5rem', background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '0.1rem 0.45rem', borderRadius: '4px', fontSize: '0.73rem', fontWeight: '700' }}>
+                          ⚠️ CRM registrou R$ 0,01 (cortesia/voucher) — ajuste manualmente no campo &quot;Cashback Abatido (R$)&quot; se houver crédito real
+                        </span>
+                      )}
                     </span>
                   )}
                 </div>
