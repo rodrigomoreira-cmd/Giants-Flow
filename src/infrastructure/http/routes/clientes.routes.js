@@ -3,32 +3,36 @@ const router = express.Router();
 const dbModule = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
 
-// 3. CLIENTES COM CASHBACK ATÔMICO
+// 1. LISTAGEM DE CLIENTES / PARTICIPANTES POR TURMA
 router.get('/clientes', async (req, res) => {
   try {
     const rawTurma = req.query.turmaId || req.query.turma_id || '';
     const digits = String(rawTurma).replace(/\D/g, '');
     const turmaFiltro = digits ? parseInt(digits, 10) : 1491;
 
-    const { rows } = await pool.query(`
-      SELECT id, 
-        nome_participante, 
-        nome_cracha, 
-        empresa, 
-        cnpj, 
-        cpf_cnpj, 
-        telefone, 
-        email, 
-        turma_id, 
-        almoco_pago, 
-        membro_giants, 
-        valor_almoco, 
-        cortesia_almoco, 
-        mesa_alocada, 
+    const { rows } = await pool.query(
+      `SELECT id,
+        nome_participante,
+        nome_cracha,
+        empresa,
+        cnpj,
+        cpf_cnpj,
+        telefone,
+        email,
+        turma_id,
+        almoco_pago,
+        membro_giants,
+        valor_almoco,
+        cortesia_almoco,
+        mesa_alocada,
         assento_alocado,
-        status, 
+        status,
         cargo,
-        origem, historico_produtos_elegiveis, valor_investido_pac_ae, cashback_upgrade_90_pct ,
+        origem,
+        cv_cartao,
+        historico_produtos_elegiveis,
+        valor_investido_pac_ae,
+        cashback_upgrade_90_pct,
         etapa_funil,
         status_aprovacao,
         ficha_fechada,
@@ -36,21 +40,22 @@ router.get('/clientes', async (req, res) => {
         dados_proposta
       FROM fichas
       WHERE ($1::INT IS NULL OR turma_id = $1::INT)
-      ORDER BY id ASC
-    `, [turmaFiltro]);
+      ORDER BY id ASC`,
+      [turmaFiltro]
+    );
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ALOCAÇÃO NO SALÃO DE LUNCH (MESA E ASSENTO)
+// 2. ALOCAÇÃO NO SALÃO DE LUNCH (MESA E ASSENTO)
 router.patch('/clientes/:id/mesa', async (req, res) => {
   const { id } = req.params;
   const fichaId = parseInt(id, 10);
   const { mesa, assento } = req.body;
-  const mesaNum = (mesa !== null && mesa !== undefined && mesa !== '') ? parseInt(mesa, 10) : null;
-  const assentoNum = (assento !== null && assento !== undefined && assento !== '') ? parseInt(assento, 10) : null;
+  const mesaNum = mesa !== null && mesa !== undefined && mesa !== '' ? parseInt(mesa, 10) : null;
+  const assentoNum = assento !== null && assento !== undefined && assento !== '' ? parseInt(assento, 10) : null;
 
   if (isNaN(fichaId)) {
     return res.status(400).json({ error: 'ID do participante inválido.' });
@@ -60,9 +65,8 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // 1. Obter dados do participante com bloqueio pessimista FOR UPDATE
     const { rows: fichaRows } = await client.query(
-      'SELECT  id, turma_id, nome_participante, empresa, almoco_pago, cortesia_almoco, membro_giants, etapa_funil, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae  FROM fichas WHERE id = $1::integer FOR UPDATE',
+      'SELECT id, turma_id, nome_participante, empresa, almoco_pago, cortesia_almoco, membro_giants, etapa_funil, ficha_fechada, status_aprovacao, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae FROM fichas WHERE id = $1::integer FOR UPDATE',
       [fichaId]
     );
 
@@ -74,9 +78,24 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
     const fichaAtual = fichaRows[0];
     const turmaId = fichaAtual.turma_id;
 
-    // 2. Se for uma alocação no Lunch, validar elegibilidade e concorrência no Salão
     if (mesaNum !== null && assentoNum !== null) {
-      const liberadoAlmoco = Boolean(fichaAtual.membro_giants) || Boolean(fichaAtual.almoco_pago) || Boolean(fichaAtual.cortesia_almoco) || String(fichaAtual.origem).toUpperCase() === 'GIANTS';
+      if (
+        Boolean(fichaAtual.ficha_fechada) ||
+        ['aguardando_aprovacao', 'fechamento', 'concluido', 'reprovado'].includes(
+          String(fichaAtual.etapa_funil || '').toLowerCase()
+        )
+      ) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({
+          error: 'Esta empresa já concluiu a entrevista e teve a mesa liberada. Reabra a ficha na aba Empresas caso precise realocar.'
+        });
+      }
+
+      const liberadoAlmoco =
+        Boolean(fichaAtual.membro_giants) ||
+        Boolean(fichaAtual.almoco_pago) ||
+        Boolean(fichaAtual.cortesia_almoco) ||
+        String(fichaAtual.origem || '').toUpperCase() === 'GIANTS';
 
       if (!liberadoAlmoco) {
         await client.query('ROLLBACK');
@@ -85,31 +104,36 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
         });
       }
 
-      // Checa concorrência de assento no Salão de Lunch com casting tipado
       const { rows: ocupante } = await client.query(
-        'SELECT  id, nome_participante, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae  FROM fichas WHERE mesa_alocada = $1::integer AND assento_alocado = $2::integer AND COALESCE(turma_id, 0) = COALESCE($3::integer, 0) AND id <> $4::integer FOR UPDATE',
+        'SELECT id, nome_participante FROM fichas WHERE mesa_alocada = $1::integer AND assento_alocado = $2::integer AND COALESCE(turma_id, 0) = COALESCE($3::integer, 0) AND id <> $4::integer FOR UPDATE',
         [mesaNum, assentoNum, turmaId, fichaId]
       );
 
       if (ocupante.length > 0) {
         await client.query('ROLLBACK');
         return res.status(409).json({
-          error: 'O assento ' + assentoNum + ' da Mesa ' + mesaNum + ' do Salão de Lunch já está ocupado por ' + (ocupante[0].nome_participante || 'outro participante') + '.'
+          error:
+            'O assento ' +
+            assentoNum +
+            ' da Mesa ' +
+            mesaNum +
+            ' do Salão de Lunch já está ocupado por ' +
+            (ocupante[0].nome_participante || 'outro participante') +
+            '.'
         });
       }
     }
 
-    // 3. Atualizar alocação no Salão de Lunch com casting explícito ($1::integer)
     const sqlUpdate = `
-      UPDATE fichas 
-      SET mesa_alocada = $1::integer, 
-          assento_alocado = $2::integer, 
-          etapa_funil = CASE 
-            WHEN $1::integer IS NOT NULL AND (etapa_funil IS NULL OR etapa_funil IN ('lead', 'novo')) THEN 'entrevista' 
-            ELSE etapa_funil 
-          END, 
-          updated_at = CURRENT_TIMESTAMP 
-      WHERE id = $3::integer 
+      UPDATE fichas
+      SET mesa_alocada = $1::integer,
+          assento_alocado = $2::integer,
+          etapa_funil = CASE
+            WHEN $1::integer IS NOT NULL AND (etapa_funil IS NULL OR etapa_funil IN ('lead', 'novo')) THEN 'entrevista'
+            ELSE etapa_funil
+          END,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3::integer
       RETURNING id, empresa, nome_participante, mesa_alocada, assento_alocado, almoco_pago, cortesia_almoco, membro_giants, etapa_funil
     `;
 
@@ -131,7 +155,7 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
   }
 });
 
-// VALIDADOR DE ALMOÇO (PAGO R$ 1000, CORTESIA OU GIANTS)
+// 3. VALIDADOR DE ALMOÇO (PAGO R$ 1.000, CORTESIA DEBITANDO R$ 1.000 OU GIANTS)
 router.patch('/clientes/:id/almoco', async (req, res) => {
   const client = await pool.connect();
   try {
@@ -165,7 +189,6 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
       ? todos_empresa_ids.map((x) => parseInt(x, 10)).filter((n) => !isNaN(n))
       : [];
 
-    // Localiza todos os sócios não-GIANTS da empresa na turma
     const { rows: sociosEmpresa } = await client.query(
       `SELECT id, membro_giants
        FROM fichas
@@ -174,16 +197,14 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
          AND (
            id = $2::int
            OR id = ANY($3::int[])
-           OR ($4::text <> '' AND LENGTH($4::text) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $4::text)
+           OR ($4::text <> '' AND LENGTH($4::text) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\\D', '', 'g') = $4::text)
            OR ($5::text <> '' AND $5::text NOT IN ('empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada') AND LOWER(TRIM(COALESCE(empresa, ''))) = $5::text)
          )
        ORDER BY id ASC`,
       [base.turma_id, fichaId, idsEnviados, cnpjLimpo, empNorm]
     );
 
-    const todosIds = sociosEmpresa.length > 0
-      ? sociosEmpresa.map((s) => Number(s.id))
-      : [fichaId];
+    const todosIds = sociosEmpresa.length > 0 ? sociosEmpresa.map((s) => Number(s.id)) : [fichaId];
 
     const marcadosRaw = Array.isArray(participantes_ids)
       ? participantes_ids.map((x) => parseInt(x, 10)).filter((n) => !isNaN(n))
@@ -192,7 +213,6 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
     const titularPaganteId = idsParticipantes.includes(fichaId) ? fichaId : idsParticipantes[0];
 
     if (tipo === 'pago') {
-      // Marca almoço pago para os sócios selecionados e cobra R$ 1.000,00 uma única vez no CNPJ
       await client.query(
         `UPDATE fichas
          SET almoco_pago = CASE WHEN id = ANY($2::int[]) THEN true ELSE false END,
@@ -207,7 +227,7 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
         [todosIds, idsParticipantes, titularPaganteId, cv]
       );
     } else if (tipo === 'cortesia') {
-      // Debita os R$ 1.000,00 (valor_almoco = 0 e almoco_pago = false), mas garante o almoço e preserva a mesa dos sócios marcados
+      // Debita os R$ 1.000,00 (valor_almoco = 0 e almoco_pago = false), garantindo almoço e mesa para os sócios selecionados
       await client.query(
         `UPDATE fichas
          SET almoco_pago = false,
@@ -234,7 +254,6 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
         [todosIds]
       );
     } else {
-      // Pendente / Não vai ao almoço: debita R$ 1.000,00 e libera cadeira
       await client.query(
         `UPDATE fichas
          SET almoco_pago = false,
@@ -264,152 +283,18 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
   }
 });
 
-}
-
-    const cv = (cv_cartao || '').trim() || null;
-
-    await client.query('BEGIN');
-    await client.query("SET LOCAL app.user_role = 'SYSTEM'");
-
-    const { rows: baseRows } = await client.query(
-      'SELECT id, turma_id, empresa, cnpj, cpf_cnpj, membro_giants FROM fichas WHERE id = $1::int FOR UPDATE',
-      [fichaId]
-    );
-
-    if (baseRows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Empresa/participante não encontrado.' });
-    }
-
-    const base = baseRows[0];
-    const cnpjLimpo = String(base.cnpj || base.cpf_cnpj || '').replace(/\D/g, '');
-    const empNorm = String(base.empresa || '').trim().toLowerCase();
-
-    const idsEnviados = Array.isArray(todos_empresa_ids)
-      ? todos_empresa_ids.map((x) => parseInt(x, 10)).filter((n) => !isNaN(n))
-      : [];
-
-    // Localiza todos os sócios não-GIANTS da empresa na turma
-    const { rows: sociosEmpresa } = await client.query(
-      `SELECT id, membro_giants
-       FROM fichas
-       WHERE turma_id = $1::int
-         AND COALESCE(membro_giants, false) = false
-         AND (
-           id = $2::int
-           OR id = ANY($3::int[])
-           OR ($4::text <> '' AND LENGTH($4::text) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $4::text)
-           OR ($5::text <> '' AND $5::text NOT IN ('empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada') AND LOWER(TRIM(COALESCE(empresa, ''))) = $5::text)
-         )
-       ORDER BY id ASC`,
-      [base.turma_id, fichaId, idsEnviados, cnpjLimpo, empNorm]
-    );
-
-    const todosIds = sociosEmpresa.length > 0
-      ? sociosEmpresa.map((s) => Number(s.id))
-      : [fichaId];
-
-    const marcadosRaw = Array.isArray(participantes_ids)
-      ? participantes_ids.map((x) => parseInt(x, 10)).filter((n) => !isNaN(n))
-      : [];
-    const idsParticipantes = marcadosRaw.length > 0 ? marcadosRaw : todosIds;
-    const titularPaganteId = idsParticipantes.includes(fichaId) ? fichaId : idsParticipantes[0];
-
-    if (tipo === 'pago') {
-      // Marca almoço pago para os sócios selecionados e cobra R$ 1.000,00 uma única vez no CNPJ
-      await client.query(
-        `UPDATE fichas
-         SET almoco_pago = CASE WHEN id = ANY($2::int[]) THEN true ELSE false END,
-             cortesia_almoco = false,
-             membro_giants = false,
-             valor_almoco = CASE WHEN id = $3::int THEN 1000.00 ELSE 0.00 END,
-             cv_cartao = CASE WHEN id = ANY($2::int[]) THEN COALESCE($4::varchar, cv_cartao) ELSE NULL END,
-             mesa_alocada = CASE WHEN id = ANY($2::int[]) THEN mesa_alocada ELSE NULL END,
-             assento_alocado = CASE WHEN id = ANY($2::int[]) THEN assento_alocado ELSE NULL END,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = ANY($1::int[])`,
-        [todosIds, idsParticipantes, titularPaganteId, cv]
-      );
-    } else if (tipo === 'cortesia') {
-      // Debita os R$ 1.000,00 (valor_almoco = 0 e almoco_pago = false), mas garante o almoço e preserva a mesa dos sócios marcados
-      await client.query(
-        `UPDATE fichas
-         SET almoco_pago = false,
-             valor_almoco = 0.00,
-             cv_cartao = NULL,
-             cortesia_almoco = CASE WHEN id = ANY($2::int[]) THEN true ELSE false END,
-             membro_giants = false,
-             mesa_alocada = CASE WHEN id = ANY($2::int[]) THEN mesa_alocada ELSE NULL END,
-             assento_alocado = CASE WHEN id = ANY($2::int[]) THEN assento_alocado ELSE NULL END,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = ANY($1::int[])`,
-        [todosIds, idsParticipantes]
-      );
-    } else if (tipo === 'giants') {
-      await client.query(
-        `UPDATE fichas
-         SET almoco_pago = false,
-             cortesia_almoco = false,
-             membro_giants = true,
-             valor_almoco = 0.00,
-             cv_cartao = NULL,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = ANY($1::int[])`,
-        [todosIds]
-      );
-    } else {
-      // Pendente / Não vai ao almoço: debita R$ 1.000,00 e libera cadeira
-      await client.query(
-        `UPDATE fichas
-         SET almoco_pago = false,
-             cortesia_almoco = false,
-             valor_almoco = 0.00,
-             cv_cartao = NULL,
-             mesa_alocada = NULL,
-             assento_alocado = NULL,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = ANY($1::int[])`,
-        [todosIds]
-      );
-    }
-
-    const { rows: atualizadas } = await client.query(
-      'SELECT id, empresa, nome_participante, almoco_pago, cortesia_almoco, membro_giants, valor_almoco, cv_cartao, mesa_alocada, etapa_funil FROM fichas WHERE id = ANY($1::int[]) ORDER BY id ASC',
-      [todosIds]
-    );
-
-    await client.query('COMMIT');
-    res.json(atualizadas[0] || { sucesso: true, atualizadas });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    res.status(500).json({ error: 'Erro ao validar almoço: ' + err.message });
-  } finally {
-    client.release();
-  }
-});
-
-}
-
-    await client.query('COMMIT');
-    res.json(rows[0]);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    res.status(500).json({ error: 'Erro ao validar almoço: ' + err.message });
-  } finally {
-    client.release();
-  }
-});
-
+// 4. ATUALIZAÇÃO RÁPIDA DE ALMOÇO/CORTESIA (ATALHO DO SALÃO DE LUNCH)
 router.patch('/clientes/:id', async (req, res) => {
   try {
     const { almoco_pago, cortesia_almoco, cortesia, valor_almoco } = req.body;
     const cortesiaFinal = cortesia_almoco !== undefined ? cortesia_almoco : cortesia;
     const pagoFinal = cortesiaFinal === true && almoco_pago === undefined ? false : almoco_pago;
-    const valorFinal = cortesiaFinal === true && valor_almoco === undefined
-      ? 0
-      : pagoFinal === true && valor_almoco === undefined
-      ? 1000
-      : valor_almoco;
+    const valorFinal =
+      cortesiaFinal === true && valor_almoco === undefined
+        ? 0
+        : pagoFinal === true && valor_almoco === undefined
+        ? 1000
+        : valor_almoco;
 
     const { rows } = await pool.query(
       `UPDATE fichas
@@ -426,15 +311,8 @@ router.patch('/clientes/:id', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
+// 5. EDIÇÃO CADASTRAL DO CLIENTE
 router.put('/clientes/:id', async (req, res) => {
   const client = await pool.connect();
   try {
@@ -457,7 +335,7 @@ router.put('/clientes/:id', async (req, res) => {
     await client.query('BEGIN');
 
     const { rows: clienteAtual } = await client.query(
-      'SELECT  id, cashback, empresa, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae  FROM fichas WHERE id = $1 FOR UPDATE',
+      'SELECT id, cashback, empresa, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae FROM fichas WHERE id = $1 FOR UPDATE',
       [id]
     );
 
@@ -467,7 +345,7 @@ router.put('/clientes/:id', async (req, res) => {
     }
 
     const { rows } = await client.query(
-      `UPDATE fichas 
+      `UPDATE fichas
        SET empresa = COALESCE($1, empresa),
            nome_participante = COALESCE($2, nome_participante),
            email = COALESCE($3, email),
@@ -475,7 +353,7 @@ router.put('/clientes/:id', async (req, res) => {
            cnpj = COALESCE($5, cnpj),
            cashback = COALESCE($6, cashback),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $7 
+       WHERE id = $7
        RETURNING *`,
       [empresa, nome_completo, email, telefone, cnpj, cashback, id]
     );
@@ -490,12 +368,11 @@ router.put('/clientes/:id', async (req, res) => {
   }
 });
 
-
-// SINCRONIZAÇÃO EM LOTE DE CASHBACK DE UPGRADE (90% PAC/AE) POR CNPJ
+// 6. SINCRONIZAÇÃO EM LOTE DE CASHBACK DE UPGRADE POR CNPJ
 router.post('/clientes/sincronizar-cashback-cnpj', async (req, res) => {
   const client = await pool.connect();
   try {
-    const registros = Array.isArray(req.body) ? req.body : (req.body.registros || []);
+    const registros = Array.isArray(req.body) ? req.body : req.body.registros || [];
     if (registros.length === 0) {
       return res.status(400).json({ error: 'Envie um array de registros com cnpj/empresa e cashback_upgrade_90_pct.' });
     }
@@ -503,16 +380,15 @@ router.post('/clientes/sincronizar-cashback-cnpj', async (req, res) => {
     await client.query('BEGIN');
     let atualizados = 0;
 
-    // Deduplica por CNPJ antes de aplicar para garantir crédito único por empresa
     const mapaCnpj = new Map();
     for (const r of registros) {
       const cnpjLimpo = String(r.cnpj || r.cpfcnpj || '').replace(/\D/g, '');
       const razaoNorm = String(r.empresa || r.razaoSocial || '').trim().toUpperCase();
-      const chave = cnpjLimpo.length >= 11 ? `cnpj:${cnpjLimpo}` : (razaoNorm ? `emp:${razaoNorm}` : null);
+      const chave = cnpjLimpo.length >= 11 ? `cnpj:${cnpjLimpo}` : razaoNorm ? `emp:${razaoNorm}` : null;
       if (!chave) continue;
 
       const valInvestido = Number(r.valor_investido_pac_ae || 0);
-      const valCashback = Number(r.cashback_upgrade_90_pct || (valInvestido * 0.90) || 0);
+      const valCashback = Number(r.cashback_upgrade_90_pct || valInvestido * 0.9 || 0);
       const hist = r.historico_produtos_elegiveis || null;
 
       const atual = mapaCnpj.get(chave);
