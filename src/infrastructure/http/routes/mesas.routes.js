@@ -24,6 +24,16 @@ router.get('/auxiliares', async (req, res) => {
       FROM fichas
       WHERE mesa_alocada IS NOT NULL
         AND ($1::int IS NULL OR turma_id = $1::int)
+        AND COALESCE(ficha_fechada, false) = false
+        AND LOWER(TRIM(COALESCE(etapa_funil, ''))) NOT IN (
+          'aguardando_aprovacao', 'fechamento', 'concluido', 'concluida',
+          'vendido', 'decisao_futura', 'nao_fechou', 'reprovado', 'reprovada',
+          'recusado', 'recusada', 'sem_interesse'
+        )
+        AND LOWER(TRIM(COALESCE(status_aprovacao, ''))) NOT IN (
+          'aprovada', 'aprovado', 'aprovada_com_ressalva',
+          'recusada', 'recusado', 'negado', 'reprovado', 'reprovada'
+        )
       ORDER BY id ASC
     `, [turmaFiltro]);
 

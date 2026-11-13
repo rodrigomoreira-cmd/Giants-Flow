@@ -54,6 +54,16 @@ export default function Lunch() {
   const [cortesiasLocais, setCortesiasLocais] = useState({});
   const [carregando, setCarregando] = useState(true);
   const [liberandoGiants, setLiberandoGiants] = useState(false);
+  const [modalSistema, setModalSistema] = useState(null);
+  const [executandoModal, setExecutandoModal] = useState(false);
+
+  const abrirModalAviso = (tipo, titulo, mensagem) => {
+    setModalSistema({ tipo, titulo, mensagem });
+  };
+
+  const abrirModalConfirmacao = ({ tipo = 'aviso', titulo, mensagem, textoConfirmar = 'Confirmar', corConfirmar = '#ff5722', onConfirmar }) => {
+    setModalSistema({ tipo, titulo, mensagem, textoConfirmar, corConfirmar, onConfirmar });
+  };
   const [erro, setErro] = useState('');
 
   // Filtros da barra lateral
@@ -201,40 +211,57 @@ export default function Lunch() {
     });
   }, [clientesBase, idsSentados]);
 
-  const liberarTodosGiantsDasMesas = async () => {
+  const liberarTodosGiantsDasMesas = () => {
     if (giantsSentados.length === 0) {
-      alert('Não há nenhum membro GIANTS sentado nas mesas neste momento.');
+      abrirModalAviso('aviso', 'Nenhum GIANTS nas Mesas', 'Não há nenhum membro GIANTS sentado nas mesas neste momento.');
       return;
     }
 
-    const confirmar = window.confirm(
-      `Deseja remover todos os ${giantsSentados.length} membro(s) GIANTS das mesas agora (pós-almoço)?\n\n` +
-      `Os assentos ficarão imediatamente livres para as entrevistas comerciais da tarde/jantar.`
-    );
-    if (!confirmar) return;
-
-    try {
-      setLiberandoGiants(true);
-      const tIdAtiva = turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491';
-      const resp = await api.post('/mesas/liberar-giants', { turmaId: tIdAtiva });
-      await carregarDados();
-      alert(`${resp?.liberados ?? giantsSentados.length} membro(s) GIANTS liberados das mesas com sucesso!`);
-    } catch (err) {
-      alert('Erro ao liberar membros GIANTS: ' + (err.message || 'Falha na operação.'));
-    } finally {
-      setLiberandoGiants(false);
-    }
+    abrirModalConfirmacao({
+      tipo: 'aviso',
+      titulo: 'Liberar Membros GIANTS das Mesas',
+      mensagem:
+        `Deseja remover todos os ${giantsSentados.length} membro(s) GIANTS das mesas agora (pós-almoço)?\n\n` +
+        `Os assentos ficarão imediatamente livres para as entrevistas comerciais da tarde/jantar.`,
+      textoConfirmar: `Liberar ${giantsSentados.length} GIANTS`,
+      corConfirmar: '#d97706',
+      onConfirmar: async () => {
+        try {
+          setLiberandoGiants(true);
+          const tIdAtiva = turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491';
+          const resp = await api.post('/mesas/liberar-giants', { turmaId: tIdAtiva });
+          await carregarDados();
+          abrirModalAviso(
+            'sucesso',
+            'Mesas Liberadas com Sucesso',
+            `${resp?.liberados ?? giantsSentados.length} membro(s) GIANTS foram removidos das mesas e os assentos já estão disponíveis.`
+          );
+        } catch (err) {
+          abrirModalAviso('erro', 'Falha ao Liberar GIANTS', err.message || 'Não foi possível liberar os membros GIANTS.');
+        } finally {
+          setLiberandoGiants(false);
+        }
+      }
+    });
   };
 
   // 1. Filtra unicamente quem possui direito garantido ao almoço (checklist marcado, cortesia ou GIANTS)
   const todosParticipantes = useMemo(() => {
     const isConfirmadaFinanceiro = (item) => {
       const stAprov = String(item?.status_aprovacao || '').trim().toLowerCase();
+      const creditoSt = String(item?.analise_credito_status || '').trim().toUpperCase();
       const etapa = String(item?.etapa_funil || '').trim().toLowerCase();
       const fechada = Boolean(item?.ficha_fechada);
-      const aprovadaFin = ['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(stAprov);
-      const etapaConcluida = ['concluido', 'concluida', 'fechamento', 'vendido', 'decisao_futura', 'nao_fechou', 'reprovado'].includes(etapa);
-      return aprovadaFin || (fechada && etapaConcluida) || etapaConcluida;
+      const statusBloqueado = [
+        'aprovada', 'aprovado', 'aprovada_com_ressalva',
+        'recusada', 'recusado', 'negado', 'reprovado', 'reprovada'
+      ].includes(stAprov) || creditoSt === 'NEGADO';
+      const etapaEncerrada = [
+        'aguardando_aprovacao', 'fechamento', 'concluido', 'concluida',
+        'vendido', 'decisao_futura', 'nao_fechou', 'reprovado', 'reprovada',
+        'recusado', 'recusada', 'sem_interesse'
+      ].includes(etapa);
+      return fechada || statusBloqueado || etapaEncerrada;
     };
 
     const chavesConfirmadasFinanceiro = new Set();
@@ -437,7 +464,7 @@ export default function Lunch() {
       });
       carregarDados();
     } catch (err) {
-      alert('Erro ao registrar pagamento: ' + err.message);
+      abrirModalAviso('erro', 'Erro ao Registrar Pagamento', err.message);
     }
   };
 
@@ -474,7 +501,7 @@ export default function Lunch() {
       const livres = Math.max(0, capTotal - ocupados);
 
       if (livres === 0) {
-        alert(`A Mesa ${mesaAlvo.numero} está lotada (0 lugares livres). Aumente a capacidade (+) ou escolha outra mesa.`);
+        abrirModalAviso('aviso', `Mesa ${mesaAlvo.numero} Lotada`, `A Mesa ${mesaAlvo.numero} está com 0 lugares livres. Aumente a capacidade (+) ou escolha outra mesa disponível.`);
         return;
       }
 
@@ -505,18 +532,27 @@ export default function Lunch() {
           ? ` (sugestão ao lado: Mesa ${mesaVizinhaSugerida.numero} com ${mesaVizinhaSugerida.livres} lugares livres)`
           : '';
 
-        const confirmarDivisao = window.confirm(
-          `A empresa "${grupoSelecionadoAlocacao.empresa}" tem ${pendentes.length} pessoas e a Mesa ${mesaAlvo.numero} possui ${livres} ${livres === 1 ? 'lugar' : 'lugares'}.\n\n` +
-          `Para que ninguém fique sozinho, faremos a divisão equilibrada:\n` +
-          `• ${qtdNestaMesa} ${qtdNestaMesa === 1 ? 'pessoa senta' : 'pessoas sentam'} agora na Mesa ${mesaAlvo.numero}\n` +
-          `• ${sobra} ${sobra === 1 ? 'pessoa fica' : 'pessoas ficam'} prontas para a próxima mesa${textoVizinha}\n\n` +
-          `Deseja confirmar esta divisão?`
-        );
-        if (!confirmarDivisao) return;
-        listaParaSentar = pendentes.slice(0, qtdNestaMesa);
+        abrirModalConfirmacao({
+          tipo: 'aviso',
+          titulo: 'Divisão Equilibrada Entre Mesas',
+          mensagem:
+            `A empresa "${grupoSelecionadoAlocacao.empresa}" tem ${pendentes.length} pessoas e a Mesa ${mesaAlvo.numero} possui ${livres} ${livres === 1 ? 'lugar' : 'lugares'}.\n\n` +
+            `Para que ninguém fique sozinho, faremos a divisão equilibrada:\n` +
+            `• ${qtdNestaMesa} ${qtdNestaMesa === 1 ? 'pessoa senta' : 'pessoas sentam'} agora na Mesa ${mesaAlvo.numero}\n` +
+            `• ${sobra} ${sobra === 1 ? 'pessoa fica' : 'pessoas ficam'} prontas para a próxima mesa${textoVizinha}\n\n` +
+            `Deseja confirmar esta divisão?`,
+          textoConfirmar: 'Confirmar Divisão',
+          corConfirmar: '#ff5722',
+          onConfirmar: () => executarAlocacaoMesa(mesaId, mesaAlvo, pendentes, pendentes.slice(0, qtdNestaMesa), mesaVizinhaSugerida)
+        });
+        return;
       }
     }
 
+    await executarAlocacaoMesa(mesaId, mesaAlvo, pendentes, listaParaSentar, mesaVizinhaSugerida);
+  };
+
+  const executarAlocacaoMesa = async (mesaId, mesaAlvo, pendentes, listaParaSentar, mesaVizinhaSugerida) => {
     try {
       for (const socio of listaParaSentar) {
         await api.post('/entrevistas/agendar', {
@@ -555,7 +591,7 @@ export default function Lunch() {
 
       carregarDados();
     } catch (err) {
-      alert('Erro ao alocar empresa na mesa: ' + err.message);
+      abrirModalAviso('erro', 'Não Foi Possível Alocar na Mesa', err.message);
       carregarDados();
     }
   };
@@ -577,14 +613,22 @@ export default function Lunch() {
     }, 4500);
   };
 
-  const removerParticipante = async (entrevistaId) => {
-    if (!confirm('Deseja retirar o participante desta cadeira?')) return;
-    try {
-      await api.delete(`/mesas/cadeiras/${entrevistaId}`);
-      carregarDados();
-    } catch (err) {
-      alert('Erro ao remover assento: ' + err.message);
-    }
+  const removerParticipante = (entrevistaId) => {
+    abrirModalConfirmacao({
+      tipo: 'aviso',
+      titulo: 'Liberar Assento da Mesa',
+      mensagem: 'Deseja retirar este participante da cadeira e devolvê-lo para a lista de espera?',
+      textoConfirmar: 'Retirar da Cadeira',
+      corConfirmar: '#dc2626',
+      onConfirmar: async () => {
+        try {
+          await api.delete(`/mesas/cadeiras/${entrevistaId}`);
+          carregarDados();
+        } catch (err) {
+          abrirModalAviso('erro', 'Erro ao Remover Assento', err.message);
+        }
+      }
+    });
   };
 
   const adicionarMesa = async () => {
@@ -597,7 +641,7 @@ export default function Lunch() {
       });
       carregarDados();
     } catch (err) {
-      alert('Erro ao adicionar mesa: ' + err.message);
+      abrirModalAviso('erro', 'Erro ao Adicionar Mesa', err.message);
     }
   };
 
@@ -653,7 +697,7 @@ export default function Lunch() {
           : prev
       );
     } catch (err) {
-      alert('Erro ao atualizar entrevistadores da mesa: ' + err.message);
+      abrirModalAviso('erro', 'Erro ao Escalar Entrevistadores', err.message);
     }
   };
 
@@ -1293,15 +1337,22 @@ export default function Lunch() {
                             <span className="material-symbols-outlined" style={{ fontSize: '0.85rem' }}>mic</span>
                           </button>
                           <button
-                            onClick={async () => {
-                              if (confirm(`Deseja remover a Mesa ${mesa.numero}?`)) {
-                                try {
-                                  await api.delete(`/mesas/${mesa.id}`);
-                                  carregarDados();
-                                } catch (e) {
-                                  alert('Erro ao excluir mesa: ' + e.message);
+                            onClick={() => {
+                              abrirModalConfirmacao({
+                                tipo: 'erro',
+                                titulo: `Remover Mesa ${mesa.numero}`,
+                                mensagem: `Tem certeza que deseja excluir a Mesa ${mesa.numero} da estrutura do salão?`,
+                                textoConfirmar: 'Excluir Mesa',
+                                corConfirmar: '#dc2626',
+                                onConfirmar: async () => {
+                                  try {
+                                    await api.delete(`/mesas/${mesa.id}`);
+                                    carregarDados();
+                                  } catch (e) {
+                                    abrirModalAviso('erro', 'Não Foi Possível Excluir a Mesa', e.message);
+                                  }
                                 }
-                              }
+                              });
                             }}
                             title="Excluir mesa"
                             style={{ width: '22px', height: '22px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#dc2626' }}
@@ -1603,6 +1654,199 @@ export default function Lunch() {
               >
                 Concluir Escala
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PADRÃO DO SISTEMA (AVISOS, ERROS E CONFIRMAÇÕES) */}
+      {modalSistema && (
+        <div
+          onClick={() => !executandoModal && setModalSistema(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              width: '100%',
+              maxWidth: '460px',
+              overflow: 'hidden',
+              boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.35)',
+              border: '1px solid #e2e8f0'
+            }}
+          >
+            <div
+              style={{
+                padding: '1.1rem 1.35rem',
+                background:
+                  modalSistema.tipo === 'erro'
+                    ? '#fef2f2'
+                    : modalSistema.tipo === 'sucesso'
+                    ? '#f0fdf4'
+                    : '#fffbeb',
+                borderBottom:
+                  modalSistema.tipo === 'erro'
+                    ? '1px solid #fecaca'
+                    : modalSistema.tipo === 'sucesso'
+                    ? '1px solid #bbf7d0'
+                    : '1px solid #fde68a',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span
+                  className="material-symbols-outlined"
+                  style={{
+                    fontSize: '1.35rem',
+                    color:
+                      modalSistema.tipo === 'erro'
+                        ? '#dc2626'
+                        : modalSistema.tipo === 'sucesso'
+                        ? '#16a34a'
+                        : '#d97706'
+                  }}
+                >
+                  {modalSistema.tipo === 'erro'
+                    ? 'error'
+                    : modalSistema.tipo === 'sucesso'
+                    ? 'check_circle'
+                    : 'warning'}
+                </span>
+                <h3
+                  style={{
+                    margin: 0,
+                    fontSize: '1rem',
+                    fontWeight: '800',
+                    color:
+                      modalSistema.tipo === 'erro'
+                        ? '#991b1b'
+                        : modalSistema.tipo === 'sucesso'
+                        ? '#166534'
+                        : '#92400e'
+                  }}
+                >
+                  {modalSistema.titulo}
+                </h3>
+              </div>
+
+              <button
+                type="button"
+                disabled={executandoModal}
+                onClick={() => setModalSistema(null)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#64748b',
+                  cursor: 'pointer',
+                  fontSize: '1.1rem',
+                  fontWeight: '800'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div
+              style={{
+                padding: '1.3rem 1.35rem',
+                fontSize: '0.9rem',
+                color: '#334155',
+                lineHeight: 1.55,
+                whiteSpace: 'pre-line'
+              }}
+            >
+              {modalSistema.mensagem}
+            </div>
+
+            <div
+              style={{
+                padding: '0.9rem 1.35rem',
+                background: '#f8fafc',
+                borderTop: '1px solid #e2e8f0',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '0.6rem'
+              }}
+            >
+              {modalSistema.onConfirmar ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={executandoModal}
+                    onClick={() => setModalSistema(null)}
+                    style={{
+                      background: '#ffffff',
+                      color: '#475569',
+                      border: '1px solid #cbd5e1',
+                      padding: '0.55rem 1.1rem',
+                      borderRadius: '8px',
+                      fontWeight: '700',
+                      fontSize: '0.84rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={executandoModal}
+                    onClick={async () => {
+                      const acao = modalSistema.onConfirmar;
+                      setModalSistema(null);
+                      try {
+                        setExecutandoModal(true);
+                        await acao();
+                      } finally {
+                        setExecutandoModal(false);
+                      }
+                    }}
+                    style={{
+                      background: modalSistema.corConfirmar || '#ff5722',
+                      color: '#ffffff',
+                      border: 'none',
+                      padding: '0.55rem 1.2rem',
+                      borderRadius: '8px',
+                      fontWeight: '800',
+                      fontSize: '0.84rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {modalSistema.textoConfirmar || 'Confirmar'}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setModalSistema(null)}
+                  style={{
+                    background: '#0f172a',
+                    color: '#ffffff',
+                    border: 'none',
+                    padding: '0.55rem 1.3rem',
+                    borderRadius: '8px',
+                    fontWeight: '800',
+                    fontSize: '0.84rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Entendi
+                </button>
+              )}
             </div>
           </div>
         </div>
