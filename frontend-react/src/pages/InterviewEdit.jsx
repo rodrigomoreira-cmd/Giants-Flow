@@ -19,6 +19,7 @@ export default function InterviewEdit() {
   const [erro, setErro] = useState('');
   const [catalogoProdutos, setCatalogoProdutos] = useState([]);
   const [modalConclusao, setModalConclusao] = useState(null);
+  const [modalAviso, setModalAviso] = useState(null);
   const [modalReabrir, setModalReabrir] = useState(false);
   const [motivoReabertura, setMotivoReabertura] = useState('');
   const [reabrindoFicha, setReabrindoFicha] = useState(false);
@@ -314,11 +315,11 @@ export default function InterviewEdit() {
 
   const submeterFicha = async () => {
     if (ficha.ficha_fechada) {
-      alert('Esta ficha já está encerrada e aguardando aprovação do financeiro.');
+      setModalAviso({ tipo: 'aviso', titulo: 'Ficha Encerrada', mensagem: 'Esta ficha já está encerrada e aguardando aprovação do financeiro.' });
       return;
     }
     if (!podeSubmeter) {
-      alert(`Preencha os campos obrigatórios:\n- ${camposFaltantes.join('\n- ')}`);
+      setModalAviso({ tipo: 'erro', titulo: 'Campos Obrigatórios Pendentes', mensagem: 'Preencha os seguintes campos antes de registrar: ' + camposFaltantes.join(', ') });
       return;
     }
 
@@ -396,7 +397,7 @@ export default function InterviewEdit() {
         formaRestante: ficha.forma_restante
       });
     } catch (err) {
-      alert(`Erro ao registrar: ${err.message}`);
+      setModalAviso({ tipo: 'erro', titulo: 'Erro ao Registrar Entrevista', mensagem: err.message });
     } finally {
       setSalvando(false);
     }
@@ -416,7 +417,7 @@ export default function InterviewEdit() {
       setModalReabrir(false);
       setMotivoReabertura('');
     } catch (err) {
-      alert(`Erro ao reabrir ficha: ${err.message}`);
+      setModalAviso({ tipo: 'erro', titulo: 'Erro ao Reabrir Ficha', mensagem: err.message });
     } finally {
       setReabrindoFicha(false);
     }

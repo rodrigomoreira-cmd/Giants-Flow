@@ -23,6 +23,9 @@ export default function Interviews() {
   const [busca, setBusca] = useState('');
   const [abaFiltro, setAbaFiltro] = useState('ATIVAS');
   const [erro, setErro] = useState('');
+  const [modalReabrirEmpresa, setModalReabrirEmpresa] = useState(null);
+  const [motivoReabrir, setMotivoReabrir] = useState('');
+  const [reabrindo, setReabrindo] = useState(false);
 
   const sessaoOperador = (() => {
     try {
@@ -168,14 +171,25 @@ export default function Interviews() {
     carregarSessoes();
   }, []);
 
-  const reabrirFichaRapido = async (s) => {
-    const motivo = window.prompt(`Informe o motivo para reabrir a ficha de "${s.empresa}" (Admin):`, 'Ajuste comercial solicitado');
-    if (motivo === null) return;
+  const abrirModalReabertura = (s) => {
+    setMotivoReabrir('');
+    setModalReabrirEmpresa(s);
+  };
+
+  const confirmarReaberturaEmpresa = async () => {
+    if (!modalReabrirEmpresa) return;
     try {
-      await api.post(`/entrevistas/${s.id}/reabrir`, { motivo });
+      setReabrindo(true);
+      await api.post(`/entrevistas/${modalReabrirEmpresa.id}/reabrir`, {
+        motivo: motivoReabrir.trim() || 'Ajuste comercial solicitado pelo Administrador'
+      });
+      setModalReabrirEmpresa(null);
       await carregarSessoes();
     } catch (err) {
-      alert(`Erro ao reabrir ficha: ${err.message}`);
+      setErro(`Erro ao reabrir ficha: ${err.message}`);
+      setModalReabrirEmpresa(null);
+    } finally {
+      setReabrindo(false);
     }
   };
 
@@ -364,7 +378,7 @@ export default function Interviews() {
                       <div style={{ display: 'flex', gap: '0.45rem', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
                         {s.fichaFechada && isAdmin && (
                           <button
-                            onClick={() => reabrirFichaRapido(s)}
+                            onClick={() => abrirModalReabertura(s)}
                             title="Reabrir ficha encerrada (Administrador)"
                             style={{
                               background: '#0f172a',
@@ -435,6 +449,55 @@ export default function Interviews() {
           </tbody>
         </table>
       </div>
+
+      {/* MODAL DE REABERTURA DE FICHA NO PADRÃO DO SISTEMA (ADMIN) */}
+      {modalReabrirEmpresa && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.55)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
+          <div style={{ background: '#ffffff', borderRadius: '14px', maxWidth: '460px', width: '100%', overflow: 'hidden', boxShadow: '0 20px 45px rgba(15, 23, 42, 0.22)', border: '1px solid #e2e8f0' }}>
+            <div style={{ padding: '1.2rem 1.4rem', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+              <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#fff7ed', color: '#ff5722', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span className="material-symbols-outlined" style={{ fontSize: '1.35rem' }}>lock_open</span>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.72rem', fontWeight: '800', color: '#ff5722' }}>PERMISSÃO ADMINISTRADOR</div>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '800', color: '#0f172a' }}>Reabrir Ficha Encerrada</h3>
+              </div>
+            </div>
+            <div style={{ padding: '1.25rem 1.4rem' }}>
+              <p style={{ fontSize: '0.84rem', color: '#475569', margin: '0 0 0.9rem 0' }}>
+                Deseja destravar a ficha da empresa <strong>{modalReabrirEmpresa.empresa}</strong> para edição comercial?
+              </p>
+              <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: '700', color: '#334155', marginBottom: '0.35rem' }}>
+                Motivo da reabertura:
+              </label>
+              <textarea
+                rows={3}
+                value={motivoReabrir}
+                onChange={(e) => setMotivoReabrir(e.target.value)}
+                placeholder="Ex: Ajuste na condição de pagamento ou inclusão de sócio..."
+                style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.84rem', boxSizing: 'border-box' }}
+              />
+            </div>
+            <div style={{ padding: '0.85rem 1.4rem', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: '0.6rem' }}>
+              <button
+                type="button"
+                onClick={() => setModalReabrirEmpresa(null)}
+                style={{ background: '#fff', border: '1px solid #cbd5e1', color: '#475569', padding: '0.55rem 1rem', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '0.82rem' }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={reabrindo}
+                onClick={confirmarReaberturaEmpresa}
+                style={{ background: '#ff5722', border: 'none', color: '#fff', padding: '0.55rem 1.15rem', borderRadius: '8px', fontWeight: '700', cursor: 'pointer', fontSize: '0.82rem' }}
+              >
+                {reabrindo ? 'Reabrindo...' : 'Confirmar Reabertura'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

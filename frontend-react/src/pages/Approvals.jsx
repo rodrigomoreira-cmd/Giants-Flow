@@ -41,6 +41,8 @@ export default function Approvals() {
 
   // Estado do Modal de Análise de Crédito & Deliberação
   const [propSelecionada, setPropSelecionada] = useState(null);
+  const [erroModal, setErroModal] = useState('');
+  const [modalFeedback, setModalFeedback] = useState(null);
   const [analiseCreditoStatus, setAnaliseCreditoStatus] = useState('APROVADO');
   const [statusSerasaCodigo, setStatusSerasaCodigo] = useState('sem_restricao');
   const [statusSerasaTexto, setStatusSerasaTexto] = useState('');
@@ -68,11 +70,11 @@ export default function Approvals() {
   }, []);
 
   const abrirModalAnalise = (prop) => {
-    const dp = prop.dados_proposta || {};
     const temRestricaoPrev =
       String(prop.analise_credito_status || prop.af_decisao_financeiro || '').toUpperCase() === 'NEGADO' ||
       String(prop.status_serasa_codigo || prop.af_status_serasa || '').includes('restricao');
 
+    setErroModal('');
     setPropSelecionada(prop);
     setAnaliseCreditoStatus(
       prop.analise_credito_status || prop.af_decisao_financeiro || (temRestricaoPrev ? 'NEGADO' : 'APROVADO')
@@ -90,14 +92,15 @@ export default function Approvals() {
 
   const submeterDeliberacao = async (decisaoFinal) => {
     if (!propSelecionada) return;
+    setErroModal('');
 
     if (decisaoFinal === 'recusado' && !parecerFinanceiro.trim() && !statusSerasaTexto.trim()) {
-      alert('Informe o parecer financeiro ou o detalhamento da restrição Serasa antes de recusar a proposta.');
+      setErroModal('Informe o parecer financeiro ou o detalhamento da restrição Serasa antes de recusar a proposta.');
       return;
     }
 
     if (decisaoFinal === 'aprovado_com_ressalva' && !condicaoEspecial.trim() && !parecerFinanceiro.trim()) {
-      alert('Informe a condição especial / garantia exigida para aprovar com ressalva.');
+      setErroModal('Informe a condição especial / garantia exigida para aprovar com ressalva.');
       return;
     }
 
@@ -114,10 +117,27 @@ export default function Approvals() {
         condicao_especial: condicaoEspecial,
         parecer: parecerFinanceiro
       });
+
+      const empresaNome = propSelecionada.empresa || propSelecionada.nome_participante;
+      const protocolo = `PROP-${String(propSelecionada.id).padStart(3, '0')}`;
       setPropSelecionada(null);
       await carregarAprovacoes();
+
+      setModalFeedback({
+        tipo: decisaoFinal === 'recusado' ? 'recusado' : decisaoFinal === 'aprovado_com_ressalva' ? 'ressalva' : 'aprovado',
+        protocolo,
+        empresa: empresaNome,
+        titulo:
+          decisaoFinal === 'recusado'
+            ? 'Proposta Recusada / Negada'
+            : decisaoFinal === 'aprovado_com_ressalva'
+            ? 'Proposta Aprovada com Ressalva'
+            : 'Proposta Aprovada com Sucesso',
+        credito: analiseCreditoStatus,
+        serasa: statusSerasaTexto || 'Sem restrições apontadas'
+      });
     } catch (err) {
-      alert(`Erro ao registrar deliberação: ${err.message}`);
+      setErroModal(`Erro ao registrar deliberação: ${err.message}`);
     } finally {
       setSalvandoAnalise(false);
     }
@@ -312,7 +332,7 @@ export default function Approvals() {
                       <button
                         onClick={() => abrirModalAnalise(prop)}
                         style={{
-                          background: '#0f172a',
+                          background: '#ff5722',
                           color: '#fff',
                           border: 'none',
                           padding: '0.5rem 0.95rem',
@@ -337,7 +357,7 @@ export default function Approvals() {
         </table>
       </div>
 
-      {/* MODAL COMPLETO DE ANÁLISE DE CRÉDITO, STATUS SERASA E DELIBERAÇÃO */}
+      {/* MODAL DE ANÁLISE DE CRÉDITO, STATUS SERASA E DELIBERAÇÃO (PADRÃO DO SISTEMA) */}
       {propSelecionada && (() => {
         const dp = propSelecionada.dados_proposta || {};
         const valorNeg = Number(propSelecionada.valor_negociado ?? dp.valorTotal ?? propSelecionada.proposta_valor_total ?? 0);
@@ -353,44 +373,51 @@ export default function Approvals() {
           : [];
 
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.72)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem', overflowY: 'auto' }}>
-            <div style={{ background: '#ffffff', borderRadius: '16px', maxWidth: '780px', width: '100%', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)', border: '1px solid #e2e8f0', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
-              {/* Topo Modal */}
-              <div style={{ background: '#0f172a', color: '#fff', padding: '1.25rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.55)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
+            <div style={{ background: '#ffffff', borderRadius: '14px', maxWidth: '800px', width: '100%', overflow: 'hidden', boxShadow: '0 20px 45px rgba(15, 23, 42, 0.22)', border: '1px solid #e2e8f0', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
+              {/* Cabeçalho Limpo Padrão do Sistema */}
+              <div style={{ background: '#ffffff', padding: '1.25rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
                 <div>
-                  <div style={{ fontSize: '0.72rem', fontWeight: '800', color: '#fb923c', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    PROP-{String(propSelecionada.id).padStart(3, '0')} • Mesa de Crédito & Aprovação Financeira
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.3rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: '800', color: '#ff5722', background: '#fff7ed', border: '1px solid #fed7aa', padding: '0.18rem 0.55rem', borderRadius: '6px' }}>
+                      PROP-{String(propSelecionada.id).padStart(3, '0')}
+                    </span>
+                    <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#475569', background: '#f1f5f9', padding: '0.18rem 0.55rem', borderRadius: '6px' }}>
+                      Mesa de Crédito & Aprovação Financeira
+                    </span>
                   </div>
-                  <h3 style={{ margin: '0.2rem 0 0', fontSize: '1.15rem', fontWeight: '800' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '800', color: '#0f172a' }}>
                     {propSelecionada.empresa || propSelecionada.nome_participante}
                   </h3>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setPropSelecionada(null)}
-                  style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', width: '34px', height: '34px', borderRadius: '8px', cursor: 'pointer', fontSize: '1.1rem' }}
+                  style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#64748b', width: '34px', height: '34px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 >
-                  ✕
+                  <span className="material-symbols-outlined" style={{ fontSize: '1.15rem' }}>close</span>
                 </button>
               </div>
 
               {/* Corpo Rolável */}
-              <div style={{ padding: '1.5rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div style={{ padding: '1.35rem 1.5rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.15rem', background: '#f8fafc' }}>
                 {/* Resumo da Proposta & Cashback */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.85rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '1rem' }}>
-                  <div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.85rem' }}>
+                  <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0.95rem' }}>
                     <div style={{ fontSize: '0.7rem', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>Empresa / CNPJ</div>
-                    <div style={{ fontSize: '0.86rem', fontWeight: '700', color: '#0f172a', marginTop: '0.15rem' }}>
+                    <div style={{ fontSize: '0.86rem', fontWeight: '700', color: '#0f172a', marginTop: '0.2rem' }}>
                       {propSelecionada.cnpj || propSelecionada.cpf_cnpj || 'CNPJ não informado'}
                     </div>
-                    <div style={{ fontSize: '0.76rem', color: '#475569', marginTop: '0.2rem' }}>
+                    <div style={{ fontSize: '0.76rem', color: '#475569', marginTop: '0.25rem' }}>
                       {sociosContrato.length > 0
                         ? `Sócios (${sociosContrato.length}): ${sociosContrato.map((s) => s.nome).join(', ')}`
                         : `Titular: ${propSelecionada.nome_participante}`}
                     </div>
                   </div>
-                  <div>
+
+                  <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0.95rem' }}>
                     <div style={{ fontSize: '0.7rem', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>Composição Financeira</div>
-                    <div style={{ fontSize: '0.8rem', color: '#334155', marginTop: '0.15rem' }}>
+                    <div style={{ fontSize: '0.8rem', color: '#334155', marginTop: '0.2rem' }}>
                       Negociado: <strong>{fmtBRL(valorNeg)}</strong>
                     </div>
                     {cbTotal > 0 && (
@@ -409,29 +436,30 @@ export default function Approvals() {
                     <div style={{ fontSize: '0.78rem', color: '#0284c7', fontWeight: '700' }}>
                       (-) Entrada: -{fmtBRL(entrada)}
                     </div>
-                    <div style={{ fontSize: '0.95rem', fontWeight: '900', color: '#ea580c', marginTop: '0.2rem', borderTop: '1px dashed #cbd5e1', paddingTop: '0.2rem' }}>
+                    <div style={{ fontSize: '0.95rem', fontWeight: '900', color: '#ff5722', marginTop: '0.25rem', borderTop: '1px dashed #cbd5e1', paddingTop: '0.25rem' }}>
                       Saldo Final: {fmtBRL(saldoFinal)}
                     </div>
                   </div>
-                  <div>
+
+                  <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0.95rem' }}>
                     <div style={{ fontSize: '0.7rem', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>Pagamento Acordado</div>
-                    <div style={{ fontSize: '0.82rem', color: '#0f172a', fontWeight: '700', marginTop: '0.15rem' }}>
+                    <div style={{ fontSize: '0.82rem', color: '#0f172a', fontWeight: '700', marginTop: '0.2rem' }}>
                       Entrada: {fmtBRL(entrada)} ({dp.formaEntrada || 'Pix'})
                     </div>
                     <div style={{ fontSize: '0.82rem', color: '#0f172a', fontWeight: '700', marginTop: '0.15rem' }}>
                       A Parcelar: {fmtBRL(saldoFinal)}
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: '#475569' }}>
+                    <div style={{ fontSize: '0.78rem', color: '#475569', marginTop: '0.15rem' }}>
                       Parcelas: {parcelas}x de {fmtBRL(valorParcela)} ({dp.formaRestante || 'Pix'})
                     </div>
                   </div>
                 </div>
 
                 {/* Seção 1: Análise de Crédito & Consulta Serasa */}
-                <div style={{ border: '1.5px solid #cbd5e1', borderRadius: '12px', padding: '1.15rem', background: '#ffffff' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                    <span style={{ fontSize: '0.85rem', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <span className="material-symbols-outlined" style={{ color: '#0284c7', fontSize: '1.2rem' }}>account_balance</span>
+                <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '1.15rem', background: '#ffffff' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '0.86rem', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <span className="material-symbols-outlined" style={{ color: '#ff5722', fontSize: '1.2rem' }}>account_balance</span>
                       1. Análise de Crédito & Status Serasa (CPF / CNPJ)
                     </span>
 
@@ -443,7 +471,7 @@ export default function Approvals() {
                           setStatusSerasaCodigo('sem_restricao');
                           setStatusSerasaTexto('APROVADO — SEM RESTRIÇÕES FINANCEIRAS OU PROTESTOS NO CPF/CNPJ.');
                         }}
-                        style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '0.28rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: '700', cursor: 'pointer' }}
+                        style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '0.3rem 0.65rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '700', cursor: 'pointer' }}
                       >
                         + Sem Restrição
                       </button>
@@ -456,7 +484,7 @@ export default function Approvals() {
                             setStatusSerasaTexto('CLIENTE POSSUI X PENDÊNCIAS FINANCEIRAS (DÍVIDA COM BANCOS) NO VALOR TOTAL DE R$ 0,00 / POSSUI TAMBÉM X PROTESTOS QUE TOTALIZAM R$ 0,00');
                           }
                         }}
-                        style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '0.28rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: '700', cursor: 'pointer' }}
+                        style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '0.3rem 0.65rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '700', cursor: 'pointer' }}
                       >
                         + Modelo Pendências / Protestos
                       </button>
@@ -475,7 +503,7 @@ export default function Approvals() {
                           width: '100%',
                           padding: '0.58rem',
                           borderRadius: '8px',
-                          border: '1.5px solid #cbd5e1',
+                          border: '1px solid #cbd5e1',
                           fontWeight: '800',
                           fontSize: '0.84rem',
                           color: analiseCreditoStatus === 'NEGADO' ? '#dc2626' : '#059669',
@@ -494,7 +522,7 @@ export default function Approvals() {
                       <select
                         value={statusSerasaCodigo}
                         onChange={(e) => setStatusSerasaCodigo(e.target.value)}
-                        style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.84rem', background: '#fff' }}
+                        style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.84rem', background: '#fff', color: '#0f172a' }}
                       >
                         <option value="sem_restricao">Sem Restrição</option>
                         <option value="score_alto_sem_restricao">Score Alto / Sem Restrição</option>
@@ -574,14 +602,25 @@ export default function Approvals() {
 
                 {/* Alerta orientativo quando há restrição Serasa */}
                 {(analiseCreditoStatus === 'NEGADO' || statusSerasaCodigo !== 'sem_restricao') && (
-                  <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '10px', padding: '0.8rem 1rem', fontSize: '0.8rem', color: '#92400e' }}>
-                    <strong>Cliente com Restrição / Atenção no Serasa:</strong> Você pode <strong>Recusar</strong> a proposta ou, caso a diretoria/financeiro aceite mediante garantia (entrada reforçada, cartão ou avalista), utilizar <strong>Aprovar com Ressalva</strong> para manter o histórico da restrição registrado na ficha.
+                  <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '10px', padding: '0.8rem 1rem', fontSize: '0.8rem', color: '#92400e', display: 'flex', alignItems: 'flex-start', gap: '0.55rem' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '1.15rem', color: '#d97706' }}>warning</span>
+                    <div>
+                      <strong>Cliente com Restrição / Atenção no Serasa:</strong> Você pode <strong>Recusar</strong> a proposta ou, caso o financeiro aceite mediante garantia (entrada reforçada, cartão ou avalista), utilizar <strong>Aprovar com Ressalva</strong> para manter o histórico da restrição registrado na ficha.
+                    </div>
+                  </div>
+                )}
+
+                {/* Banner de Erro Interno no Padrão do Sistema (sem alert nativo) */}
+                {erroModal && (
+                  <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '0.8rem 1rem', color: '#b91c1c', fontSize: '0.82rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '1.15rem', color: '#dc2626' }}>error</span>
+                    <span>{erroModal}</span>
                   </div>
                 )}
               </div>
 
               {/* Rodapé de Deliberação */}
-              <div style={{ padding: '1rem 1.5rem', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div style={{ padding: '1rem 1.5rem', background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
                 <button
                   type="button"
                   onClick={() => setPropSelecionada(null)}
@@ -595,27 +634,30 @@ export default function Approvals() {
                     type="button"
                     disabled={salvandoAnalise}
                     onClick={() => submeterDeliberacao('recusado')}
-                    style={{ background: '#fff', color: '#dc2626', border: '1.5px solid #fca5a5', padding: '0.6rem 1.05rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer' }}
+                    style={{ background: '#fff', color: '#dc2626', border: '1.5px solid #fca5a5', padding: '0.6rem 1.05rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
                   >
-                    ✖ Recusar Proposta
+                    <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>close</span>
+                    Recusar Proposta
                   </button>
 
                   <button
                     type="button"
                     disabled={salvandoAnalise}
                     onClick={() => submeterDeliberacao('aprovado_com_ressalva')}
-                    style={{ background: '#d97706', color: '#fff', border: 'none', padding: '0.6rem 1.05rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer' }}
+                    style={{ background: '#d97706', color: '#fff', border: 'none', padding: '0.6rem 1.05rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
                   >
-                    ⚠ Aprovar c/ Ressalva (Restrição)
+                    <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>warning</span>
+                    Aprovar c/ Ressalva
                   </button>
 
                   <button
                     type="button"
                     disabled={salvandoAnalise}
                     onClick={() => submeterDeliberacao('aprovado')}
-                    style={{ background: '#059669', color: '#fff', border: 'none', padding: '0.6rem 1.2rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer' }}
+                    style={{ background: '#059669', color: '#fff', border: 'none', padding: '0.6rem 1.2rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
                   >
-                    ✔ Aprovar Proposta
+                    <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>check_circle</span>
+                    {salvandoAnalise ? 'Gravando...' : 'Aprovar Proposta'}
                   </button>
                 </div>
               </div>
@@ -623,6 +665,52 @@ export default function Approvals() {
           </div>
         );
       })()}
+
+      {/* MODAL DE CONFIRMAÇÃO DA DELIBERAÇÃO NO PADRÃO DO SISTEMA */}
+      {modalFeedback && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.55)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: '1rem' }}>
+          <div style={{ background: '#ffffff', borderRadius: '14px', maxWidth: '460px', width: '100%', overflow: 'hidden', boxShadow: '0 20px 45px rgba(15, 23, 42, 0.22)', border: '1px solid #e2e8f0' }}>
+            <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '10px',
+                background: modalFeedback.tipo === 'recusado' ? '#fef2f2' : modalFeedback.tipo === 'ressalva' ? '#fffbeb' : '#ecfdf5',
+                color: modalFeedback.tipo === 'recusado' ? '#dc2626' : modalFeedback.tipo === 'ressalva' ? '#d97706' : '#059669',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <span className="material-symbols-outlined" style={{ fontSize: '1.45rem' }}>
+                  {modalFeedback.tipo === 'recusado' ? 'cancel' : modalFeedback.tipo === 'ressalva' ? 'warning' : 'check_circle'}
+                </span>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.72rem', fontWeight: '800', color: '#ff5722' }}>{modalFeedback.protocolo}</div>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '800', color: '#0f172a' }}>{modalFeedback.titulo}</h3>
+              </div>
+            </div>
+
+            <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.84rem', color: '#334155' }}>
+              <div><strong>Empresa:</strong> {modalFeedback.empresa}</div>
+              <div><strong>Análise de Crédito:</strong> {modalFeedback.credito}</div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.65rem 0.8rem', fontSize: '0.78rem', color: '#475569' }}>
+                <strong>Status Serasa:</strong> {modalFeedback.serasa}
+              </div>
+            </div>
+
+            <div style={{ padding: '0.9rem 1.5rem', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setModalFeedback(null)}
+                style={{ background: '#ff5722', color: '#fff', border: 'none', padding: '0.55rem 1.25rem', borderRadius: '8px', fontWeight: '700', fontSize: '0.82rem', cursor: 'pointer' }}
+              >
+                Concluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

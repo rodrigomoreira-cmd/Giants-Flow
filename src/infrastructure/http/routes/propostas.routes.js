@@ -420,20 +420,20 @@ router.post('/financeiro/analisar', async (req, res) => {
     // Atualiza a ficha principal e sincroniza todos os sócios do mesmo CNPJ/Empresa na turma
     const { rows } = await client.query(
       `UPDATE fichas
-       SET status_aprovacao = $1,
-           etapa_funil = $2,
-           analise_credito_status = $3,
-           status_serasa_codigo = $4,
-           status_serasa_texto = NULLIF($5, ''),
-           parecer_financeiro = NULLIF($6, ''),
-           ficha_fechada = CASE WHEN $1 = 'recusada' THEN false ELSE true END,
+       SET status_aprovacao = $1::varchar,
+           etapa_funil = $2::varchar,
+           analise_credito_status = $3::varchar,
+           status_serasa_codigo = $4::varchar,
+           status_serasa_texto = NULLIF($5::text, ''),
+           parecer_financeiro = NULLIF($6::text, ''),
+           ficha_fechada = CASE WHEN $1::text = 'recusada' THEN false ELSE true END,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $7
+       WHERE id = $7::int
           OR (
-            turma_id = $8
+            turma_id = $8::int
             AND (
-              ($9 <> '' AND LENGTH($9) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $9)
-              OR ($9 = '' AND $10 <> '' AND $10 <> 'empresa sga' AND LOWER(TRIM(COALESCE(empresa, ''))) = $10)
+              ($9::text <> '' AND LENGTH($9::text) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $9::text)
+              OR ($9::text = '' AND $10::text <> '' AND $10::text <> 'empresa sga' AND LOWER(TRIM(COALESCE(empresa, ''))) = $10::text)
             )
           )
        RETURNING *`,
@@ -451,9 +451,9 @@ router.post('/financeiro/analisar', async (req, res) => {
       const statusPropEnum = novoStatus === 'recusada' ? 'reprovada' : 'aprovada';
       await client.query(
         `UPDATE propostas
-         SET status = $1,
-             condicoes_especiais = COALESCE(NULLIF($2, ''), condicoes_especiais)
-         WHERE id = $3`,
+         SET status = $1::status_prop,
+             condicoes_especiais = COALESCE(NULLIF($2::text, ''), condicoes_especiais)
+         WHERE id = $3::int`,
         [statusPropEnum, condicao_especial || parecerFinal, propId]
       );
 
@@ -461,7 +461,7 @@ router.post('/financeiro/analisar', async (req, res) => {
         `INSERT INTO analises_financeiras (
            proposta_id, analista_id, status_serasa, decisao_financeiro,
            parecer, analisado_em, score_serasa, aprovado, motivo_recusa, observacoes_auditoria
-         ) VALUES ($1, $2, $3::status_serasa_tipo, $4, $5, CURRENT_TIMESTAMP, $6, $7, $8, $9)
+         ) VALUES ($1::int, $2::int, $3::status_serasa_tipo, $4::varchar, $5::text, CURRENT_TIMESTAMP, $6::int, $7::boolean, $8::text, $9::text)
          ON CONFLICT (proposta_id) DO UPDATE SET
            analista_id = COALESCE(EXCLUDED.analista_id, analises_financeiras.analista_id),
            status_serasa = EXCLUDED.status_serasa,

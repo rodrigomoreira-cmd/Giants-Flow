@@ -128,14 +128,14 @@ router.post('/entrevistas/resultado', async (req, res) => {
     // 2) Encerra a ficha (ficha_fechada = true) aguardando aprovação do financeiro
     const { rows: atualizadas } = await client.query(
       `UPDATE fichas
-       SET etapa_funil = $1,
+       SET etapa_funil = $1::varchar,
            mesa_alocada = NULL,
            assento_alocado = NULL,
            ficha_fechada = true,
            fechada_em = CURRENT_TIMESTAMP,
-           fechada_por = COALESCE($2, fechada_por),
+           fechada_por = COALESCE($2::int, fechada_por),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $3
+       WHERE id = $3::int
           OR (
             turma_id = $4
             AND (
