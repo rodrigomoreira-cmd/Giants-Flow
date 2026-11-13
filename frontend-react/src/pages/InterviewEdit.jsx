@@ -603,7 +603,7 @@ export default function InterviewEdit() {
   );
 
   return (
-    <div style={{ padding: '1.5rem 2rem', width: '100%', boxSizing: 'border-box', maxWidth: '1440px', margin: '0 auto' }}>
+    <div style={{ padding: '1.5rem 2rem', width: '100%', boxSizing: 'border-box', width: '100%' }}>
       <style>{
         '.ficha-rapida-grid { display: grid; grid-template-columns: minmax(0, 1.85fr) minmax(320px, 1fr); gap: 1.35rem; align-items: start; } ' +
         '@media (max-width: 980px) { .ficha-rapida-grid { grid-template-columns: 1fr; } }'
@@ -920,7 +920,7 @@ export default function InterviewEdit() {
                     })}
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.85rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(205px, 1fr))', gap: '0.85rem' }}>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: '700', color: '#475569', marginBottom: '0.25rem' }}>Dores / Gargalos Selecionados</label>
                       <input
