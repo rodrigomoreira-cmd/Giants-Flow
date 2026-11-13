@@ -1339,27 +1339,96 @@ export default function InterviewEdit() {
               </div>
             )}
 
+            {Boolean(ficha.ficha_fechada) && (
+              <div style={{
+                background: ['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(String(ficha.status_aprovacao || '').toLowerCase()) ? '#f0fdf4' : '#fffbeb',
+                border: ['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(String(ficha.status_aprovacao || '').toLowerCase()) ? '1px solid #86efac' : '1px solid #fcd34d',
+                borderRadius: '10px',
+                padding: '0.85rem 1rem',
+                marginBottom: '1rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.55rem',
+                fontSize: '0.84rem',
+                fontWeight: '700',
+                color: ['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(String(ficha.status_aprovacao || '').toLowerCase()) ? '#166534' : '#92400e'
+              }}>
+                <span className="material-symbols-outlined" style={{ fontSize: '1.15rem' }}>
+                  {['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(String(ficha.status_aprovacao || '').toLowerCase()) ? 'verified' : 'hourglass_top'}
+                </span>
+                <span>
+                  {['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(String(ficha.status_aprovacao || '').toLowerCase())
+                    ? 'Contrato aprovado e liberado pelo Financeiro.'
+                    : 'Entrevista finalizada e mesa liberada — ficha bloqueada aguardando liberação financeira.'}
+                </span>
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button
-                disabled={!podeSubmeter || salvando || Boolean(ficha.ficha_fechada)}
-                onClick={submeterFicha}
-                style={{
-                  background: !podeSubmeter ? '#cbd5e1' : '#059669',
-                  color: '#fff',
-                  border: 'none',
-                  padding: '0.8rem 1.75rem',
-                  borderRadius: '8px',
-                  fontWeight: '700',
-                  fontSize: '0.95rem',
-                  cursor: !podeSubmeter ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}
-              >
-                <span className="material-symbols-outlined">check_circle</span>
-                {ficha.ficha_fechada ? 'Ficha Encerrada (Aguardando Financeiro)' : salvando ? 'Registrando...' : 'Finalizar Ficha da Empresa'}
-              </button>
+              {(() => {
+                const isFechada = Boolean(ficha.ficha_fechada);
+                const isAprovadaFin = ['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(
+                  String(ficha.status_aprovacao || '').toLowerCase()
+                );
+
+                const bgBotao = isFechada
+                  ? isAprovadaFin
+                    ? '#dcfce7'
+                    : '#fef3c7'
+                  : !podeSubmeter
+                  ? '#cbd5e1'
+                  : '#059669';
+
+                const corTextoBotao = isFechada
+                  ? isAprovadaFin
+                    ? '#166534'
+                    : '#92400e'
+                  : '#ffffff';
+
+                const bordaBotao = isFechada
+                  ? isAprovadaFin
+                    ? '2px solid #22c55e'
+                    : '2px solid #f59e0b'
+                  : 'none';
+
+                const iconeBotao = isFechada
+                  ? isAprovadaFin
+                    ? 'verified'
+                    : 'hourglass_top'
+                  : 'check_circle';
+
+                const textoBotao = isFechada
+                  ? isAprovadaFin
+                    ? 'Aprovado pelo Financeiro'
+                    : 'Aguardando Liberação Financeira'
+                  : salvando
+                  ? 'Registrando...'
+                  : 'Finalizar Ficha da Empresa';
+
+                return (
+                  <button
+                    disabled={!podeSubmeter || salvando || isFechada}
+                    onClick={submeterFicha}
+                    style={{
+                      background: bgBotao,
+                      color: corTextoBotao,
+                      border: bordaBotao,
+                      padding: '0.8rem 1.75rem',
+                      borderRadius: '8px',
+                      fontWeight: '800',
+                      fontSize: '0.95rem',
+                      cursor: !podeSubmeter || salvando || isFechada ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      boxShadow: isFechada && !isAprovadaFin ? '0 2px 8px rgba(245, 158, 11, 0.2)' : 'none'
+                    }}
+                  >
+                    <span className="material-symbols-outlined">{iconeBotao}</span>
+                    {textoBotao}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         )}
