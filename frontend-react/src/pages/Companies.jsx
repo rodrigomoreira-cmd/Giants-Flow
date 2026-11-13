@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 const normalizarChaveEmpresa = (emp) => {
   const cnpjDigits = String(emp.cnpj || emp.cpf_cnpj || '').replace(/\D/g, '');
@@ -56,6 +56,8 @@ export default function Companies() {
   const [pagina, setPagina] = useState(1);
   const itensPorPagina = 60;
   const navigate = useNavigate();
+  const location = useLocation();
+  const [avisoRetornoFicha, setAvisoRetornoFicha] = useState(location.state?.fichaFinalizada || null);
   const usuarioEhAdmin = useMemo(() => isUsuarioAdmin(), []);
 
   // Modal Unificado da Empresa (Sócios não-GIANTS + Pagamento + Checklist de Participantes no Almoço)
@@ -440,6 +442,21 @@ export default function Companies() {
           </button>
         </div>
       </div>
+
+      {avisoRetornoFicha && (
+        <div style={{ background: '#f0fdf4', border: '1px solid #86efac', color: '#166534', padding: '0.85rem 1.1rem', borderRadius: '10px', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', fontSize: '0.86rem', fontWeight: '700' }}>
+          <span>
+            ✔ Ficha da empresa <strong>{avisoRetornoFicha.empresa}</strong> ({avisoRetornoFicha.resultado}) finalizada e bloqueada — mesa liberada no salão!
+          </span>
+          <button
+            type="button"
+            onClick={() => setAvisoRetornoFicha(null)}
+            style={{ background: 'transparent', border: 'none', color: '#166534', fontWeight: '800', cursor: 'pointer', fontSize: '1rem' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {erro && (
         <div style={{ background: '#fef2f2', color: '#ef4444', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem', border: '1px solid #fecaca' }}>

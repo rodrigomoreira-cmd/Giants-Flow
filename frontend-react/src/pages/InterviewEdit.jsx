@@ -151,6 +151,8 @@ export default function InterviewEdit() {
           setFicha((prev) => ({
             ...prev,
             aplicacao_id: clienteEncontrado.id || id,
+            ficha_fechada: Boolean(clienteEncontrado.ficha_fechada) || ['aguardando_aprovacao', 'fechamento', 'concluido', 'reprovado'].includes(String(clienteEncontrado.etapa_funil || '').toLowerCase()),
+            status_aprovacao: clienteEncontrado.status_aprovacao || '',
             turma_id: Number(clienteEncontrado.turma_id || turmaAtiva),
             razao_social: empTitular,
             cnpj: cnpjTitular,
@@ -343,13 +345,49 @@ export default function InterviewEdit() {
   };
 
   const confirmarGravacaoFicha = async () => {
+    if (ficha.ficha_fechada || salvando) return;
     try {
       setSalvando(true);
       const appTargetId = Number(ficha.aplicacao_id || id);
       const resumoSocios = sociosQueEntram.map((s) => s.nome).join(', ');
       const gerouProposta = ['Fechou GIANTS', 'Fechou PAC', 'Downsell PAC', 'Fechou AE'].includes(ficha.resultado_comercial);
 
-      // 1. Registra o resultado da entrevista no backend oficial (fecha a ficha e libera a mesa da empresa)
+      // 1. Se gerou fechamento, emite a proposta comercial primeiro
+      if (gerouProposta) {
+        const prodMatch =
+          catalogoProdutos.find((p) => p.nome === ficha.produto_nome) ||
+          catalogoProdutos.find((p) => String(p.categoria || '').toUpperCase() === String(ficha.categoria_produto || '').toUpperCase() && p.tipo_item === 'PRINCIPAL');
+
+        await api.post('/propostas', {
+          aplicacao_id: appTargetId,
+          turma_id: ficha.turma_id || 1491,
+          produto_id: prodMatch ? prodMatch.id : null,
+          categoria_produto: ficha.categoria_produto,
+          produto_nome: ficha.produto_nome,
+          empresa: ficha.razao_social,
+          cnpj: ficha.cnpj,
+          participante_nome: ficha.nome_empresario,
+          socios_quantidade: sociosQueEntram.length,
+          socios_lista: sociosQueEntram,
+          valor_tabela: calc.contrato,
+          valor_negociado: calc.valorNegociado,
+          desconto: calc.desconto,
+          cashback: calc.cashback,
+          valor_entrada: calc.entrada,
+          forma_entrada: ficha.forma_entrada,
+          valor_entrada_complementar: calc.entradaComplementar,
+          data_entrada_complementar: ficha.data_entrada_complementar || '',
+          valor_permuta: calc.permuta,
+          identificador_pagamento: ficha.identificador_pagamento || '',
+          saldo_restante: calc.saldo,
+          parcelas: calc.parcelas,
+          valor_parcela: calc.valorParcela,
+          forma_restante: ficha.forma_restante,
+          observacoes: ficha.resultado_obs || ficha.resumo_entrevista || ''
+        });
+      }
+
+      // 2. Encerra a entrevista no backend, bloqueia a ficha e libera a mesa de toda a empresa
       await api.post('/entrevistas/resultado', {
         aplicacaoId: appTargetId,
         turmaId: ficha.turma_id || 1491,
@@ -359,53 +397,7 @@ export default function InterviewEdit() {
         observacao: `[${ficha.resultado_comercial}] Empresa: ${ficha.razao_social} | Sócios no contrato (${sociosQueEntram.length}): ${resumoSocios} | ${ficha.resultado_obs || ''} | Resumo: ${ficha.resumo_entrevista || 'N/A'}`
       });
 
-      let propostaCriada = null;
-
-      // 2. Se gerou fechamento, cria a proposta comercial com todos os sócios vinculados e cashback
-      if (gerouProposta) {
-        const prodMatch =
-          catalogoProdutos.find((p) => p.nome === ficha.produto_nome) ||
-          catalogoProdutos.find((p) => String(p.categoria || '').toUpperCase() === String(ficha.categoria_produto || 'GIANTS').toUpperCase());
-
-        propostaCriada = await api.post('/propostas', {
-          aplicacaoId: appTargetId,
-          turmaId: ficha.turma_id || 1491,
-          razaoSocial: ficha.razao_social,
-          cnpj: ficha.cnpj,
-          produtoId: prodMatch ? prodMatch.id : 7,
-          produtoNome: ficha.produto_nome,
-          categoriaProduto: ficha.categoria_produto,
-          socios: sociosQueEntram.length,
-          sociosDetalhes: sociosLista,
-          valorTabela: calc.contrato,
-          valorTotal: calc.valorNegociado,
-          desconto: Number(calc.desconto || ficha.desconto || 0),
-          valorEntrada: calc.entrada,
-          cashback: calc.cashback,
-          cashbackAlmoco: Number(ficha.cashback_almoco_cnpj || 0),
-          cashbackUpgrade: ficha.categoria_produto === 'GIANTS' ? Number(ficha.cashback_upgrade_cnpj || 0) : 0,
-          historicoProdutosElegiveis: ficha.historico_produtos_elegiveis || '',
-          formaEntrada: ficha.forma_entrada || 'Pix',
-          formaRestante: ficha.forma_restante || 'Pix',
-          permuta: Number(ficha.valor_permuta || 0),
-        identificadorPagamento: ficha.identificador_pagamento || '',
-          entradaComplementar: Number(ficha.valor_entrada_complementar || 0),
-          dataEntradaComplementar: ficha.data_entrada_complementar || null,
-          identificadorPagamento: ficha.identificador_pagamento || null,
-          metodoPagamento: `${ficha.forma_entrada} + ${calc.parcelas}x ${ficha.forma_restante}`,
-          quantidadeParcelas: calc.parcelas,
-          valorParcela: calc.valorParcela
-        });
-      }
-
-      setFicha((prev) => ({
-        ...prev,
-        ficha_fechada: true,
-        etapa_funil: 'aguardando_aprovacao',
-        status_aprovacao: 'pendente'
-      }));
-
-      // Marca imediatamente a ficha como fechada em tela
+      // 3. Bloqueia a ficha e o botão em tela até um Administrador reabrir e volta para a aba Empresas
       setFicha((prev) => ({
         ...prev,
         ficha_fechada: true,
@@ -413,28 +405,24 @@ export default function InterviewEdit() {
         status_aprovacao: gerouProposta ? 'pendente' : prev.status_aprovacao
       }));
       setModalConfirmarFinalizacao(false);
-      setModalConclusao({
-        protocolo: propostaCriada?.id ? `PROP-${String(propostaCriada.id).padStart(3, '0')}` : `FICHA-${appTargetId}`,
-        gerouProposta,
-        empresa: ficha.razao_social,
-        cnpj: ficha.cnpj,
-        resultado: ficha.resultado_comercial,
-        produto: ficha.produto_nome,
-        socios: sociosQueEntram.map((s) => s.nome),
-        valorNegociado: calc.valorNegociado,
-        cashback: calc.cashback,
-        saldoLiquido: calc.saldo + calc.entrada,
-        entrada: calc.entrada,
-        formaEntrada: ficha.forma_entrada,
-        parcelas: calc.parcelas,
-        valorParcela: calc.valorParcela,
-        formaRestante: ficha.forma_restante
+
+      navigate('/companies', {
+        state: {
+          fichaFinalizada: {
+            empresa: ficha.razao_social,
+            resultado: ficha.resultado_comercial
+          }
+        }
       });
     } catch (err) {
-      setModalAviso({ tipo: 'erro', titulo: 'Erro ao Registrar Entrevista', mensagem: err.message });
+      setModalConfirmarFinalizacao(false);
+      setModalAviso({
+        tipo: 'erro',
+        titulo: 'Erro ao Registrar Entrevista',
+        mensagem: err.message || 'Não foi possível concluir a finalização da ficha.'
+      });
     } finally {
       setSalvando(false);
-      setModalConfirmarFinalizacao(false);
     }
   };
 
@@ -1522,8 +1510,8 @@ export default function InterviewEdit() {
 
                 const textoBotao = isFechada
                   ? isAprovadaFin
-                    ? 'Ficha Bloqueada — Aprovada pelo Financeiro'
-                    : 'Ficha Bloqueada — Aguardando Liberação Financeira'
+                    ? 'Ficha Bloqueada — Aprovada (Admin Reabre)'
+                    : 'Ficha Bloqueada (Somente Admin Reabre)'
                   : salvando
                   ? 'Registrando...'
                   : 'Finalizar Ficha da Empresa';
