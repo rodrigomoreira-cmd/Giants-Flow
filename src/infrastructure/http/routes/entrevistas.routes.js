@@ -148,11 +148,22 @@ router.post('/entrevistas/resultado', async (req, res) => {
       return res.status(400).json({ error: 'Identificador da ficha não informado.' });
     }
 
+    const isNaoFechou =
+      resString.includes('reprovado') ||
+      resString.includes('sem interesse') ||
+      resString.includes('não fechou') ||
+      resString.includes('nao fechou');
+    const isDecisaoFutura =
+      resString.includes('decisão futura') ||
+      resString.includes('decisao futura') ||
+      resString.includes('retomada') ||
+      resString.includes('follow');
+
     let novaEtapa = 'aguardando_aprovacao';
-    if (resString.includes('reprovado') || resString.includes('sem interesse') || resString.includes('não fechou')) {
+    if (isNaoFechou) {
       novaEtapa = 'reprovado';
-    } else if (resString.includes('retomada') || resString.includes('follow')) {
-      novaEtapa = 'aguardando_aprovacao';
+    } else if (isDecisaoFutura) {
+      novaEtapa = 'decisao_futura';
     }
 
     await client.query('BEGIN');

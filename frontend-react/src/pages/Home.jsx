@@ -153,7 +153,7 @@ export default function Home() {
         ['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(
           String(c.status_aprovacao || '').toLowerCase()
         ) ||
-        ['aguardando_aprovacao', 'fechamento', 'concluido', 'reprovado'].includes(
+        ['aguardando_aprovacao', 'fechamento', 'concluido', 'reprovado', 'decisao_futura', 'nao_fechou'].includes(
           String(c.etapa_funil || '').toLowerCase()
         )
       ) {

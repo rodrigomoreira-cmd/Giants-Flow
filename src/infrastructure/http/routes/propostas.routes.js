@@ -327,11 +327,11 @@ router.get('/financeiro/propostas', async (req, res) => {
         ) p ON TRUE
         LEFT JOIN analises_financeiras af ON af.proposta_id = p.id
         WHERE ($1::INT IS NULL OR f.turma_id = $1::INT)
+          AND f.etapa_funil NOT IN ('decisao_futura', 'nao_fechou')
           AND (
             f.dados_proposta IS NOT NULL
             OR p.id IS NOT NULL
             OR f.etapa_funil IN ('aguardando_aprovacao', 'fechamento', 'concluido')
-            OR COALESCE(f.status_aprovacao, '') <> ''
           )
       ),
       unificadas AS (

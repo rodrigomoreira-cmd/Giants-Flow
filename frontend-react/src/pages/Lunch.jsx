@@ -233,7 +233,7 @@ export default function Lunch() {
       const etapa = String(item?.etapa_funil || '').trim().toLowerCase();
       const fechada = Boolean(item?.ficha_fechada);
       const aprovadaFin = ['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(stAprov);
-      const etapaConcluida = ['concluido', 'concluida', 'fechamento', 'vendido'].includes(etapa);
+      const etapaConcluida = ['concluido', 'concluida', 'fechamento', 'vendido', 'decisao_futura', 'nao_fechou', 'reprovado'].includes(etapa);
       return aprovadaFin || (fechada && etapaConcluida) || etapaConcluida;
     };
 

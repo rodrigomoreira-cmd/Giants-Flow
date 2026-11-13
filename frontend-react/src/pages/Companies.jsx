@@ -213,10 +213,20 @@ export default function Companies() {
           );
         });
 
-        const isAguardandoFinanceiro = !isFechadoAprovado && sociosNaoGiants.some((m) => {
+        const isDecisaoFutura = !isFechadoAprovado && sociosNaoGiants.some((m) => {
+          const et = String(m.etapa_funil || '').trim().toLowerCase();
+          return ['decisao_futura', 'follow_up'].includes(et);
+        });
+
+        const isNaoFechou = !isFechadoAprovado && !isDecisaoFutura && sociosNaoGiants.some((m) => {
+          const et = String(m.etapa_funil || '').trim().toLowerCase();
+          return ['reprovado', 'nao_fechou', 'sem_interesse'].includes(et);
+        });
+
+        const isAguardandoFinanceiro = !isFechadoAprovado && !isDecisaoFutura && !isNaoFechou && sociosNaoGiants.some((m) => {
           const et = String(m.etapa_funil || '').trim().toLowerCase();
           const st = String(m.status_aprovacao || '').trim().toLowerCase();
-          return Boolean(m.ficha_fechada) || et === 'aguardando_aprovacao' || st === 'pendente';
+          return et === 'aguardando_aprovacao' || st === 'pendente' || (Boolean(m.ficha_fechada) && Boolean(m.dados_proposta));
         });
 
         const fichaComProposta = sociosNaoGiants.find((m) => m.dados_proposta || Number(m.valor_negociado || 0) > 0);
@@ -235,6 +245,8 @@ export default function Companies() {
           algumCortesia,
           apenasGiants,
           isFechadoAprovado,
+          isDecisaoFutura,
+          isNaoFechou,
           isAguardandoFinanceiro,
           produtoFechado,
           isPendente: !apenasGiants && !algumPago && !algumCortesia && !isFechadoAprovado && !isAguardandoFinanceiro,
@@ -380,6 +392,46 @@ export default function Companies() {
         rotuloMesa: 'Concluído (Mesa Liberada)',
         bgMesa: '#f0fdf4',
         corMesa: '#15803d',
+        podeEntrevista: false
+      };
+    }
+
+    if (g.isDecisaoFutura) {
+      const qtdNoAlmoco = g.participantesAlmoco.length || g.sociosNaoGiants.length;
+      const rotuloAlmocoDf = g.algumPago
+        ? `● Pago R$ 1.000 (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
+        : g.algumCortesia
+        ? `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
+        : '● Validado';
+      return {
+        passo: 4,
+        fechado: true,
+        rotuloAlmoco: rotuloAlmocoDf,
+        bgAlmoco: g.algumPago ? '#dcfce7' : '#e0f2fe',
+        corAlmoco: g.algumPago ? '#15803d' : '#0369a1',
+        rotuloMesa: 'Decisão Futura (Sem Venda)',
+        bgMesa: '#fffbeb',
+        corMesa: '#b45309',
+        podeEntrevista: false
+      };
+    }
+
+    if (g.isNaoFechou) {
+      const qtdNoAlmoco = g.participantesAlmoco.length || g.sociosNaoGiants.length;
+      const rotuloAlmocoNf = g.algumPago
+        ? `● Pago R$ 1.000 (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
+        : g.algumCortesia
+        ? `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
+        : '● Validado';
+      return {
+        passo: 4,
+        fechado: true,
+        rotuloAlmoco: rotuloAlmocoNf,
+        bgAlmoco: g.algumPago ? '#dcfce7' : '#e0f2fe',
+        corAlmoco: g.algumPago ? '#15803d' : '#0369a1',
+        rotuloMesa: 'Não Fechou (Encerrada)',
+        bgMesa: '#f1f5f9',
+        corMesa: '#475569',
         podeEntrevista: false
       };
     }

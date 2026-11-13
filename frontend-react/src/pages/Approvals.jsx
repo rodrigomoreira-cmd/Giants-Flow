@@ -65,7 +65,14 @@ export default function Approvals() {
       const tIdAtiva = turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491';
       const dados = await api.get(`/financeiro/propostas?turmaId=${tIdAtiva}`);
       const lista = Array.isArray(dados) ? dados : dados.propostas || [];
-      setPropostas(unificarPorEmpresa(lista));
+      const apenasComProposta = lista.filter((item) => {
+        const et = String(item.etapa_funil || '').toLowerCase();
+        const temProposta = Boolean(item.dados_proposta || item.proposta_real_id || Number(item.valor_negociado || 0) > 0);
+        if (['decisao_futura', 'nao_fechou'].includes(et) && !temProposta) return false;
+        if (et === 'reprovado' && !temProposta) return false;
+        return true;
+      });
+      setPropostas(unificarPorEmpresa(apenasComProposta));
     } catch (err) {
       setErro(err.message);
     } finally {
