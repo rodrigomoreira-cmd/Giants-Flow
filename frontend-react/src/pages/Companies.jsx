@@ -106,6 +106,27 @@ export default function Companies() {
         const alocadosMesa = participantesAlmoco.filter((m) => Boolean(m.mesa_alocada));
         const paganteComCv = sociosNaoGiants.find((m) => m.cv_cartao);
 
+        const isFechadoAprovado = sociosNaoGiants.some((m) => {
+          const st = String(m.status_aprovacao || '').trim().toLowerCase();
+          const et = String(m.etapa_funil || '').trim().toLowerCase();
+          return (
+            ['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(st) ||
+            ['fechamento', 'concluido', 'concluida', 'vendido'].includes(et)
+          );
+        });
+
+        const isAguardandoFinanceiro = !isFechadoAprovado && sociosNaoGiants.some((m) => {
+          const et = String(m.etapa_funil || '').trim().toLowerCase();
+          const st = String(m.status_aprovacao || '').trim().toLowerCase();
+          return Boolean(m.ficha_fechada) || et === 'aguardando_aprovacao' || st === 'pendente';
+        });
+
+        const fichaComProposta = sociosNaoGiants.find((m) => m.dados_proposta || Number(m.valor_negociado || 0) > 0);
+        const produtoFechado =
+          fichaComProposta?.dados_proposta?.categoriaProduto ||
+          fichaComProposta?.dados_proposta?.produtoNome ||
+          '';
+
         return {
           ...g,
           idPrincipal: titular.id,
@@ -115,7 +136,10 @@ export default function Companies() {
           algumPago,
           algumCortesia,
           apenasGiants,
-          isPendente: !apenasGiants && !algumPago && !algumCortesia,
+          isFechadoAprovado,
+          isAguardandoFinanceiro,
+          produtoFechado,
+          isPendente: !apenasGiants && !algumPago && !algumCortesia && !isFechadoAprovado && !isAguardandoFinanceiro,
           participantesAlmoco,
           alocadosMesa,
           cvCartao: paganteComCv?.cv_cartao || ''
@@ -135,6 +159,7 @@ export default function Companies() {
 
     if (!matchTermo) return false;
 
+    if (filtroAlmoco === 'fechados') return g.isFechadoAprovado;
     if (filtroAlmoco === 'pagos') return g.algumPago;
     if (filtroAlmoco === 'giants') return g.apenasGiants || g.sociosGiants.length > 0;
     if (filtroAlmoco === 'cortesia') return g.algumCortesia;
@@ -142,6 +167,7 @@ export default function Companies() {
     return true;
   });
 
+  const totalFechados = gruposEmpresas.filter((g) => g.isFechadoAprovado).length;
   const totalPagos = gruposEmpresas.filter((g) => g.algumPago).length;
   const totalGiants = gruposEmpresas.filter((g) => g.apenasGiants || g.sociosGiants.length > 0).length;
   const totalCortesia = gruposEmpresas.filter((g) => g.algumCortesia).length;
@@ -206,13 +232,53 @@ export default function Companies() {
       await carregarDados();
       setModalEmpresaAberto(false);
     } catch (err) {
-      alert('Erro ao salvar validação de almoço da empresa: ' + err.message);
+      setErro('Erro ao salvar validação de almoço da empresa: ' + err.message); setModalEmpresaAberto(false);
     } finally {
       setSalvandoAlmoco(false);
     }
   };
 
   const obterEstagioGrupo = (g) => {
+    if (g.isFechadoAprovado) {
+      const qtdNoAlmoco = g.participantesAlmoco.length || g.sociosNaoGiants.length;
+      const rotuloAlmocoFechado = g.algumPago
+        ? `● Pago R$ 1.000 (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
+        : g.algumCortesia
+        ? `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
+        : '● Validado';
+      return {
+        passo: 4,
+        fechado: true,
+        rotuloAlmoco: rotuloAlmocoFechado,
+        bgAlmoco: g.algumPago ? '#dcfce7' : '#e0f2fe',
+        corAlmoco: g.algumPago ? '#15803d' : '#0369a1',
+        rotuloMesa: 'Concluído (Mesa Liberada)',
+        bgMesa: '#f0fdf4',
+        corMesa: '#15803d',
+        podeEntrevista: false
+      };
+    }
+
+    if (g.isAguardandoFinanceiro) {
+      const qtdNoAlmoco = g.participantesAlmoco.length || g.sociosNaoGiants.length;
+      const rotuloAlmocoFin = g.algumPago
+        ? `● Pago R$ 1.000 (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
+        : g.algumCortesia
+        ? `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
+        : '● Validado';
+      return {
+        passo: 3.5,
+        aguardandoFinanceiro: true,
+        rotuloAlmoco: rotuloAlmocoFin,
+        bgAlmoco: g.algumPago ? '#dcfce7' : '#e0f2fe',
+        corAlmoco: g.algumPago ? '#15803d' : '#0369a1',
+        rotuloMesa: 'Em Análise Financeira',
+        bgMesa: '#fffbeb',
+        corMesa: '#b45309',
+        podeEntrevista: false
+      };
+    }
+
     if (g.apenasGiants) {
       return {
         passo: 3,
@@ -350,6 +416,7 @@ export default function Companies() {
             }}
           >
             <option value="todos">📋 Todas as Empresas ({gruposEmpresas.length})</option>
+            <option value="fechados">🏆 Fechados / Aprovados ({totalFechados})</option>
             <option value="pagos">💰 Almoço Pago ({totalPagos})</option>
             <option value="giants">⚡ Com Membro GIANTS ({totalGiants})</option>
             <option value="cortesia">🎁 Cortesia ({totalCortesia})</option>
@@ -416,6 +483,34 @@ export default function Companies() {
                               </span>
                             )}
                         </span>
+                        {g.isFechadoAprovado && (
+                          <span style={{
+                            fontSize: '0.72rem',
+                            fontWeight: '800',
+                            background: '#15803d',
+                            color: '#ffffff',
+                            padding: '0.18rem 0.6rem',
+                            borderRadius: '999px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.25rem'
+                          }}>
+                            🏆 FECHADO {g.produtoFechado ? `(${g.produtoFechado})` : ''}
+                          </span>
+                        )}
+                        {g.isAguardandoFinanceiro && (
+                          <span style={{
+                            fontSize: '0.72rem',
+                            fontWeight: '800',
+                            background: '#fef3c7',
+                            color: '#92400e',
+                            border: '1px solid #fcd34d',
+                            padding: '0.16rem 0.55rem',
+                            borderRadius: '999px'
+                          }}>
+                            ⏳ Aguardando Financeiro
+                          </span>
+                        )}
                         {g.sociosNaoGiants.length > 1 && (
                           <span style={{ fontSize: '0.72rem', fontWeight: '700', background: '#e0e7ff', color: '#3730a3', padding: '0.15rem 0.5rem', borderRadius: '999px' }}>
                             {g.sociosNaoGiants.length} sócios elegíveis
@@ -510,7 +605,39 @@ export default function Companies() {
 
                     {/* 2. Mesa Lunch */}
                     <td style={{ padding: '1rem' }}>
-                      {estagio.passo === 1 ? (
+                      {estagio.fechado ? (
+                        <span style={{
+                          background: '#f0fdf4',
+                          color: '#15803d',
+                          border: '1px solid #bbf7d0',
+                          padding: '0.35rem 0.75rem',
+                          borderRadius: '6px',
+                          fontSize: '0.78rem',
+                          fontWeight: '700',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem'
+                        }}>
+                          <span className="material-symbols-outlined" style={{ fontSize: '0.9rem' }}>task_alt</span>
+                          {estagio.rotuloMesa}
+                        </span>
+                      ) : estagio.aguardandoFinanceiro ? (
+                        <span style={{
+                          background: '#fffbeb',
+                          color: '#b45309',
+                          border: '1px solid #fde68a',
+                          padding: '0.35rem 0.75rem',
+                          borderRadius: '6px',
+                          fontSize: '0.78rem',
+                          fontWeight: '700',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem'
+                        }}>
+                          <span className="material-symbols-outlined" style={{ fontSize: '0.9rem' }}>hourglass_top</span>
+                          {estagio.rotuloMesa}
+                        </span>
+                      ) : estagio.passo === 1 ? (
                         <button
                           onClick={() => abrirModalEmpresa(g)}
                           style={{
@@ -554,7 +681,49 @@ export default function Companies() {
 
                     {/* 3. Entrevista */}
                     <td style={{ padding: '1rem', textAlign: 'right' }}>
-                      {g.apenasGiants ? (
+                      {estagio.fechado ? (
+                        <button
+                          onClick={() => navigate(`/interviews/${g.idPrincipal}/edit`)}
+                          title="Contrato fechado e aprovado pelo Financeiro"
+                          style={{
+                            background: '#15803d',
+                            color: '#fff',
+                            border: 'none',
+                            padding: '0.45rem 0.95rem',
+                            borderRadius: '6px',
+                            fontSize: '0.8rem',
+                            fontWeight: '800',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem'
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>verified</span>
+                          Fechado
+                        </button>
+                      ) : estagio.aguardandoFinanceiro ? (
+                        <button
+                          onClick={() => navigate(`/interviews/${g.idPrincipal}/edit`)}
+                          title="Ficha encerrada aguardando aprovação do Financeiro"
+                          style={{
+                            background: '#fef3c7',
+                            color: '#92400e',
+                            border: '1px solid #fcd34d',
+                            padding: '0.45rem 0.9rem',
+                            borderRadius: '6px',
+                            fontSize: '0.78rem',
+                            fontWeight: '700',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem'
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>lock</span>
+                          Aguardando Financeiro
+                        </button>
+                      ) : g.apenasGiants ? (
                         <button
                           disabled
                           style={{
