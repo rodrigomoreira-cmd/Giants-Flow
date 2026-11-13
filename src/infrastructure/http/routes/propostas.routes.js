@@ -159,7 +159,7 @@ router.post('/propostas', async (req, res) => {
       ]
     );
 
-    // 4. Libera mesa e fecha fichas de todos os sócios do mesmo CNPJ/Empresa na turma
+    // 4. Libera mesa e fecha fichas de todos os sócios do mesmo CNPJ/Empresa na turma (sem gerar proposta duplicada)
     await client.query(
       `UPDATE fichas
        SET mesa_alocada = NULL,
@@ -194,13 +194,29 @@ router.post('/propostas', async (req, res) => {
   }
 });
 
-// APROVAÇÃO / VENDA DE PROPOSTA
+// APROVAÇÃO / VENDA DE PROPOSTA (UNIFICADA POR EMPRESA/CNPJ)
 router.patch('/propostas/:id/vender', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     await client.query('BEGIN');
     await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+
+    const { rows: baseRows } = await client.query(
+      `SELECT id, turma_id, empresa, COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), '')) AS doc_cnpj
+       FROM fichas WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+
+    if (baseRows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Ficha não encontrada.' });
+    }
+
+    const base = baseRows[0];
+    const cnpjLimpo = String(base.doc_cnpj || '').replace(/\D/g, '');
+    const empNorm = String(base.empresa || '').trim().toLowerCase();
+
     const { rows } = await client.query(
       `UPDATE fichas
        SET etapa_funil = 'concluido',
@@ -208,11 +224,19 @@ router.patch('/propostas/:id/vender', async (req, res) => {
            ficha_fechada = true,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $1
+          OR (
+            turma_id = $2
+            AND (
+              ($3 <> '' AND LENGTH($3) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $3)
+              OR ($3 = '' AND $4 <> '' AND $4 <> 'empresa sga' AND LOWER(TRIM(COALESCE(empresa, ''))) = $4)
+            )
+          )
        RETURNING *`,
-      [id]
+      [id, base.turma_id, cnpjLimpo, empNorm]
     );
+
     await client.query('COMMIT');
-    res.json(rows[0] || { sucesso: true });
+    res.json(rows.find((r) => Number(r.id) === id) || rows[0] || { sucesso: true });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
@@ -221,52 +245,86 @@ router.patch('/propostas/:id/vender', async (req, res) => {
   }
 });
 
-// LISTAGEM PARA FILA DE APROVAÇÕES & ANÁLISE DE CRÉDITO / SERASA
+// LISTAGEM UNIFICADA POR EMPRESA (CNPJ) PARA FILA DE APROVAÇÕES & ANÁLISE DE CRÉDITO
 router.get('/financeiro/propostas', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     await client.query("SET LOCAL app.user_role = 'SYSTEM'");
 
-    const { rows } = await client.query(`
-      SELECT
-        f.*,
-        p.id AS proposta_real_id,
-        p.valor_total AS proposta_valor_total,
-        p.valor_entrada AS proposta_valor_entrada,
-        p.cashback AS proposta_cashback,
-        p.desconto_aplicado AS proposta_desconto,
-        p.quantidade_parcelas AS proposta_parcelas,
-        p.valor_parcela AS proposta_valor_parcela,
-        p.metodo_pagamento AS proposta_metodo_pagamento,
-        af.status_serasa AS af_status_serasa,
-        af.decisao_financeiro AS af_decisao_financeiro,
-        af.parecer AS af_parecer,
-        af.score_serasa AS af_score_serasa,
-        af.motivo_recusa AS af_motivo_recusa,
-        af.observacoes_auditoria AS af_observacoes_auditoria,
-        COALESCE(
-          NULLIF(f.dados_proposta->>'produtoNome', ''),
-          (SELECT pr.nome FROM produtos pr WHERE pr.id = COALESCE(p.produto_id, NULLIF(f.dados_proposta->>'produtoId', '')::int)),
-          'GIANTS'
-        ) AS produto_nome
-      FROM fichas f
-      LEFT JOIN LATERAL (
-        SELECT * FROM propostas pr
-        WHERE pr.aplicacao_id = f.id
-        ORDER BY pr.id DESC
-        LIMIT 1
-      ) p ON TRUE
-      LEFT JOIN analises_financeiras af ON af.proposta_id = p.id
-      WHERE f.dados_proposta IS NOT NULL
-         OR p.id IS NOT NULL
-         OR f.etapa_funil IN ('aguardando_aprovacao', 'fechamento', 'concluido')
-         OR COALESCE(f.status_aprovacao, '') <> ''
+    const turmaFiltro = req.query.turmaId ? Number(req.query.turmaId) : null;
+
+    const { rows } = await client.query(
+      `WITH base_fichas AS (
+        SELECT
+          f.*,
+          p.id AS proposta_real_id,
+          p.valor_total AS proposta_valor_total,
+          p.valor_entrada AS proposta_valor_entrada,
+          p.cashback AS proposta_cashback,
+          p.desconto_aplicado AS proposta_desconto,
+          p.quantidade_parcelas AS proposta_parcelas,
+          p.valor_parcela AS proposta_valor_parcela,
+          p.metodo_pagamento AS proposta_metodo_pagamento,
+          af.status_serasa AS af_status_serasa,
+          af.decisao_financeiro AS af_decisao_financeiro,
+          af.parecer AS af_parecer,
+          af.score_serasa AS af_score_serasa,
+          af.motivo_recusa AS af_motivo_recusa,
+          af.observacoes_auditoria AS af_observacoes_auditoria,
+          COALESCE(
+            NULLIF(f.dados_proposta->>'produtoNome', ''),
+            (SELECT pr.nome FROM produtos pr WHERE pr.id = COALESCE(p.produto_id, NULLIF(f.dados_proposta->>'produtoId', '')::int)),
+            'GIANTS'
+          ) AS produto_nome,
+          CASE
+            WHEN LENGTH(regexp_replace(COALESCE(f.cnpj, f.cpf_cnpj, ''), '\D', '', 'g')) >= 11
+              THEN 'cnpj:' || regexp_replace(COALESCE(f.cnpj, f.cpf_cnpj, ''), '\D', '', 'g')
+            WHEN LOWER(TRIM(COALESCE(f.empresa, ''))) NOT IN ('', 'empresa sga', 'sem empresa')
+              THEN 'emp:' || LOWER(TRIM(f.empresa))
+            ELSE 'id:' || f.id::text
+          END AS chave_empresa
+        FROM fichas f
+        LEFT JOIN LATERAL (
+          SELECT * FROM propostas pr
+          WHERE pr.aplicacao_id = f.id
+          ORDER BY pr.id DESC
+          LIMIT 1
+        ) p ON TRUE
+        LEFT JOIN analises_financeiras af ON af.proposta_id = p.id
+        WHERE ($1::INT IS NULL OR f.turma_id = $1::INT)
+          AND (
+            f.dados_proposta IS NOT NULL
+            OR p.id IS NOT NULL
+            OR f.etapa_funil IN ('aguardando_aprovacao', 'fechamento', 'concluido')
+            OR COALESCE(f.status_aprovacao, '') <> ''
+          )
+      ),
+      unificadas AS (
+        SELECT DISTINCT ON (COALESCE(turma_id, 0), chave_empresa)
+          *
+        FROM base_fichas
+        ORDER BY
+          COALESCE(turma_id, 0),
+          chave_empresa,
+          (CASE WHEN dados_proposta IS NOT NULL OR proposta_real_id IS NOT NULL THEN 0 ELSE 1 END),
+          COALESCE(valor_negociado, 0) DESC,
+          id ASC
+      )
+      SELECT u.*,
+        (
+          SELECT COALESCE(json_agg(json_build_object('id', s.id, 'nome', s.nome_participante, 'cargo', s.cargo) ORDER BY s.id ASC), '[]'::json)
+          FROM base_fichas s
+          WHERE COALESCE(s.turma_id, 0) = COALESCE(u.turma_id, 0)
+            AND s.chave_empresa = u.chave_empresa
+        ) AS socios_empresa
+      FROM unificadas u
       ORDER BY
-        CASE WHEN COALESCE(NULLIF(f.status_aprovacao, ''), 'pendente') = 'pendente' THEN 0 ELSE 1 END,
-        f.updated_at DESC NULLS LAST,
-        f.id DESC
-    `);
+        CASE WHEN COALESCE(NULLIF(u.status_aprovacao, ''), 'pendente') = 'pendente' THEN 0 ELSE 1 END,
+        u.updated_at DESC NULLS LAST,
+        u.id DESC`,
+      [turmaFiltro]
+    );
 
     await client.query('COMMIT');
     res.json(rows);
@@ -278,7 +336,7 @@ router.get('/financeiro/propostas', async (req, res) => {
   }
 });
 
-// DELIBERAÇÃO FINANCEIRA + ANÁLISE DE CRÉDITO / STATUS SERASA
+// DELIBERAÇÃO FINANCEIRA + ANÁLISE DE CRÉDITO / STATUS SERASA (PROPAGADA PARA TODOS OS SÓCIOS DO CNPJ)
 router.post('/financeiro/analisar', async (req, res) => {
   const client = await pool.connect();
   try {
@@ -344,7 +402,10 @@ router.post('/financeiro/analisar', async (req, res) => {
     await client.query("SET LOCAL app.user_role = 'SYSTEM'");
 
     const { rows: atual } = await client.query(
-      'SELECT id, status_aprovacao, etapa_funil FROM fichas WHERE id = $1 FOR UPDATE',
+      `SELECT id, turma_id, empresa,
+              COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), '')) AS doc_cnpj,
+              status_aprovacao, etapa_funil
+       FROM fichas WHERE id = $1 FOR UPDATE`,
       [targetId]
     );
     if (atual.length === 0) {
@@ -352,6 +413,11 @@ router.post('/financeiro/analisar', async (req, res) => {
       return res.status(404).json({ error: 'Ficha não encontrada.' });
     }
 
+    const base = atual[0];
+    const cnpjLimpo = String(base.doc_cnpj || '').replace(/\D/g, '');
+    const empNorm = String(base.empresa || '').trim().toLowerCase();
+
+    // Atualiza a ficha principal e sincroniza todos os sócios do mesmo CNPJ/Empresa na turma
     const { rows } = await client.query(
       `UPDATE fichas
        SET status_aprovacao = $1,
@@ -363,11 +429,18 @@ router.post('/financeiro/analisar', async (req, res) => {
            ficha_fechada = CASE WHEN $1 = 'recusada' THEN false ELSE true END,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $7
+          OR (
+            turma_id = $8
+            AND (
+              ($9 <> '' AND LENGTH($9) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $9)
+              OR ($9 = '' AND $10 <> '' AND $10 <> 'empresa sga' AND LOWER(TRIM(COALESCE(empresa, ''))) = $10)
+            )
+          )
        RETURNING *`,
-      [novoStatus, novaEtapa, creditoStatusFinal, serasaCodigo, serasaTextoFinal, parecerFinal, targetId]
+      [novoStatus, novaEtapa, creditoStatusFinal, serasaCodigo, serasaTextoFinal, parecerFinal, targetId, base.turma_id, cnpjLimpo, empNorm]
     );
 
-    // Sincroniza proposta e tabela analises_financeiras (se existir proposta formal vinculada)
+    // Sincroniza proposta e tabela analises_financeiras
     const { rows: propRows } = await client.query(
       'SELECT id FROM propostas WHERE aplicacao_id = $1 ORDER BY id DESC LIMIT 1',
       [targetId]
@@ -414,7 +487,7 @@ router.post('/financeiro/analisar', async (req, res) => {
     }
 
     await client.query('COMMIT');
-    res.json(rows[0]);
+    res.json(rows.find((r) => Number(r.id) === targetId) || rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });

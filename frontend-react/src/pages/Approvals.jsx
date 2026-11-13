@@ -3,6 +3,36 @@ import { api } from '../services/api';
 
 const fmtBRL = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+const unificarPorEmpresa = (lista) => {
+  const mapa = new Map();
+  for (const item of lista) {
+    const cnpjDigits = String(item.cnpj || item.cpf_cnpj || item.dados_proposta?.cnpj || '').replace(/\D/g, '');
+    const empNorm = String(item.empresa || item.cliente_empresa || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+    const chave =
+      cnpjDigits.length >= 11
+        ? `${item.turma_id || 0}:cnpj:${cnpjDigits}`
+        : empNorm && empNorm !== 'empresa sga'
+        ? `${item.turma_id || 0}:emp:${empNorm}`
+        : `${item.turma_id || 0}:id:${item.id}`;
+
+    const temContrato = Boolean(item.dados_proposta || item.proposta_real_id || Number(item.valor_negociado || 0) > 0);
+    if (!mapa.has(chave)) {
+      mapa.set(chave, item);
+    } else {
+      const atual = mapa.get(chave);
+      const atualTemContrato = Boolean(atual.dados_proposta || atual.proposta_real_id || Number(atual.valor_negociado || 0) > 0);
+      if (temContrato && !atualTemContrato) {
+        mapa.set(chave, item);
+      }
+    }
+  }
+  return Array.from(mapa.values());
+};
+
 export default function Approvals() {
   const [propostas, setPropostas] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -25,7 +55,7 @@ export default function Approvals() {
       setErro('');
       const dados = await api.get('/financeiro/propostas');
       const lista = Array.isArray(dados) ? dados : dados.propostas || [];
-      setPropostas(lista);
+      setPropostas(unificarPorEmpresa(lista));
     } catch (err) {
       setErro(err.message);
     } finally {
