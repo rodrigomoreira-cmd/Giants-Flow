@@ -53,6 +53,7 @@ export default function Lunch() {
   const [entrevistadores, setEntrevistadores] = useState([]);
   const [cortesiasLocais, setCortesiasLocais] = useState({});
   const [carregando, setCarregando] = useState(true);
+  const [liberandoGiants, setLiberandoGiants] = useState(false);
   const [erro, setErro] = useState('');
 
   // Filtros da barra lateral
@@ -116,7 +117,7 @@ export default function Lunch() {
             empresa = det.empresa || '';
             entrevistaId = det.entrevista_id || det.id || entrevistaId;
             aplicacaoId = det.aplicacao_id || det.cliente_id || null;
-            tipoParticipante = det.tipo || 'cliente';
+            tipoParticipante = det.membro_giants ? 'giants' : (det.tipo || 'cliente');
           }
 
           ocupantesLista.push({
@@ -184,6 +185,46 @@ export default function Lunch() {
     });
     return set;
   }, [mesas]);
+
+  // Membros GIANTS atualmente ocupando assentos nas mesas
+  const giantsSentados = useMemo(() => {
+    return (clientesBase || []).filter((c) => {
+      const isGiant =
+        Boolean(c.membro_giants) ||
+        String(c.origem || '').toUpperCase().includes('GIAN') ||
+        Boolean(c.perfil_giants);
+      const temMesa =
+        (c.mesa_alocada !== null && c.mesa_alocada !== undefined) ||
+        idsSentados.has(String(c.id)) ||
+        (c.aplicacao_id && idsSentados.has(String(c.aplicacao_id)));
+      return isGiant && temMesa;
+    });
+  }, [clientesBase, idsSentados]);
+
+  const liberarTodosGiantsDasMesas = async () => {
+    if (giantsSentados.length === 0) {
+      alert('Não há nenhum membro GIANTS sentado nas mesas neste momento.');
+      return;
+    }
+
+    const confirmar = window.confirm(
+      `Deseja remover todos os ${giantsSentados.length} membro(s) GIANTS das mesas agora (pós-almoço)?\n\n` +
+      `Os assentos ficarão imediatamente livres para as entrevistas comerciais da tarde/jantar.`
+    );
+    if (!confirmar) return;
+
+    try {
+      setLiberandoGiants(true);
+      const tIdAtiva = turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491';
+      const resp = await api.post('/mesas/liberar-giants', { turmaId: tIdAtiva });
+      await carregarDados();
+      alert(`${resp?.liberados ?? giantsSentados.length} membro(s) GIANTS liberados das mesas com sucesso!`);
+    } catch (err) {
+      alert('Erro ao liberar membros GIANTS: ' + (err.message || 'Falha na operação.'));
+    } finally {
+      setLiberandoGiants(false);
+    }
+  };
 
   // 1. Filtra unicamente quem possui direito garantido ao almoço (checklist marcado, cortesia ou GIANTS)
   const todosParticipantes = useMemo(() => {
@@ -729,6 +770,34 @@ export default function Lunch() {
               <span className="material-symbols-outlined" style={{ fontSize: '1.15rem' }}>add_circle</span>
               Adicionar Mesa Redonda
             </button>
+
+          <button
+            type="button"
+            disabled={liberandoGiants || giantsSentados.length === 0}
+            onClick={liberarTodosGiantsDasMesas}
+            title="Remove de uma só vez todos os membros GIANTS das mesas após o almoço"
+            style={{
+              width: '100%',
+              marginTop: '0.55rem',
+              padding: '0.62rem 0.9rem',
+              borderRadius: '10px',
+              border: giantsSentados.length > 0 ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
+              background: giantsSentados.length > 0 ? '#fef3c7' : '#f8fafc',
+              color: giantsSentados.length > 0 ? '#92400e' : '#94a3b8',
+              fontWeight: '800',
+              fontSize: '0.82rem',
+              cursor: liberandoGiants || giantsSentados.length === 0 ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.4rem'
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: '1.05rem' }}>logout</span>
+            {liberandoGiants
+              ? 'Liberando GIANTS...'
+              : `Liberar GIANTS das Mesas (${giantsSentados.length})`}
+          </button>
           </div>
 
           {/* Seção Empresas (CNPJ) com Abas */}

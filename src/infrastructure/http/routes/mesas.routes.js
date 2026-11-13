@@ -2,6 +2,7 @@
 const router = express.Router();
 const dbModule = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
+const { exigirTurmaAtiva } = require('../../database/verificarTurmaAtiva');
 
 // 2. AUXILIARES: MESAS COM SEUS ENTREVISTADORES ESCALADOS E OCUPANTES
 router.get('/auxiliares', async (req, res) => {
@@ -58,6 +59,8 @@ router.get('/auxiliares', async (req, res) => {
             nome_cracha: f.nome,
             empresa: f.empresa,
             etapa_funil: f.etapa_funil,
+            membro_giants: Boolean(f.membro_giants),
+            tipo: f.membro_giants ? 'giants' : 'cliente',
             status_almoco: (f.almoco_pago || f.cortesia_almoco || f.membro_giants) ? 'liberado' : 'pendente',
             entrevistador_id: f.entrevistador_id,
             entrevistador_nome: entrIndividual ? entrIndividual.nome : 'Não definido'
@@ -203,6 +206,65 @@ router.delete('/mesas/:id', async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: 'Erro ao excluir mesa: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
+
+// LIBERAÇÃO EM LOTE DE TODOS OS MEMBROS GIANTS DAS MESAS (PÓS-ALMOÇO)
+router.post('/mesas/liberar-giants', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const rawTurma = req.body?.turmaId || req.body?.turma_id || req.query?.turmaId || '';
+    const digits = String(rawTurma).replace(/\D/g, '');
+    const turmaId = digits ? parseInt(digits, 10) : null;
+
+    if (turmaId) {
+      await exigirTurmaAtiva({ turmaId });
+    }
+
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+
+    const { rows: liberados } = await client.query(
+      `UPDATE fichas
+       SET mesa_alocada = NULL,
+           assento_alocado = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE ($1::int IS NULL OR turma_id = $1::int)
+         AND mesa_alocada IS NOT NULL
+         AND (
+           COALESCE(membro_giants, false) = true
+           OR UPPER(TRIM(COALESCE(origem, ''))) LIKE '%GIAN%'
+         )
+       RETURNING id, nome_participante, empresa, mesa_alocada`,
+      [turmaId]
+    );
+
+    try {
+      await client.query(
+        `INSERT INTO auditoria_eventos (turma_id, acao, detalhes, usuario_nome, usuario_papel)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          turmaId,
+          'LIBERACAO_MESAS_GIANTS',
+          `Liberação em lote pós-almoço: ${liberados.length} membro(s) GIANTS removidos das mesas.`,
+          req.usuario?.nome || 'Operador Salão',
+          String(req.usuario?.papel || 'OPERADOR').toUpperCase()
+        ]
+      );
+    } catch (_) {}
+
+    await client.query('COMMIT');
+    res.json({
+      sucesso: true,
+      liberados: liberados.length,
+      registros: liberados
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(err.statusCode || 500).json({ error: err.message });
   } finally {
     client.release();
   }
