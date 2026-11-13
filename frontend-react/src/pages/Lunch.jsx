@@ -300,6 +300,18 @@ export default function Lunch() {
   }, [searchParams, carregando, gruposEmpresasSalao]);
 
   // 3. Filtragem dos cards de empresa na barra lateral
+  const empresaJaEncerrouEntrevista = (grupo) =>
+    (grupo.membros || []).some(
+      (m) =>
+        Boolean(m.ficha_fechada) ||
+        ['aguardando_aprovacao', 'fechamento', 'concluido', 'reprovado'].includes(
+          String(m.etapa_funil || '').trim().toLowerCase()
+        ) ||
+        ['pendente', 'aprovada', 'aprovado', 'aprovada_com_ressalva', 'recusada'].includes(
+          String(m.status_aprovacao || '').trim().toLowerCase()
+        )
+    );
+
   const gruposFiltrados = gruposEmpresasSalao.filter((g) => {
     const termo = (termoBuscaLateral || '').toLowerCase().trim();
     const matchTermo =

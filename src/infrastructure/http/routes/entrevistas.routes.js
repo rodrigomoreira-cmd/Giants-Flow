@@ -91,6 +91,9 @@ router.post('/entrevistas/resultado', async (req, res) => {
   const client = await pool.connect();
   try {
     const id = req.body.entrevista_id || req.body.fichaId || req.body.participanteId || req.body.id || req.body.aplicacaoId;
+    const sociosIdsExtra = Array.isArray(req.body.sociosIds)
+      ? req.body.sociosIds.map((x) => Number(x)).filter((n) => Number.isInteger(n) && n > 0)
+      : [];
     const resString = String(req.body.resultado || '').toLowerCase();
     const userInfo = extrairUsuarioRequisicao(req);
 
@@ -136,15 +139,16 @@ router.post('/entrevistas/resultado', async (req, res) => {
            fechada_por = COALESCE($2::int, fechada_por),
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $3::int
+          OR id = ANY($7::int[])
           OR (
-            turma_id = $4
+            turma_id = $4::int
             AND (
-              ($5 <> '' AND LENGTH($5) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $5)
-              OR ($5 = '' AND $6 <> '' AND $6 <> 'empresa sga' AND LOWER(TRIM(COALESCE(empresa, ''))) = $6)
+              ($5::text <> '' AND LENGTH($5::text) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $5::text)
+              OR ($6::text <> '' AND $6::text NOT IN ('empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada') AND LOWER(TRIM(COALESCE(empresa, ''))) = $6::text)
             )
           )
        RETURNING *`,
-      [novaEtapa, userInfo.id, Number(id), base.turma_id, cnpjLimpo, empNorm]
+      [novaEtapa, userInfo.id, Number(id), base.turma_id, cnpjLimpo, empNorm, sociosIdsExtra]
     );
 
     await client.query('COMMIT');

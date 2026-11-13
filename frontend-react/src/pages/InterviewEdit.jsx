@@ -343,6 +343,7 @@ export default function InterviewEdit() {
         turmaId: ficha.turma_id || 1491,
         turno: ficha.periodo_entrevista === 'Almoço' ? 'almoco' : 'jantar',
         resultado: ficha.resultado_comercial,
+        sociosIds: sociosLista.map((s) => Number(s.id)).filter((n) => Number.isInteger(n) && n > 0),
         observacao: `[${ficha.resultado_comercial}] Empresa: ${ficha.razao_social} | Sócios no contrato (${sociosQueEntram.length}): ${resumoSocios} | ${ficha.resultado_obs || ''} | Resumo: ${ficha.resumo_entrevista || 'N/A'}`
       });
 

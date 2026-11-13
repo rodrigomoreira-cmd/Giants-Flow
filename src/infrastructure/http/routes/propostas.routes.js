@@ -177,11 +177,12 @@ router.post('/propostas', async (req, res) => {
              ELSE etapa_funil
            END,
            updated_at = CURRENT_TIMESTAMP
-       WHERE turma_id = $1
-         AND id <> $2
+       WHERE turma_id = $1::int
+         AND id <> $2::int
          AND (
-           ($3 <> '' AND LENGTH($3) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $3)
-           OR ($3 = '' AND $4 <> '' AND $4 <> 'empresa sga' AND LOWER(TRIM(COALESCE(empresa, ''))) = $4)
+           ($3::text <> '' AND LENGTH($3::text) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $3::text)
+           OR ($4::text <> '' AND $4::text NOT IN ('empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada') AND LOWER(TRIM(COALESCE(empresa, ''))) = $4::text)
+         )) = $4)
          )`,
       [turmaFinal, aplicacaoId, cnpjLimpo, empNorm]
     );
