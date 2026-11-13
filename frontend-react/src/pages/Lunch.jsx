@@ -187,8 +187,27 @@ export default function Lunch() {
 
   // 1. Filtra unicamente quem possui direito garantido ao almoço (checklist marcado, cortesia ou GIANTS)
   const todosParticipantes = useMemo(() => {
+    const isConfirmadaFinanceiro = (item) => {
+      const stAprov = String(item?.status_aprovacao || '').trim().toLowerCase();
+      const etapa = String(item?.etapa_funil || '').trim().toLowerCase();
+      const fechada = Boolean(item?.ficha_fechada);
+      const aprovadaFin = ['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(stAprov);
+      const etapaConcluida = ['concluido', 'concluida', 'fechamento', 'vendido'].includes(etapa);
+      return aprovadaFin || (fechada && etapaConcluida) || etapaConcluida;
+    };
+
+    const chavesConfirmadasFinanceiro = new Set();
+    (clientesBase || []).forEach((item) => {
+      if (isConfirmadaFinanceiro(item)) {
+        chavesConfirmadasFinanceiro.add(normalizarChaveEmpresa(item));
+      }
+    });
+
     return (clientesBase || [])
       .filter((c) => {
+        if (chavesConfirmadasFinanceiro.has(normalizarChaveEmpresa(c))) {
+          return false;
+        }
         const isGiant =
           Boolean(c.membro_giants) ||
           String(c.origem || '').toUpperCase().includes('GIAN') ||

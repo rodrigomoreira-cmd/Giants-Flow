@@ -150,6 +150,9 @@ export default function Home() {
       if (c.mesa_alocada !== null && c.mesa_alocada !== undefined) g.mesaAlocada = c.mesa_alocada;
       if (
         Boolean(c.ficha_fechada) ||
+        ['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(
+          String(c.status_aprovacao || '').toLowerCase()
+        ) ||
         ['aguardando_aprovacao', 'fechamento', 'concluido', 'reprovado'].includes(
           String(c.etapa_funil || '').toLowerCase()
         )
