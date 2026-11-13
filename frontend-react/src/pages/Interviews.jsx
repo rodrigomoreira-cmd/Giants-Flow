@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
 
@@ -36,6 +36,8 @@ const isAprovadaOuConcluida = (c) => {
 
 export default function Interviews() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [avisoRetornoFicha, setAvisoRetornoFicha] = useState(() => location.state?.fichaFinalizada || null);
   const { turmaSelecionada } = useTurma();
   const [sessoes, setSessoes] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -243,6 +245,45 @@ export default function Interviews() {
 
   return (
     <div style={{ padding: '2rem', width: '100%', boxSizing: 'border-box' }}>
+
+      {avisoRetornoFicha && (
+        <div
+          style={{
+            background: '#f0fdf4',
+            border: '1px solid #86efac',
+            color: '#166534',
+            padding: '0.85rem 1.15rem',
+            borderRadius: '10px',
+            marginBottom: '1.1rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.75rem',
+            fontSize: '0.88rem',
+            fontWeight: 700
+          }}
+        >
+          <span>
+            ✓ Ficha finalizada: <strong>{avisoRetornoFicha.empresa}</strong>
+            {avisoRetornoFicha.resultado ? ` (${avisoRetornoFicha.resultado})` : ''}
+          </span>
+          <button
+            type="button"
+            onClick={() => setAvisoRetornoFicha(null)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#166534',
+              fontWeight: 800,
+              cursor: 'pointer',
+              fontSize: '0.95rem'
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <h1 style={{ fontSize: '1.75rem', fontWeight: '800', color: '#0f172a', margin: 0 }}>

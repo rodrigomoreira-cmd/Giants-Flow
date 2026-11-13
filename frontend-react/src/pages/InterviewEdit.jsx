@@ -430,7 +430,7 @@ export default function InterviewEdit() {
         observacao: `[${ficha.resultado_comercial}] Empresa: ${ficha.razao_social} | Sócios no contrato (${sociosQueEntram.length}): ${resumoSocios} | ${ficha.resultado_obs || ''} | Resumo: ${ficha.resumo_entrevista || 'N/A'}`
       });
 
-      // 3. Bloqueia a ficha e o botão em tela até um Administrador reabrir e volta para a aba Empresas
+      // 3. Bloqueia a ficha e o botão em tela até um Administrador reabrir e volta para a tela de Entrevistas
       setFicha((prev) => ({
         ...prev,
         ficha_fechada: true,
@@ -439,7 +439,7 @@ export default function InterviewEdit() {
       }));
       setModalConfirmarFinalizacao(false);
 
-      navigate('/companies', {
+      navigate('/interviews', {
         state: {
           fichaFinalizada: {
             empresa: ficha.razao_social,
