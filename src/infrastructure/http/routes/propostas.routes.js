@@ -74,13 +74,13 @@ router.post('/propostas', async (req, res) => {
     }
 
     // 2. Cadastra sócios externos adicionados na hora do fechamento na mesma empresa/turma
-    const sociosDetalhes = Array.isArray(dados.sociosDetalhes) ? dados.sociosDetalhes : [];
+    const sociosDetalhes = Array.isArray(dados.sociosDetalhes) ? dados.sociosDetalhes : Array.isArray(dados.socios_lista) ? dados.socios_lista : [];
     const { rows: fichaBaseRows } = await client.query(
       'SELECT turma_id, empresa, cnpj, cpf_cnpj FROM fichas WHERE id = $1',
       [aplicacaoId]
     );
     const fichaBase = fichaBaseRows[0] || {};
-    const empresaFinal = dados.razaoSocial || fichaBase.empresa || 'Empresa SGA';
+    const empresaFinal = dados.razaoSocial || dados.empresa || fichaBase.empresa || 'Empresa SGA';
     const cnpjFinal = dados.cnpj || fichaBase.cnpj || fichaBase.cpf_cnpj || null;
     const turmaFinal = turmaAlvo || fichaBase.turma_id || 1491;
     const cnpjLimpo = String(cnpjFinal || '').replace(/\D/g, '');
@@ -122,13 +122,13 @@ router.post('/propostas', async (req, res) => {
       cashbackAlmoco: Number(dados.cashbackAlmoco ?? 0) || 0,
       cashbackUpgrade: Number(dados.cashbackUpgrade ?? 0) || 0,
       historicoProdutosElegiveis: dados.historicoProdutosElegiveis || '',
-      formaEntrada: dados.formaEntrada || 'Pix',
-      formaRestante: dados.formaRestante || 'Pix',
-      permuta: Number(dados.permuta || 0),
-      entradaComplementar: Number(dados.entradaComplementar || 0),
-      dataEntradaComplementar: dados.dataEntradaComplementar || null,
-      identificadorPagamento: dados.identificadorPagamento || dados.cvPagamento || null,
-      socios: dados.socios || 1,
+      formaEntrada: dados.formaEntrada || dados.forma_entrada || 'Pix',
+      formaRestante: dados.formaRestante || dados.forma_restante || 'Pix',
+      permuta: Number(dados.permuta ?? dados.valor_permuta ?? 0),
+      entradaComplementar: Number(dados.entradaComplementar ?? dados.valor_entrada_complementar ?? 0),
+      dataEntradaComplementar: dados.dataEntradaComplementar || dados.data_entrada_complementar || null,
+      identificadorPagamento: dados.identificadorPagamento || dados.identificador_pagamento || dados.cvPagamento || null,
+      socios: dados.socios || dados.socios_quantidade || 1,
       sociosDetalhes,
       cnpj: cnpjFinal
     });
@@ -161,7 +161,7 @@ router.post('/propostas', async (req, res) => {
         Number(dados.desconto ?? 0) || 0,
         Number(dados.cashback ?? 0) || 0,
         userInfo.id,
-        dados.identificadorPagamento || dados.cvPagamento || null
+        dados.identificadorPagamento || dados.identificador_pagamento || dados.cvPagamento || null
       ]
     );
 
@@ -182,7 +182,6 @@ router.post('/propostas', async (req, res) => {
          AND (
            ($3::text <> '' AND LENGTH($3::text) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $3::text)
            OR ($4::text <> '' AND $4::text NOT IN ('empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada') AND LOWER(TRIM(COALESCE(empresa, ''))) = $4::text)
-         )) = $4)
          )`,
       [turmaFinal, aplicacaoId, cnpjLimpo, empNorm]
     );
