@@ -701,6 +701,32 @@ export default function Lunch() {
           <h1 style={{ fontSize: '1.25rem', fontWeight: '800', color: '#0f172a', margin: 0 }}>
             Salão de Mesas & Entrevistas
           </h1>
+          <button
+            type="button"
+            data-btn-liberar-giants-topo="true"
+            disabled={liberandoGiants}
+            onClick={liberarTodosGiantsDasMesas}
+            title="Remove de uma só vez todos os membros GIANTS das mesas após o almoço"
+            style={{
+              padding: '0.45rem 0.9rem',
+              borderRadius: '8px',
+              border: giantsSentados.length > 0 ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
+              background: giantsSentados.length > 0 ? '#fef3c7' : '#f8fafc',
+              color: giantsSentados.length > 0 ? '#92400e' : '#475569',
+              fontWeight: '800',
+              fontSize: '0.78rem',
+              cursor: liberandoGiants ? 'not-allowed' : 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              boxShadow: giantsSentados.length > 0 ? '0 2px 6px rgba(245, 158, 11, 0.25)' : 'none'
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>logout</span>
+            {liberandoGiants
+              ? 'Liberando GIANTS...'
+              : `Liberar GIANTS das Mesas (${giantsSentados.length})`}
+          </button>
           <span style={{ background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', padding: '0.25rem 0.65rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700' }}>
             Agrupado por Empresa (CNPJ)
           </span>

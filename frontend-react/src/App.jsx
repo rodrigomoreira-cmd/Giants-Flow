@@ -1,5 +1,4 @@
-import WarRoom from './pages/WarRoom';
-﻿import React from 'react';
+﻿import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 import Sidebar from './components/Sidebar';
@@ -8,18 +7,20 @@ import { TurmaProvider } from './context/TurmaContext';
 
 import Login from './pages/Login';
 import Home from './pages/Home';
-import Companies from './pages/Companies';
-import CompanyDetail from './pages/CompanyDetail';
-import Interviews from './pages/Interviews';
-import InterviewDetail from './pages/InterviewDetail';
-import InterviewEdit from './pages/InterviewEdit';
-import Approvals from './pages/Approvals';
-import Lunch from './pages/Lunch';
-import AdminUsers from './pages/AdminUsers';
-import AdminCompanies from './pages/AdminCompanies';
-import AdminCohorts from './pages/AdminCohorts';
-import AdminRules from './pages/AdminRules';
-import AuditLogs from './pages/AuditLogs';
+
+const Companies = lazy(() => import('./pages/Companies'));
+const CompanyDetail = lazy(() => import('./pages/CompanyDetail'));
+const WarRoom = lazy(() => import('./pages/WarRoom'));
+const Interviews = lazy(() => import('./pages/Interviews'));
+const InterviewDetail = lazy(() => import('./pages/InterviewDetail'));
+const InterviewEdit = lazy(() => import('./pages/InterviewEdit'));
+const Approvals = lazy(() => import('./pages/Approvals'));
+const Lunch = lazy(() => import('./pages/Lunch'));
+const AdminUsers = lazy(() => import('./pages/AdminUsers'));
+const AdminCompanies = lazy(() => import('./pages/AdminCompanies'));
+const AdminCohorts = lazy(() => import('./pages/AdminCohorts'));
+const AdminRules = lazy(() => import('./pages/AdminRules'));
+const AuditLogs = lazy(() => import('./pages/AuditLogs'));
 
 function RotaProtegida({ children }) {
   const sessao = localStorage.getItem('sessao_operador');
@@ -33,7 +34,15 @@ function LayoutComSidebar({ children }) {
       <main style={{ flex: 1, height: '100vh', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', minWidth: 0, overflow: 'hidden' }}>
         <Header />
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-          {children}
+          <Suspense
+            fallback={
+              <div style={{ padding: '2.5rem', textAlign: 'center', color: '#64748b', fontWeight: 700, fontSize: '0.92rem' }}>
+                Carregando módulo...
+              </div>
+            }
+          >
+            {children}
+          </Suspense>
         </div>
       </main>
     </div>
@@ -46,7 +55,7 @@ export default function App() {
       <TurmaProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
-          
+
           {/* Rotas Oficiais GIANTS Flow */}
           <Route path="/home" element={<RotaProtegida><LayoutComSidebar><Home /></LayoutComSidebar></RotaProtegida>} />
           <Route path="/companies" element={<RotaProtegida><LayoutComSidebar><Companies /></LayoutComSidebar></RotaProtegida>} />
