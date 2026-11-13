@@ -87,6 +87,7 @@ router.get('/war-room/resumo', async (req, res) => {
     const digits = String(rawTurma).replace(/\D/g, '');
     const turmaId = digits ? parseInt(digits, 10) : 1491;
 
+    // Busca nome e data da turma
     let nomeTurmaEvento = 'Casais Empreendedores';
     let dataTurmaFormatada = new Date().toLocaleDateString('pt-BR').replace(/\//g, '.');
     try {
@@ -106,7 +107,7 @@ router.get('/war-room/resumo', async (req, res) => {
       }
     } catch (_) {}
 
-    // Fichas consolidadas por empresa/CNPJ na turma
+    // Todas as linhas da turma
     const { rows: fichasRows } = await client.query(
       `SELECT
          f.id,
@@ -154,8 +155,28 @@ router.get('/war-room/resumo', async (req, res) => {
       [turmaId]
     );
 
-    // Agrupa por CNPJ ou Empresa normalizada (ignorando membros GIANTS já veteranos para conversão comercial)
-    const gruposMap = new Map();
+    const isCadastradoGiants = (row) =>
+      Boolean(row.membro_giants) || String(row.origem || '').trim().toUpperCase() === 'GIANTS';
+
+    const gerarChaveEmpresa = (r) => {
+      const cnpjLimpo = String(r.cnpj_doc || '').replace(/\D/g, '');
+      const empNorm = String(r.empresa || '').trim().toLowerCase();
+      if (cnpjLimpo.length >= 11) return `cnpj:${cnpjLimpo}`;
+      if (empNorm && !['empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada'].includes(empNorm)) {
+        return `emp:${empNorm}`;
+      }
+      return `id:${r.id}`;
+    };
+
+    // 1. Total de alunos (quantidade de linhas na turma)
+    const totalAlunos = fichasRows.length;
+
+    // 2. Total de empresas (CNPJ / empresa distinta na turma)
+    const todasEmpresasSet = new Set();
+    const gruposNaoGiantsMap = new Map();
+    const giantsRows = [];
+    const giantsEmpresasSet = new Set();
+
     let totalAlmocoArrecadado = 0;
     let qtdAlmocoPago = 0;
     let qtdCortesias = 0;
@@ -165,34 +186,71 @@ router.get('/war-room/resumo', async (req, res) => {
       if (r.almoco_pago || Number(r.valor_almoco || 0) > 0) qtdAlmocoPago += 1;
       if (r.cortesia_almoco) qtdCortesias += 1;
 
-      if (r.membro_giants) continue;
+      const chave = gerarChaveEmpresa(r);
+      todasEmpresasSet.add(chave);
 
-      const cnpjLimpo = String(r.cnpj_doc || '').replace(/\D/g, '');
-      const empNorm = String(r.empresa || '').trim().toLowerCase();
-      const chave =
-        cnpjLimpo.length >= 11
-          ? `cnpj:${cnpjLimpo}`
-          : empNorm && !['empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada'].includes(empNorm)
-          ? `emp:${empNorm}`
-          : `id:${r.id}`;
-
-      if (!gruposMap.has(chave)) {
-        gruposMap.set(chave, []);
+      if (isCadastradoGiants(r)) {
+        giantsRows.push(r);
+        giantsEmpresasSet.add(chave);
+      } else {
+        if (!gruposNaoGiantsMap.has(chave)) {
+          gruposNaoGiantsMap.set(chave, []);
+        }
+        gruposNaoGiantsMap.get(chave).push(r);
       }
-      gruposMap.get(chave).push(r);
     }
 
+    const totalEmpresasCnpj = todasEmpresasSet.size;
+    const totalMembrosGiantsPresentes = giantsRows.length;
+    const totalEmpresasGiantsPresentes = giantsEmpresasSet.size;
+
     const linhasProduto = {
-      GIANTS: { linha: 'GIANTS', contratos: 0, bruto: 0, descontos: 0, cashback: 0, permuta: 0, liquido: 0, entradas: 0 },
-      PAC: { linha: 'PAC', contratos: 0, bruto: 0, descontos: 0, cashback: 0, permuta: 0, liquido: 0, entradas: 0 },
-      AE: { linha: 'AE', contratos: 0, bruto: 0, descontos: 0, cashback: 0, permuta: 0, liquido: 0, entradas: 0 }
+      GIANTS: {
+        linha: 'GIANTS',
+        contratos: 0,
+        empresas: 0,
+        pessoas: 0,
+        empresasComSocio: 0,
+        bruto: 0,
+        descontos: 0,
+        cashback: 0,
+        permuta: 0,
+        liquido: 0,
+        entradas: 0
+      },
+      PAC: {
+        linha: 'PAC',
+        contratos: 0,
+        empresas: 0,
+        pessoas: 0,
+        empresasComSocio: 0,
+        bruto: 0,
+        descontos: 0,
+        cashback: 0,
+        permuta: 0,
+        liquido: 0,
+        entradas: 0
+      },
+      AE: {
+        linha: 'AE',
+        contratos: 0,
+        empresas: 0,
+        pessoas: 0,
+        empresasComSocio: 0,
+        bruto: 0,
+        descontos: 0,
+        cashback: 0,
+        permuta: 0,
+        liquido: 0,
+        entradas: 0
+      }
     };
 
     const formasEntradaMap = new Map();
     const statusFinanceiro = { aprovadas: 0, pendentes: 0, recusadas: 0 };
     const funil = {
-      totalEmpresas: gruposMap.size,
-      aptasAlmoco: 0,
+      totalEmpresasNaoGiants: gruposNaoGiantsMap.size,
+      fichasPreenchidas: 0, // Empresas não-Giants que participam do almoço pago ou cortesia
       emMesaAgora: 0,
       encerradasTotal: 0,
       fechamentos: 0,
@@ -201,14 +259,18 @@ router.get('/war-room/resumo', async (req, res) => {
 
     const ultimosFechamentos = [];
 
-    for (const membros of gruposMap.values()) {
-      const temAlmoco = membros.some((m) => m.almoco_pago || m.cortesia_almoco || Number(m.valor_almoco || 0) > 0);
-      if (temAlmoco) funil.aptasAlmoco += 1;
+    for (const membros of gruposNaoGiantsMap.values()) {
+      // Fichas preenchidas: empresas não-Giants com almoço pago ou cortesia
+      const participaAlmoco = membros.some(
+        (m) => Boolean(m.almoco_pago) || Boolean(m.cortesia_almoco) || Number(m.valor_almoco || 0) > 0
+      );
+      if (participaAlmoco) {
+        funil.fichasPreenchidas += 1;
+      }
 
       const emMesa = membros.some((m) => m.mesa_alocada !== null && m.mesa_alocada !== undefined);
       if (emMesa) funil.emMesaAgora += 1;
 
-      // Escolhe o registro titular/principal da empresa (prioriza quem tem proposta ou dados_proposta)
       const principal =
         membros.find((m) => m.dados_proposta || m.proposta_id) ||
         membros.find((m) => m.ficha_fechada) ||
@@ -234,6 +296,15 @@ router.get('/war-room/resumo', async (req, res) => {
         ).toUpperCase();
         const cat = catRaw.includes('PAC') ? 'PAC' : catRaw.includes('AE') || catRaw.includes('ACELERADOR') ? 'AE' : 'GIANTS';
 
+        // Quantidade de pessoas fechadas nesta empresa/contrato
+        let qtdPessoasContrato = 1;
+        if (Array.isArray(dp?.sociosDetalhes) && dp.sociosDetalhes.length > 0) {
+          const marcados = dp.sociosDetalhes.filter((s) => s.entraNoContrato !== false);
+          qtdPessoasContrato = Math.max(1, marcados.length);
+        } else {
+          qtdPessoasContrato = Math.max(1, Number(dp?.socios || 1));
+        }
+
         const valorNegociado = Number(principal.prop_valor_total || dp?.valorTotal || principal.valor_negociado || 0);
         const desconto = Number(dp?.desconto ?? principal.prop_desconto ?? 0);
         const valorTabela = Number(dp?.valorTabela || valorNegociado + desconto);
@@ -245,6 +316,11 @@ router.get('/war-room/resumo', async (req, res) => {
         const formaEnt = String(dp?.formaEntrada || principal.prop_metodo_pagamento || 'Pix').trim();
 
         linhasProduto[cat].contratos += 1;
+        linhasProduto[cat].empresas += 1;
+        linhasProduto[cat].pessoas += qtdPessoasContrato;
+        if (qtdPessoasContrato > 1) {
+          linhasProduto[cat].empresasComSocio += 1;
+        }
         linhasProduto[cat].bruto += valorTabela;
         linhasProduto[cat].descontos += desconto;
         linhasProduto[cat].cashback += cashback;
@@ -270,6 +346,7 @@ router.get('/war-room/resumo', async (req, res) => {
           titular: principal.nome_participante,
           linha: cat,
           produto: dp?.produtoNome || principal.prod_nome_tabela || cat,
+          pessoasNoContrato: qtdPessoasContrato,
           valorLiquido,
           entrada1,
           entrada2,
@@ -288,6 +365,8 @@ router.get('/war-room/resumo', async (req, res) => {
     const totais = Object.values(linhasProduto).reduce(
       (acc, item) => ({
         contratos: acc.contratos + item.contratos,
+        pessoas: acc.pessoas + item.pessoas,
+        empresasComSocio: acc.empresasComSocio + item.empresasComSocio,
         bruto: acc.bruto + item.bruto,
         descontos: acc.descontos + item.descontos,
         cashback: acc.cashback + item.cashback,
@@ -295,7 +374,7 @@ router.get('/war-room/resumo', async (req, res) => {
         liquido: acc.liquido + item.liquido,
         entradas: acc.entradas + item.entradas
       }),
-      { contratos: 0, bruto: 0, descontos: 0, cashback: 0, permuta: 0, liquido: 0, entradas: 0 }
+      { contratos: 0, pessoas: 0, empresasComSocio: 0, bruto: 0, descontos: 0, cashback: 0, permuta: 0, liquido: 0, entradas: 0 }
     );
 
     const { rows: logsAuditoria } = await client.query(
@@ -309,89 +388,72 @@ router.get('/war-room/resumo', async (req, res) => {
 
     await client.query('COMMIT');
 
-    const baseConversao = funil.encerradasTotal > 0 ? funil.encerradasTotal : funil.aptasAlmoco;
-    const taxaConversao = baseConversao > 0 ? Number(((funil.fechamentos / baseConversao) * 100).toFixed(1)) : 0;
-
-    const isAlunoGiantsOuAE = (row) => {
-      if (row.membro_giants) return true;
-      const orig = String(row.origem || '').toUpperCase();
-      const hist = String(row.historico_produtos_elegiveis || '').toUpperCase();
-      if (orig.includes('GIANTS') || orig.includes('ACELERADOR') || orig === 'AE') return true;
-      if (/GIANTS|ACELERADOR|\bAE\b|ACE\d/i.test(hist)) return true;
-      return false;
-    };
-
-    const fichasBaseElegivel = fichasRows.filter((r) => !isAlunoGiantsOuAE(r));
-    const pessoasPresentes = fichasBaseElegivel.length;
-
-    const empresasElegiveisSet = new Set();
-    for (const r of fichasBaseElegivel) {
-      const cnpjLimpo = String(r.cnpj_doc || '').replace(/\D/g, '');
-      const empNorm = String(r.empresa || '').trim().toLowerCase();
-      const chave =
-        cnpjLimpo.length >= 11
-          ? `cnpj:${cnpjLimpo}`
-          : empNorm && !['empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada'].includes(empNorm)
-          ? `emp:${empNorm}`
-          : `id:${r.id}`;
-      empresasElegiveisSet.add(chave);
-    }
-
-    const empresasPresentes = empresasElegiveisSet.size > 0
-      ? empresasElegiveisSet.size
-      : Number((pessoasPresentes / 2).toFixed(1));
-
-    let pessoasCompraram = 0;
-    for (const r of fichasRows) {
-      const dp = r.dados_proposta && typeof r.dados_proposta === 'object' ? r.dados_proposta : null;
-      const gerouVenda = Boolean(dp || r.proposta_id || Number(r.prop_valor_total || 0) > 0);
-      if (gerouVenda) {
-        const qtdSociosContrato = Array.isArray(dp?.sociosDetalhes)
-          ? Math.max(1, dp.sociosDetalhes.filter((s) => s.entraNoContrato).length)
-          : Math.max(1, Number(dp?.socios || 1));
-        pessoasCompraram += qtdSociosContrato;
-      }
-    }
-
-    const empresasCompraram = funil.fechamentos;
-    const competenciaTotal = totais.liquido;
     const caixaTotal = totais.entradas + totalAlmocoArrecadado;
+    const competenciaTotal = totais.liquido;
+    const baseConversao = funil.fichasPreenchidas > 0 ? funil.fichasPreenchidas : funil.totalEmpresasNaoGiants;
+    const taxaConversao = baseConversao > 0 ? Number(((funil.fechamentos / baseConversao) * 100).toFixed(2)) : 0;
 
-    const txConversaoPessoas = pessoasPresentes > 0 ? Number(((pessoasCompraram / pessoasPresentes) * 100).toFixed(2)) : 0;
-    const txConversaoEmpresas = empresasPresentes > 0 ? Number(((empresasCompraram / empresasPresentes) * 100).toFixed(2)) : 0;
-    const fpp = pessoasPresentes > 0 ? Number((competenciaTotal / pessoasPresentes).toFixed(2)) : 0;
-    const fpe = empresasPresentes > 0 ? Number((competenciaTotal / empresasPresentes).toFixed(2)) : 0;
-
-        res.json({
+    res.json({
       turmaId,
-      panoramaExecutivo: {
-        tituloEvento: nomeTurmaEvento,
-        dataEvento: dataTurmaFormatada,
-        pessoasPresentes,
-        empresasPresentes,
-        pessoasCompraram,
-        empresasCompraram,
-        caixa: caixaTotal,
-        competencia: competenciaTotal,
-        txConversaoPessoas,
-        txConversaoEmpresas,
-        fpp,
-        fpe
-      },
       atualizadoEm: new Date().toISOString(),
+      baseTurma: {
+        totalAlunos,
+        totalEmpresasCnpj,
+        fichasPreenchidas: funil.fichasPreenchidas,
+        empresasElegiveisSemGiants: funil.totalEmpresasNaoGiants
+      },
+      giants: {
+        membrosPresentesTurma: totalMembrosGiantsPresentes,
+        empresasPresentesTurma: totalEmpresasGiantsPresentes,
+        totalEmpresasCompraram: linhasProduto.GIANTS.empresas,
+        totalPessoasFecharam: linhasProduto.GIANTS.pessoas,
+        empresasComSocio: linhasProduto.GIANTS.empresasComSocio,
+        competencia: linhasProduto.GIANTS.liquido,
+        caixaEntradas: linhasProduto.GIANTS.entradas
+      },
+      pac: {
+        totalEmpresasCompraram: linhasProduto.PAC.empresas,
+        totalPessoasFecharam: linhasProduto.PAC.pessoas,
+        empresasComSocio: linhasProduto.PAC.empresasComSocio,
+        competencia: linhasProduto.PAC.liquido,
+        caixaEntradas: linhasProduto.PAC.entradas
+      },
       kpis: {
         faturamentoBruto: totais.bruto,
-        faturamentoLiquido: totais.liquido,
+        faturamentoLiquido: competenciaTotal,
+        competencia: competenciaTotal,
+        caixa: caixaTotal,
+        caixaImediatoEvento: caixaTotal,
         totalDescontos: totais.descontos,
         totalCashback: totais.cashback,
         totalPermuta: totais.permuta,
         entradasImediatas: totais.entradas,
         almocoArrecadado: totalAlmocoArrecadado,
-        caixaImediatoEvento: totais.entradas + totalAlmocoArrecadado,
         qtdAlmocoPago,
         qtdCortesias,
         contratosFechados: totais.contratos,
+        pessoasFechadasTotal: totais.pessoas,
         taxaConversao
+      },
+      panoramaExecutivo: {
+        tituloEvento: nomeTurmaEvento,
+        dataEvento: dataTurmaFormatada,
+        totalAlunos,
+        totalEmpresasCnpj,
+        fichasPreenchidas: funil.fichasPreenchidas,
+        giantsMembrosPresentes: totalMembrosGiantsPresentes,
+        giantsEmpresasPresentes: totalEmpresasGiantsPresentes,
+        giantsEmpresas: linhasProduto.GIANTS.empresas,
+        giantsPessoas: linhasProduto.GIANTS.pessoas,
+        giantsEmpresasComSocio: linhasProduto.GIANTS.empresasComSocio,
+        giantsCompetencia: linhasProduto.GIANTS.liquido,
+        pacEmpresas: linhasProduto.PAC.empresas,
+        pacPessoas: linhasProduto.PAC.pessoas,
+        pacEmpresasComSocio: linhasProduto.PAC.empresasComSocio,
+        pacCompetencia: linhasProduto.PAC.liquido,
+        caixa: caixaTotal,
+        competencia: competenciaTotal,
+        txConversaoFichas: taxaConversao
       },
       porLinha: Object.values(linhasProduto),
       formasEntrada: Array.from(formasEntradaMap.entries()).map(([forma, valor]) => ({ forma, valor })),
