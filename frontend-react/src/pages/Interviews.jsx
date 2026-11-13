@@ -21,7 +21,19 @@ export default function Interviews() {
   const [sessoes, setSessoes] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [busca, setBusca] = useState('');
+  const [abaFiltro, setAbaFiltro] = useState('ATIVAS');
   const [erro, setErro] = useState('');
+
+  const sessaoOperador = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('sessao_operador') || 'null');
+    } catch (_) {
+      return null;
+    }
+  })();
+  const isAdmin = ['ADMIN', 'ADMINISTRADOR', 'SYSTEM'].includes(
+    String(sessaoOperador?.usuario?.papel || '').toUpperCase()
+  );
 
   const carregarSessoes = async () => {
     try {
@@ -36,6 +48,7 @@ export default function Interviews() {
       const mesas = aux.mesas || [];
       const gruposPorEmpresa = new Map();
 
+      // 1. Mapeia empresas atualmente alocadas em mesas físicas
       mesas.forEach((m) => {
         (m.ocupantes_detalhes || []).forEach((det, idx) => {
           let nome = 'Participante';
@@ -43,18 +56,8 @@ export default function Interviews() {
           let entrevistaId = idx + 1;
           let empresa = 'Empresa SGA';
           let statusAlmoco = 'Pendente';
-          let etapa = 'em_entrevista';
 
-          if (typeof det === 'string') {
-            const mNome = det.match(/nome=([^;]+)/);
-            const mCracha = det.match(/nome_cracha=([^;]+)/);
-            const mId = det.match(/entrevista_id=([^;]+)/);
-            const mEmp = det.match(/empresa=([^;]+)/);
-            if (mNome) nome = mNome[1].trim();
-            if (mCracha && mCracha[1].trim()) nomeCracha = mCracha[1].trim();
-            if (mId) entrevistaId = mId[1].trim();
-            if (mEmp) empresa = mEmp[1].trim();
-          } else if (typeof det === 'object' && det !== null) {
+          if (typeof det === 'object' && det !== null) {
             nome = det.nome || det.cliente_nome || nome;
             nomeCracha = det.nome_cracha || '';
             entrevistaId = det.entrevista_id || det.id || entrevistaId;
@@ -65,12 +68,10 @@ export default function Interviews() {
           const cliRef = listaClientes.find(
             (c) =>
               String(c.id) === String(entrevistaId) ||
-              (c.nome_participante && c.nome_participante.toLowerCase() === nome.toLowerCase()) ||
-              (c.empresa && c.empresa.toLowerCase() === empresa.toLowerCase() && c.nome_participante && c.nome_participante.toLowerCase().includes(nome.toLowerCase()))
+              (c.nome_participante && c.nome_participante.toLowerCase() === nome.toLowerCase())
           );
 
           const isGiants =
-            (typeof det === 'string' && (det.toUpperCase().includes('GIAN') || det.includes('membro_giants=t'))) ||
             Boolean(det?.membro_giants) ||
             String(det?.origem || '').toUpperCase().includes('GIAN') ||
             Boolean(cliRef?.membro_giants) ||
@@ -84,7 +85,6 @@ export default function Interviews() {
           const chave = normalizarChaveEmpresa(empresaReal, cnpjReal, entrevistaId);
 
           if (!gruposPorEmpresa.has(chave)) {
-            // Busca todos os sócios da mesma empresa na turma (mesmo que não estejam na mesma mesa)
             const todosSociosTurma = listaClientes
               .filter((c) => !c.membro_giants && normalizarChaveEmpresa(c.empresa, c.cnpj || c.cpf_cnpj, c.id) === chave)
               .map((c) => ({
@@ -100,7 +100,9 @@ export default function Interviews() {
               cnpj: cnpjReal,
               titularNome: nome,
               titularCracha: nomeCracha,
-              etapa,
+              etapa: cliRef?.etapa_funil || 'em_entrevista',
+              fichaFechada: Boolean(cliRef?.ficha_fechada),
+              statusAprovacao: cliRef?.status_aprovacao || '',
               statusAlmoco: almocoLiberado,
               sociosMesa: [{ id: entrevistaId, nome, nomeCracha }],
               todosSociosTurma
@@ -110,11 +112,48 @@ export default function Interviews() {
             if (!grupo.sociosMesa.some((s) => String(s.id) === String(entrevistaId))) {
               grupo.sociosMesa.push({ id: entrevistaId, nome, nomeCracha });
             }
-            if (almocoLiberado === 'Pago / Liberado') {
-              grupo.statusAlmoco = 'Pago / Liberado';
-            }
           }
         });
+      });
+
+      // 2. Inclui empresas cujas fichas foram encerradas (mesa já liberada, aguardando financeiro)
+      listaClientes.forEach((c) => {
+        if (c.membro_giants) return;
+        const fechada =
+          Boolean(c.ficha_fechada) ||
+          ['aguardando_aprovacao', 'fechamento', 'concluido', 'reprovado'].includes(String(c.etapa_funil || '').toLowerCase());
+        if (!fechada) return;
+
+        const cnpjReal = c.cnpj || c.cpf_cnpj || '';
+        const empresaReal = c.empresa || c.nome_participante || 'Empresa SGA';
+        const chave = normalizarChaveEmpresa(empresaReal, cnpjReal, c.id);
+
+        if (!gruposPorEmpresa.has(chave)) {
+          const todosSociosTurma = listaClientes
+            .filter((s) => !s.membro_giants && normalizarChaveEmpresa(s.empresa, s.cnpj || s.cpf_cnpj, s.id) === chave)
+            .map((s) => ({
+              id: s.id,
+              nome: s.nome_participante || s.nome_cracha || 'Sócio',
+              cargo: s.cargo || 'Sócio'
+            }));
+
+          const titularRef = todosSociosTurma.find((s) => s.cargo === 'Sócio Titular') || todosSociosTurma[0] || { id: c.id, nome: c.nome_participante };
+
+          gruposPorEmpresa.set(chave, {
+            id: titularRef.id,
+            mesaNumero: null,
+            empresa: empresaReal,
+            cnpj: cnpjReal,
+            titularNome: titularRef.nome,
+            titularCracha: c.nome_cracha || '',
+            etapa: c.etapa_funil || 'aguardando_aprovacao',
+            fichaFechada: true,
+            statusAprovacao: c.status_aprovacao || 'pendente',
+            statusAlmoco: Boolean(c.almoco_pago || c.cortesia_almoco) ? 'Pago / Liberado' : 'Pendente',
+            sociosMesa: [],
+            todosSociosTurma
+          });
+        }
       });
 
       setSessoes(Array.from(gruposPorEmpresa.values()));
@@ -129,7 +168,21 @@ export default function Interviews() {
     carregarSessoes();
   }, []);
 
+  const reabrirFichaRapido = async (s) => {
+    const motivo = window.prompt(`Informe o motivo para reabrir a ficha de "${s.empresa}" (Admin):`, 'Ajuste comercial solicitado');
+    if (motivo === null) return;
+    try {
+      await api.post(`/entrevistas/${s.id}/reabrir`, { motivo });
+      await carregarSessoes();
+    } catch (err) {
+      alert(`Erro ao reabrir ficha: ${err.message}`);
+    }
+  };
+
   const sessoesFiltradas = sessoes.filter((s) => {
+    if (abaFiltro === 'ATIVAS' && s.fichaFechada) return false;
+    if (abaFiltro === 'ENCERRADAS' && !s.fichaFechada) return false;
+
     const q = busca.toLowerCase();
     const matchSocio =
       s.sociosMesa.some((soc) => soc.nome.toLowerCase().includes(q)) ||
@@ -138,7 +191,7 @@ export default function Interviews() {
       matchSocio ||
       s.empresa.toLowerCase().includes(q) ||
       String(s.cnpj || '').toLowerCase().includes(q) ||
-      String(s.mesaNumero).includes(q) ||
+      String(s.mesaNumero || '').includes(q) ||
       String(s.id).includes(q)
     );
   });
@@ -151,17 +204,44 @@ export default function Interviews() {
             Entrevistas por Empresa (CNPJ)
           </h1>
           <p style={{ color: '#64748b', margin: '0.25rem 0 0', fontSize: '0.9rem' }}>
-            Ficha única consolidada por CNPJ — sócios da mesma empresa são gerenciados dentro do contrato
+            Ao finalizar a entrevista, a mesa é liberada automaticamente e a ficha segue fechada para o Financeiro
           </p>
         </div>
 
-        <button
-          onClick={carregarSessoes}
-          style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '0.55rem 1rem', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#334155', fontSize: '0.85rem' }}
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: '1.1rem' }}>refresh</span>
-          Atualizar Sessões
-        </button>
+        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '0.3rem', background: '#f1f5f9', padding: '0.25rem', borderRadius: '10px' }}>
+            {[
+              { id: 'ATIVAS', label: 'Na Mesa (Em Entrevista)' },
+              { id: 'ENCERRADAS', label: 'Encerradas / Financeiro' },
+              { id: 'TODAS', label: 'Todas' }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setAbaFiltro(tab.id)}
+                style={{
+                  border: 'none',
+                  background: abaFiltro === tab.id ? '#ff5722' : 'transparent',
+                  color: abaFiltro === tab.id ? '#fff' : '#64748b',
+                  padding: '0.45rem 0.85rem',
+                  borderRadius: '8px',
+                  fontWeight: '700',
+                  fontSize: '0.78rem',
+                  cursor: 'pointer'
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={carregarSessoes}
+            style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '0.5rem 0.9rem', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#334155', fontSize: '0.82rem' }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: '1.1rem' }}>refresh</span>
+            Atualizar
+          </button>
+        </div>
       </div>
 
       {erro && (
@@ -185,23 +265,23 @@ export default function Interviews() {
       </div>
 
       {/* Tabela */}
-      <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+      <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
           <thead style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
             <tr>
-              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem' }}>Ficha CNPJ</th>
-              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem' }}>Mesa</th>
-              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem' }}>Empresa / Sócios Vinculados</th>
-              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem' }}>Etapa</th>
-              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem' }}>Almoço</th>
-              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.85rem', textAlign: 'right' }}>Ações</th>
+              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Ficha CNPJ</th>
+              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Mesa</th>
+              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Empresa / Sócios Vinculados</th>
+              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Status / Etapa</th>
+              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Almoço</th>
+              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem', textAlign: 'right' }}>Ações</th>
             </tr>
           </thead>
           <tbody>
             {carregando ? (
-              <tr><td colSpan="6" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>Carregando empresas em entrevista...</td></tr>
+              <tr><td colSpan="6" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>Carregando empresas...</td></tr>
             ) : sessoesFiltradas.length === 0 ? (
-              <tr><td colSpan="6" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>Nenhuma empresa em entrevista encontrada.</td></tr>
+              <tr><td colSpan="6" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>Nenhuma empresa encontrada neste filtro.</td></tr>
             ) : (
               sessoesFiltradas.map((s) => {
                 const outrosSocios = (s.todosSociosTurma.length > 0 ? s.todosSociosTurma : s.sociosMesa)
@@ -210,17 +290,22 @@ export default function Interviews() {
                   <tr key={s.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                     <td style={{ padding: '1rem' }}>
                       <span
-                        onClick={() => navigate(`/interviews/${s.id}`)}
-                        title="Ver detalhes da ficha da empresa"
+                        onClick={() => navigate(`/interviews/${s.id}/edit`)}
                         style={{ fontWeight: '800', color: '#ff5722', cursor: 'pointer' }}
                       >
                         #{s.id}
                       </span>
                     </td>
                     <td style={{ padding: '1rem' }}>
-                      <span style={{ background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', padding: '0.2rem 0.55rem', borderRadius: '6px', fontSize: '0.75rem', fontWeight: '700' }}>
-                        Mesa {s.mesaNumero}
-                      </span>
+                      {s.mesaNumero ? (
+                        <span style={{ background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', padding: '0.2rem 0.55rem', borderRadius: '6px', fontSize: '0.75rem', fontWeight: '700' }}>
+                          Mesa {s.mesaNumero}
+                        </span>
+                      ) : (
+                        <span style={{ background: '#f1f5f9', color: '#64748b', padding: '0.2rem 0.55rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '700' }}>
+                          Mesa Liberada
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: '1rem' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -251,9 +336,15 @@ export default function Interviews() {
                       </div>
                     </td>
                     <td style={{ padding: '1rem' }}>
-                      <span style={{ background: '#eff6ff', color: '#2563eb', padding: '0.2rem 0.55rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '700' }}>
-                        {s.etapa}
-                      </span>
+                      {s.fichaFechada ? (
+                        <span style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '0.22rem 0.55rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                          🔒 Fechada • {s.etapa}
+                        </span>
+                      ) : (
+                        <span style={{ background: '#eff6ff', color: '#2563eb', padding: '0.22rem 0.55rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '700' }}>
+                          {s.etapa}
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: '1rem' }}>
                       <span
@@ -270,12 +361,34 @@ export default function Interviews() {
                       </span>
                     </td>
                     <td style={{ padding: '1rem', textAlign: 'right' }}>
-                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '0.45rem', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
+                        {s.fichaFechada && isAdmin && (
+                          <button
+                            onClick={() => reabrirFichaRapido(s)}
+                            title="Reabrir ficha encerrada (Administrador)"
+                            style={{
+                              background: '#0f172a',
+                              color: '#fff',
+                              border: 'none',
+                              padding: '0.42rem 0.75rem',
+                              borderRadius: '6px',
+                              fontSize: '0.76rem',
+                              fontWeight: '700',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.3rem'
+                            }}
+                          >
+                            <span className="material-symbols-outlined" style={{ fontSize: '0.95rem' }}>lock_open</span>
+                            Reabrir
+                          </button>
+                        )}
+
                         <button
                           onClick={() => navigate(`/interviews/${s.id}/edit`)}
-                          title="Abrir ficha única da empresa"
                           style={{
-                            background: '#ff5722',
+                            background: s.fichaFechada ? '#475569' : '#ff5722',
                             color: '#fff',
                             border: 'none',
                             padding: '0.45rem 0.85rem',
@@ -288,8 +401,10 @@ export default function Interviews() {
                             gap: '0.35rem'
                           }}
                         >
-                          <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>business</span>
-                          Ficha da Empresa
+                          <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>
+                            {s.fichaFechada ? 'visibility' : 'business'}
+                          </span>
+                          {s.fichaFechada ? 'Ver Ficha Fechada' : 'Ficha da Empresa'}
                         </button>
 
                         <button

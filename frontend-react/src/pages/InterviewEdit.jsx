@@ -18,6 +18,20 @@ export default function InterviewEdit() {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
   const [catalogoProdutos, setCatalogoProdutos] = useState([]);
+  const [modalConclusao, setModalConclusao] = useState(null);
+  const [modalReabrir, setModalReabrir] = useState(false);
+  const [motivoReabertura, setMotivoReabertura] = useState('');
+  const [reabrindoFicha, setReabrindoFicha] = useState(false);
+
+  const sessaoOperador = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('sessao_operador') || 'null');
+    } catch (_) {
+      return null;
+    }
+  })();
+  const papelUsuario = String(sessaoOperador?.usuario?.papel || '').toUpperCase();
+  const isAdmin = ['ADMIN', 'ADMINISTRADOR', 'SYSTEM'].includes(papelUsuario);
 
   // Lista de sócios da empresa (cadastrados na turma + adicionados na hora do fechamento)
   const [sociosLista, setSociosLista] = useState([]);
@@ -299,6 +313,10 @@ export default function InterviewEdit() {
   const podeSubmeter = camposFaltantes.length === 0;
 
   const submeterFicha = async () => {
+    if (ficha.ficha_fechada) {
+      alert('Esta ficha já está encerrada e aguardando aprovação do financeiro.');
+      return;
+    }
     if (!podeSubmeter) {
       alert(`Preencha os campos obrigatórios:\n- ${camposFaltantes.join('\n- ')}`);
       return;
@@ -308,8 +326,9 @@ export default function InterviewEdit() {
       setSalvando(true);
       const appTargetId = Number(ficha.aplicacao_id || id);
       const resumoSocios = sociosQueEntram.map((s) => s.nome).join(', ');
+      const gerouProposta = ['Fechou GIANTS', 'Fechou PAC', 'Downsell PAC', 'Fechou AE'].includes(ficha.resultado_comercial);
 
-      // 1. Registra o resultado da entrevista no backend oficial
+      // 1. Registra o resultado da entrevista no backend oficial (fecha a ficha e libera a mesa da empresa)
       await api.post('/entrevistas/resultado', {
         aplicacaoId: appTargetId,
         turmaId: ficha.turma_id || 1491,
@@ -318,13 +337,15 @@ export default function InterviewEdit() {
         observacao: `[${ficha.resultado_comercial}] Empresa: ${ficha.razao_social} | Sócios no contrato (${sociosQueEntram.length}): ${resumoSocios} | ${ficha.resultado_obs || ''} | Resumo: ${ficha.resumo_entrevista || 'N/A'}`
       });
 
-      // 2. Se gerou fechamento, cria a proposta comercial com todos os sócios vinculados
-      if (['Fechou GIANTS', 'Fechou PAC', 'Downsell PAC', 'Fechou AE'].includes(ficha.resultado_comercial)) {
+      let propostaCriada = null;
+
+      // 2. Se gerou fechamento, cria a proposta comercial com todos os sócios vinculados e cashback
+      if (gerouProposta) {
         const prodMatch =
           catalogoProdutos.find((p) => p.nome === ficha.produto_nome) ||
           catalogoProdutos.find((p) => String(p.categoria || '').toUpperCase() === String(ficha.categoria_produto || 'GIANTS').toUpperCase());
 
-        await api.post('/propostas', {
+        propostaCriada = await api.post('/propostas', {
           aplicacaoId: appTargetId,
           turmaId: ficha.turma_id || 1491,
           razaoSocial: ficha.razao_social,
@@ -334,21 +355,70 @@ export default function InterviewEdit() {
           categoriaProduto: ficha.categoria_produto,
           socios: sociosQueEntram.length,
           sociosDetalhes: sociosLista,
+          valorTabela: calc.contrato,
           valorTotal: calc.valorNegociado,
+          desconto: Number(calc.desconto || ficha.desconto || 0),
           valorEntrada: calc.entrada,
           cashback: calc.cashback,
+          cashbackAlmoco: Number(ficha.cashback_almoco_cnpj || 0),
+          cashbackUpgrade: ficha.categoria_produto === 'GIANTS' ? Number(ficha.cashback_upgrade_cnpj || 0) : 0,
+          historicoProdutosElegiveis: ficha.historico_produtos_elegiveis || '',
+          formaEntrada: ficha.forma_entrada || 'Pix',
+          formaRestante: ficha.forma_restante || 'Pix',
           metodoPagamento: `${ficha.forma_entrada} + ${calc.parcelas}x ${ficha.forma_restante}`,
           quantidadeParcelas: calc.parcelas,
           valorParcela: calc.valorParcela
         });
       }
 
-      alert('Entrevista da empresa e sócios vinculados registrados com sucesso!');
-      navigate('/interviews');
+      setFicha((prev) => ({
+        ...prev,
+        ficha_fechada: true,
+        etapa_funil: 'aguardando_aprovacao',
+        status_aprovacao: 'pendente'
+      }));
+
+      setModalConclusao({
+        protocolo: propostaCriada?.id ? `PROP-${String(propostaCriada.id).padStart(3, '0')}` : `FICHA-${appTargetId}`,
+        gerouProposta,
+        empresa: ficha.razao_social,
+        cnpj: ficha.cnpj,
+        resultado: ficha.resultado_comercial,
+        produto: ficha.produto_nome,
+        socios: sociosQueEntram.map((s) => s.nome),
+        valorNegociado: calc.valorNegociado,
+        cashback: calc.cashback,
+        saldoLiquido: calc.saldo + calc.entrada,
+        entrada: calc.entrada,
+        formaEntrada: ficha.forma_entrada,
+        parcelas: calc.parcelas,
+        valorParcela: calc.valorParcela,
+        formaRestante: ficha.forma_restante
+      });
     } catch (err) {
       alert(`Erro ao registrar: ${err.message}`);
     } finally {
       setSalvando(false);
+    }
+  };
+
+  const confirmarReaberturaAdmin = async () => {
+    try {
+      setReabrindoFicha(true);
+      await api.post(`/entrevistas/${id}/reabrir`, {
+        motivo: motivoReabertura || 'Reaberta pelo Administrador para ajuste comercial'
+      });
+      setFicha((prev) => ({
+        ...prev,
+        ficha_fechada: false,
+        etapa_funil: 'em_entrevista'
+      }));
+      setModalReabrir(false);
+      setMotivoReabertura('');
+    } catch (err) {
+      alert(`Erro ao reabrir ficha: ${err.message}`);
+    } finally {
+      setReabrindoFicha(false);
     }
   };
 
@@ -1155,7 +1225,7 @@ export default function InterviewEdit() {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button
-                disabled={!podeSubmeter || salvando}
+                disabled={!podeSubmeter || salvando || Boolean(ficha.ficha_fechada)}
                 onClick={submeterFicha}
                 style={{
                   background: !podeSubmeter ? '#cbd5e1' : '#059669',
@@ -1172,7 +1242,7 @@ export default function InterviewEdit() {
                 }}
               >
                 <span className="material-symbols-outlined">check_circle</span>
-                {salvando ? 'Registrando...' : 'Confirmar e Gravar Ficha da Empresa'}
+                {ficha.ficha_fechada ? 'Ficha Encerrada (Aguardando Financeiro)' : salvando ? 'Registrando...' : 'Confirmar e Gravar Ficha da Empresa'}
               </button>
             </div>
           </div>
