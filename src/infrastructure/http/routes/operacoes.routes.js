@@ -16,5 +16,6 @@ router.use(require('./clientes.routes'));
 router.use(require('./propostas.routes'));
 router.use(require('./usuarios.routes'));
 router.use(require('./entrevistas.routes'));
+router.use(require('./warroom.routes'));
 
 module.exports = router;

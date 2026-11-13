@@ -4,6 +4,7 @@ const dbModule = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
 const criarPropostaUseCase = require('../../../application/use-cases/proposta/CriarPropostaUseCase');
 const { verificarJWT } = require('../../security/jwt');
+const { registrarAuditoria } = require('./warroom.routes');
 
 function extrairUsuarioRequisicao(req) {
   if (req.usuario && req.usuario.papel) {
@@ -193,6 +194,16 @@ router.post('/propostas', async (req, res) => {
          )`,
       [turmaFinal, aplicacaoId, cnpjLimpo, empNorm]
     );
+
+    await registrarAuditoria(client, {
+      turmaId: turmaFinal,
+      fichaId: aplicacaoId,
+      empresa: empresaFinal,
+      cnpj: cnpjFinal,
+      acao: 'EMISSAO_PROPOSTA',
+      detalhes: `Produto: ${dados.produtoNome || dados.produto_nome || dados.categoriaProduto || 'Plano'} | Negociado: R$ ${Number(propostaSalva.valorTotal || 0).toFixed(2)}`,
+      req
+    });
 
     await client.query('COMMIT');
     res.status(201).json({

@@ -2,6 +2,7 @@
 const router = express.Router();
 const dbModule = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
+const { registrarAuditoria } = require('./warroom.routes');
 
 // 1. LISTAGEM DE CLIENTES / PARTICIPANTES POR TURMA
 router.get('/clientes', async (req, res) => {
@@ -139,6 +140,17 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
 
     const { rows } = await client.query(sqlUpdate, [mesaNum, assentoNum, fichaId]);
 
+    if (cashback !== undefined && cashback !== null && Number(clienteAtual[0]?.cashback || 0) !== Number(cashback)) {
+      await registrarAuditoria(client, {
+        fichaId: Number(id),
+        empresa: rows[0]?.empresa || clienteAtual[0]?.empresa,
+        cnpj: rows[0]?.cnpj,
+        acao: 'EDICAO_CASHBACK',
+        detalhes: `Cashback alterado de R$ ${Number(clienteAtual[0]?.cashback || 0).toFixed(2)} para R$ ${Number(cashback).toFixed(2)}`,
+        req
+      });
+    }
+
     await client.query('COMMIT');
     res.json(rows[0]);
   } catch (err) {
@@ -266,6 +278,18 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
          WHERE id = ANY($1::int[])`,
         [todosIds]
       );
+    }
+
+    if (tipo === 'cortesia') {
+      await registrarAuditoria(client, {
+        turmaId: base.turma_id,
+        fichaId,
+        empresa: base.empresa,
+        cnpj: base.cnpj || base.cpf_cnpj,
+        acao: 'CORTESIA_ALMOCO',
+        detalhes: `Cortesia de almoço autorizada (R$ 1.000,00 debitado) para ${idsParticipantes.length} participante(s)`,
+        req
+      });
     }
 
     const { rows: atualizadas } = await client.query(

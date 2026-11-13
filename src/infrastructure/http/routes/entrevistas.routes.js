@@ -2,6 +2,7 @@
 const router = express.Router();
 const dbModule = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
+const { registrarAuditoria } = require('./warroom.routes');
 const { verificarJWT } = require('../../security/jwt');
 
 function extrairUsuarioRequisicao(req) {
@@ -237,6 +238,15 @@ router.post('/entrevistas/:id/reabrir', async (req, res) => {
 
 // REABRIR FICHA DA EMPRESA (LIBERA EDIÇÃO APÓS FECHAMENTO / APROVAÇÃO)
 router.post('/entrevistas/reabrir', async (req, res) => {
+  await registrarAuditoria(pool, {
+    turmaId: req.body?.turmaId || 1491,
+    fichaId: req.body?.fichaId || null,
+    empresa: req.body?.empresa || null,
+    cnpj: req.body?.cnpj || null,
+    acao: 'REABERTURA_FICHA_ADMIN',
+    detalhes: req.body?.motivo || 'Reabertura administrativa da ficha encerrada',
+    req
+  });
   const roleHeader = String(req.user?.papel || req.user?.role || req.user?.perfil || req.body?.papel || req.headers['x-user-role'] || '').trim().toLowerCase();
   if (roleHeader && !['admin', 'administrador', 'superadmin', 'master', 'system', 'diretor'].includes(roleHeader)) {
     return res.status(403).json({ error: 'Acesso negado: somente administradores podem reabrir fichas encerradas.' });

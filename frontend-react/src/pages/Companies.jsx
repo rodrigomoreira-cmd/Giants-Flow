@@ -446,6 +446,28 @@ export default function Companies() {
           <h1 style={{ fontSize: '1.75rem', fontWeight: '800', color: '#0f172a', margin: 0 }}>
             Base de Empresas — Fluxo Pré-Entrevista
           </h1>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.85rem' }}>
+        <a
+          href={`${import.meta.env.VITE_API_URL || '/api'}/financeiro/exportar-csv?turmaId=${localStorage.getItem('turma_ativa_id') || '1491'}`}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            background: '#059669',
+            color: '#ffffff',
+            padding: '0.55rem 1rem',
+            borderRadius: '8px',
+            fontWeight: '800',
+            fontSize: '0.82rem',
+            textDecoration: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.4rem'
+          }}
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: '1.05rem' }}>download</span>
+          Exportar Planilha (Excel/CSV)
+        </a>
+      </div>
           <p style={{ color: '#64748b', margin: '0.25rem 0 0', fontSize: '0.9rem' }}>
             1. Clicar na Empresa e Validar Almoço (Checklist de Sócios) → 2. Alocar na Mesa → 3. Entrevista por CNPJ
           </p>
