@@ -16,6 +16,7 @@ export default function InterviewEdit() {
   const [etapaAtual, setEtapaAtual] = useState(1);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const [modalConfirmarFinalizacao, setModalConfirmarFinalizacao] = useState(false);
   const [erro, setErro] = useState('');
   const [catalogoProdutos, setCatalogoProdutos] = useState([]);
   const [modalConclusao, setModalConclusao] = useState(null);
@@ -331,6 +332,10 @@ export default function InterviewEdit() {
       return;
     }
 
+    setModalConfirmarFinalizacao(true);
+  };
+
+  const confirmarGravacaoFicha = async () => {
     try {
       setSalvando(true);
       const appTargetId = Number(ficha.aplicacao_id || id);
@@ -414,6 +419,7 @@ export default function InterviewEdit() {
       setModalAviso({ tipo: 'erro', titulo: 'Erro ao Registrar Entrevista', mensagem: err.message });
     } finally {
       setSalvando(false);
+      setModalConfirmarFinalizacao(false);
     }
   };
 
@@ -1352,7 +1358,7 @@ export default function InterviewEdit() {
                 }}
               >
                 <span className="material-symbols-outlined">check_circle</span>
-                {ficha.ficha_fechada ? 'Ficha Encerrada (Aguardando Financeiro)' : salvando ? 'Registrando...' : 'Confirmar e Gravar Ficha da Empresa'}
+                {ficha.ficha_fechada ? 'Ficha Encerrada (Aguardando Financeiro)' : salvando ? 'Registrando...' : 'Finalizar Ficha da Empresa'}
               </button>
             </div>
           </div>
@@ -1377,6 +1383,140 @@ export default function InterviewEdit() {
           Avançar Etapa
         </button>
       </div>
+      {/* MODAL DE CONFIRMAÇÃO ANTES DE FINALIZAR A ENTREVISTA */}
+      {modalConfirmarFinalizacao && (() => {
+        const gerouFechamento = ['Fechou GIANTS', 'Fechou PAC', 'Downsell PAC', 'Fechou AE'].includes(ficha.resultado_comercial);
+        const sociosForaContrato = Array.isArray(sociosLista) ? sociosLista.filter((s) => !s.entraNoContrato) : [];
+        const fmtBRL = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+        return (
+          <div
+            onClick={() => !salvando && setModalConfirmarFinalizacao(false)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ background: '#ffffff', borderRadius: '14px', maxWidth: '580px', width: '100%', overflow: 'hidden', boxShadow: '0 20px 45px rgba(15, 23, 42, 0.25)', border: '1px solid #e2e8f0' }}
+            >
+              {/* Cabeçalho */}
+              <div style={{ background: '#ffffff', padding: '1.25rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+                  <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: '#fff7ed', color: '#ff5722', border: '1px solid #fed7aa', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '1.5rem' }}>task_alt</span>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.72rem', fontWeight: '800', color: '#ff5722', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Ficha #{id} • Confirmação de Finalização
+                    </div>
+                    <h3 style={{ margin: '0.15rem 0 0', fontSize: '1.15rem', fontWeight: '800', color: '#0f172a' }}>
+                      Confirmar encerramento da entrevista?
+                    </h3>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={salvando}
+                  onClick={() => setModalConfirmarFinalizacao(false)}
+                  style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#64748b', width: '32px', height: '32px', borderRadius: '8px', cursor: salvando ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '1.1rem' }}>close</span>
+                </button>
+              </div>
+
+              {/* Corpo com Resumo */}
+              <div style={{ padding: '1.35rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.9rem', background: '#f8fafc' }}>
+                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0.95rem 1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.95rem', fontWeight: '800', color: '#0f172a' }}>{ficha.razao_social}</span>
+                    <span style={{ fontSize: '0.74rem', fontWeight: '800', background: gerouFechamento ? '#dcfce7' : '#f1f5f9', color: gerouFechamento ? '#166534' : '#334155', padding: '0.2rem 0.6rem', borderRadius: '999px' }}>
+                      {ficha.resultado_comercial}
+                    </span>
+                  </div>
+                  {ficha.cnpj && (
+                    <div style={{ fontSize: '0.78rem', color: '#64748b', fontFamily: 'monospace', marginTop: '0.2rem' }}>
+                      CNPJ: {ficha.cnpj}
+                    </div>
+                  )}
+                  <div style={{ fontSize: '0.8rem', color: '#334155', marginTop: '0.45rem' }}>
+                    <strong>Sócios no contrato ({sociosQueEntram.length}):</strong> {sociosQueEntram.map((s) => s.nome).join(', ')}
+                  </div>
+                  {sociosForaContrato.length > 0 && (
+                    <div style={{ fontSize: '0.78rem', color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', padding: '0.4rem 0.6rem', borderRadius: '6px', marginTop: '0.45rem' }}>
+                      <strong>Sócios que não fecharam ({sociosForaContrato.length}):</strong> {sociosForaContrato.map((s) => s.nome).join(', ')} <em>(também sairão da mesa)</em>
+                    </div>
+                  )}
+                </div>
+
+                {gerouFechamento && calc && (
+                  <div style={{ background: '#ffffff', border: '1px solid #fed7aa', borderRadius: '10px', padding: '0.95rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.82rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#64748b' }}>Produto / Plano:</span>
+                      <strong style={{ color: '#0f172a' }}>{ficha.produto_nome}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#64748b' }}>Valor Negociado:</span>
+                      <strong>{fmtBRL(calc.valorNegociado)}</strong>
+                    </div>
+                    {Number(calc.cashback || 0) > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#047857' }}>
+                        <span>(-) Cashback CNPJ:</span>
+                        <strong>- {fmtBRL(calc.cashback)}</strong>
+                      </div>
+                    )}
+                    {Number(calc.permuta || 0) > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#7e22ce' }}>
+                        <span>(-) Permuta:</span>
+                        <strong>- {fmtBRL(calc.permuta)}</strong>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #e2e8f0', paddingTop: '0.4rem', marginTop: '0.15rem' }}>
+                      <span style={{ fontWeight: '700', color: '#334155' }}>Condição Acordada:</span>
+                      <strong style={{ color: '#ff5722', textAlign: 'right' }}>
+                        Entr. {fmtBRL(calc.entrada)} ({ficha.forma_entrada})
+                        {Number(calc.entradaComplementar || 0) > 0 ? ` + ${fmtBRL(calc.entradaComplementar)}` : ''}
+                        {' '}• {calc.parcelas}x {fmtBRL(calc.valorParcela)} ({ficha.forma_restante})
+                      </strong>
+                    </div>
+                    {ficha.identificador_pagamento && (
+                      <div style={{ fontSize: '0.76rem', color: '#0369a1', marginTop: '0.15rem' }}>
+                        <strong>Identificador / CV / Link:</strong> {ficha.identificador_pagamento}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '10px', padding: '0.8rem 0.95rem', fontSize: '0.78rem', color: '#92400e', lineHeight: '1.45' }}>
+                  <strong>Ao confirmar a finalização:</strong>
+                  <div style={{ marginTop: '0.2rem' }}>• A ficha será <strong>encerrada e bloqueada para edição</strong> (reabertura apenas por Administrador).</div>
+                  <div>• <strong>Toda a empresa sairá da mesa imediatamente</strong> (inclusive sócios que não fecharam), deixando a mesa livre no salão.</div>
+                  {gerouFechamento && <div>• A proposta seguirá para a <strong>Fila de Aprovações & Crédito</strong> do Financeiro.</div>}
+                </div>
+              </div>
+
+              {/* Rodapé */}
+              <div style={{ padding: '0.95rem 1.5rem', background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: '0.65rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  disabled={salvando}
+                  onClick={() => setModalConfirmarFinalizacao(false)}
+                  style={{ background: '#ffffff', border: '1px solid #cbd5e1', color: '#475569', padding: '0.6rem 1.1rem', borderRadius: '8px', fontWeight: '700', fontSize: '0.82rem', cursor: salvando ? 'not-allowed' : 'pointer' }}
+                >
+                  Voltar e Revisar
+                </button>
+                <button
+                  type="button"
+                  disabled={salvando}
+                  onClick={confirmarGravacaoFicha}
+                  style={{ background: '#059669', border: 'none', color: '#ffffff', padding: '0.6rem 1.25rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: salvando ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: '1.05rem' }}>check_circle</span>
+                  {salvando ? 'Finalizando e Liberando Mesa...' : 'Confirmar Finalização e Liberar Mesa'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
