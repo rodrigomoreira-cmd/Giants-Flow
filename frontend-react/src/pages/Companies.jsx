@@ -17,6 +17,34 @@ const normalizarChaveEmpresa = (emp) => {
   return `id:${emp.id}`;
 };
 
+const isUsuarioAdmin = () => {
+  try {
+    const directRole = String(
+      localStorage.getItem('role') ||
+      localStorage.getItem('perfil') ||
+      localStorage.getItem('user_role') ||
+      ''
+    ).trim().toLowerCase();
+    if (['admin', 'administrador', 'superadmin', 'master'].includes(directRole)) return true;
+
+    for (const key of ['user', 'usuario', 'auth_user', 'giants_user', 'currentUser']) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw);
+      const r = String(parsed?.role || parsed?.perfil || parsed?.tipo || parsed?.nivel || '').trim().toLowerCase();
+      if (['admin', 'administrador', 'superadmin', 'master'].includes(r)) return true;
+    }
+
+    const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
+    if (token && token.split('.').length === 3) {
+      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      const r = String(payload?.role || payload?.perfil || payload?.tipo || '').trim().toLowerCase();
+      if (['admin', 'administrador', 'superadmin', 'master'].includes(r)) return true;
+    }
+  } catch (_) {}
+  return false;
+};
+
 export default function Companies() {
   const { turmaSelecionada } = useTurma();
   const [participantes, setParticipantes] = useState([]);
@@ -28,6 +56,7 @@ export default function Companies() {
   const [pagina, setPagina] = useState(1);
   const itensPorPagina = 60;
   const navigate = useNavigate();
+  const usuarioEhAdmin = useMemo(() => isUsuarioAdmin(), []);
 
   // Modal Unificado da Empresa (Sócios não-GIANTS + Pagamento + Checklist de Participantes no Almoço)
   const [modalEmpresaAberto, setModalEmpresaAberto] = useState(false);
@@ -248,6 +277,11 @@ export default function Companies() {
   };
 
   const executarReaberturaFicha = async () => {
+    if (!usuarioEhAdmin) {
+      setErro('Acesso negado: somente Administrador pode reabrir fichas encerradas.');
+      setGrupoReabrir(null);
+      return;
+    }
     if (!grupoReabrir) return;
     try {
       setReabrindoFicha(true);
@@ -712,47 +746,93 @@ export default function Companies() {
                     {/* 3. Entrevista */}
                     <td style={{ padding: '1rem', textAlign: 'right' }}>
                       {estagio.fechado ? (
-                        <button
-                          onClick={() => setGrupoReabrir(g)}
-                          title="Contrato aprovado pelo Financeiro — clique para reabrir a ficha e fazer alterações"
-                          style={{
-                            background: '#fffbeb',
-                            color: '#b45309',
-                            border: '1.5px solid #f59e0b',
-                            padding: '0.45rem 0.95rem',
-                            borderRadius: '6px',
-                            fontSize: '0.8rem',
-                            fontWeight: '800',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.35rem'
-                          }}
-                        >
-                          <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>lock_open</span>
-                          Reabrir
-                        </button>
+                        usuarioEhAdmin ? (
+                          <button
+                            onClick={() => setGrupoReabrir(g)}
+                            title="Administrador: clique para reabrir esta ficha fechada"
+                            style={{
+                              background: '#fffbeb',
+                              color: '#b45309',
+                              border: '1.5px solid #f59e0b',
+                              padding: '0.45rem 0.95rem',
+                              borderRadius: '6px',
+                              fontSize: '0.8rem',
+                              fontWeight: '800',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.35rem'
+                            }}
+                          >
+                            <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>lock_open</span>
+                            Reabrir
+                          </button>
+                        ) : (
+                          <button
+                            disabled
+                            title="Ficha fechada e bloqueada — somente Administrador pode reabrir"
+                            style={{
+                              background: '#f1f5f9',
+                              color: '#64748b',
+                              border: '1px solid #cbd5e1',
+                              padding: '0.45rem 0.95rem',
+                              borderRadius: '6px',
+                              fontSize: '0.8rem',
+                              fontWeight: '800',
+                              cursor: 'not-allowed',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.35rem'
+                            }}
+                          >
+                            <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>lock</span>
+                            Fechado (Bloqueado)
+                          </button>
+                        )
                       ) : estagio.aguardandoFinanceiro ? (
-                        <button
-                          onClick={() => navigate(`/interviews/${g.idPrincipal}/edit`)}
-                          title="Ficha encerrada aguardando aprovação do Financeiro"
-                          style={{
-                            background: '#fef3c7',
-                            color: '#92400e',
-                            border: '1px solid #fcd34d',
-                            padding: '0.45rem 0.9rem',
-                            borderRadius: '6px',
-                            fontSize: '0.78rem',
-                            fontWeight: '700',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.35rem'
-                          }}
-                        >
-                          <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>lock</span>
-                          Aguardando Financeiro
-                        </button>
+                        usuarioEhAdmin ? (
+                          <button
+                            onClick={() => setGrupoReabrir(g)}
+                            title="Administrador: clique para reabrir esta ficha"
+                            style={{
+                              background: '#fffbeb',
+                              color: '#b45309',
+                              border: '1.5px solid #f59e0b',
+                              padding: '0.45rem 0.95rem',
+                              borderRadius: '6px',
+                              fontSize: '0.8rem',
+                              fontWeight: '800',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.35rem'
+                            }}
+                          >
+                            <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>lock_open</span>
+                            Reabrir
+                          </button>
+                        ) : (
+                          <button
+                            disabled
+                            title="Ficha bloqueada aguardando financeiro — somente Administrador pode reabrir"
+                            style={{
+                              background: '#fef3c7',
+                              color: '#92400e',
+                              border: '1px solid #fcd34d',
+                              padding: '0.45rem 0.9rem',
+                              borderRadius: '6px',
+                              fontSize: '0.78rem',
+                              fontWeight: '700',
+                              cursor: 'not-allowed',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.35rem'
+                            }}
+                          >
+                            <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>lock</span>
+                            Aguardando Financeiro
+                          </button>
+                        )
                       ) : g.apenasGiants ? (
                         <button
                           disabled

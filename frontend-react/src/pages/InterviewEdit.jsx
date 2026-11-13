@@ -544,7 +544,14 @@ export default function InterviewEdit() {
       {/* Conteúdo por Etapa */}
       <div style={{ background: '#fff', borderRadius: '14px', border: '1px solid #e2e8f0', padding: '2rem', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', marginBottom: '2rem' }}>
         {/* ETAPA 1: EMPRESA + GESTÃO DE SÓCIOS */}
-        {etapaAtual === 1 && (
+        <div
+        data-bloqueio-edicao-ficha="true"
+        style={{
+          pointerEvents: Boolean(ficha.ficha_fechada) && etapaAtual < 6 ? 'none' : 'auto',
+          opacity: Boolean(ficha.ficha_fechada) && etapaAtual < 6 ? 0.88 : 1
+        }}
+      >
+      {etapaAtual === 1 && (
           <div>
             <h3 style={{ margin: '0 0 1.25rem 0', color: '#0f172a', fontSize: '1.15rem' }}>1. Dados do CNPJ & Sócios no Contrato</h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
@@ -1083,7 +1090,8 @@ export default function InterviewEdit() {
         )}
 
         {/* ETAPA 6: REVISÃO */}
-        {etapaAtual === 6 && (
+        </div>
+      {etapaAtual === 6 && (
           <div>
             <h3 style={{ margin: '0 0 1.25rem 0', color: '#0f172a', fontSize: '1.15rem' }}>6. Revisão Final e Envio</h3>
 
@@ -1366,8 +1374,8 @@ export default function InterviewEdit() {
                 </span>
                 <span>
                   {['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(String(ficha.status_aprovacao || '').toLowerCase())
-                    ? 'Contrato aprovado e liberado pelo Financeiro.'
-                    : 'Entrevista finalizada e mesa liberada — ficha bloqueada aguardando liberação financeira.'}
+                    ? 'Contrato aprovado pelo Financeiro — ficha bloqueada (reabertura exclusiva por Administrador na aba Empresas).'
+                    : 'Ficha encerrada e bloqueada para edição — somente um Administrador pode reabrir esta ficha pela aba Empresas.'}
                 </span>
               </div>
             )}
@@ -1399,16 +1407,12 @@ export default function InterviewEdit() {
                     : '2px solid #f59e0b'
                   : 'none';
 
-                const iconeBotao = isFechada
-                  ? isAprovadaFin
-                    ? 'verified'
-                    : 'hourglass_top'
-                  : 'check_circle';
+                const iconeBotao = isFechada ? 'lock' : 'check_circle';
 
                 const textoBotao = isFechada
                   ? isAprovadaFin
-                    ? 'Ficha Fechada — Aprovada pelo Financeiro'
-                    : 'Ficha Fechada — Aguardando Liberação Financeira'
+                    ? 'Ficha Bloqueada — Aprovada pelo Financeiro'
+                    : 'Ficha Bloqueada — Aguardando Liberação Financeira'
                   : salvando
                   ? 'Registrando...'
                   : 'Finalizar Ficha da Empresa';
