@@ -124,6 +124,10 @@ router.post('/propostas', async (req, res) => {
       historicoProdutosElegiveis: dados.historicoProdutosElegiveis || '',
       formaEntrada: dados.formaEntrada || 'Pix',
       formaRestante: dados.formaRestante || 'Pix',
+      permuta: Number(dados.permuta || 0),
+      entradaComplementar: Number(dados.entradaComplementar || 0),
+      dataEntradaComplementar: dados.dataEntradaComplementar || null,
+      identificadorPagamento: dados.identificadorPagamento || dados.cvPagamento || null,
       socios: dados.socios || 1,
       sociosDetalhes,
       cnpj: cnpjFinal
@@ -145,6 +149,7 @@ router.post('/propostas', async (req, res) => {
            mesa_alocada = NULL,
            assento_alocado = NULL,
            dados_proposta = $2::jsonb,
+           cv_cartao = COALESCE(NULLIF($9::varchar, ''), cv_cartao),
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $3`,
       [
@@ -155,7 +160,8 @@ router.post('/propostas', async (req, res) => {
         cnpjFinal,
         Number(dados.desconto ?? 0) || 0,
         Number(dados.cashback ?? 0) || 0,
-        userInfo.id
+        userInfo.id,
+        dados.identificadorPagamento || dados.cvPagamento || null
       ]
     );
 

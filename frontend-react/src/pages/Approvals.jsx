@@ -269,10 +269,14 @@ export default function Approvals() {
                 const descTotal = Number(prop.desconto_concedido ?? dp.desconto ?? prop.proposta_desconto ?? 0);
                 const saldoContrato = Math.max(0, valorNeg - cbTotal - descTotal);
                 const entrada = Number(dp.valorEntrada ?? prop.proposta_valor_entrada ?? 0);
-                const saldoFinal = Math.max(0, saldoContrato - entrada);
+                const permuta = Number(dp.permuta || 0);
+                const entradaComp = Number(dp.entradaComplementar || 0);
+                const dataEntradaComp = dp.dataEntradaComplementar || '';
+                const saldoFinal = Math.max(0, saldoContrato - entrada - permuta - entradaComp);
                 const parcelas = Number(dp.quantidadeParcelas ?? prop.proposta_parcelas ?? 12);
                 const valorParcela = Number(dp.valorParcela ?? prop.proposta_valor_parcela ?? 0);
                 const cnpjExibir = prop.cnpj || prop.cpf_cnpj || dp.cnpj || '';
+                const idPagamento = dp.identificadorPagamento || prop.cv_cartao || '';
 
                 return (
                   <tr key={prop.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
@@ -319,11 +323,17 @@ export default function Approvals() {
                       </div>
                       <div style={{ fontSize: '0.74rem', color: '#334155' }}>
                         Líquido: <strong>{fmtBRL(saldoContrato)}</strong>
+                        {permuta > 0 && <span style={{ color: '#9333ea', fontWeight: '700' }}> • Permuta: -{fmtBRL(permuta)}</span>}
                         {cbTotal > 0 && <span style={{ color: '#047857', fontWeight: '700' }}> • CB: -{fmtBRL(cbTotal)}</span>}
                       </div>
                       <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
-                        (-) Entr. {fmtBRL(entrada)} • {parcelas}x {fmtBRL(valorParcela)}
+                        (-) Entr. {fmtBRL(entrada)}{entradaComp > 0 ? ` + ${fmtBRL(entradaComp)}` : ''} • {parcelas}x {fmtBRL(valorParcela)}
                       </div>
+                      {idPagamento && (
+                        <div style={{ fontSize: '0.71rem', color: '#0369a1', fontWeight: '700', marginTop: '0.15rem' }}>
+                          Ref./CV: {idPagamento}
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '1rem' }}>
                       {renderBadgeStatus(prop)}
@@ -365,7 +375,10 @@ export default function Approvals() {
         const descTotal = Number(propSelecionada.desconto_concedido ?? dp.desconto ?? propSelecionada.proposta_desconto ?? 0);
         const saldoContrato = Math.max(0, valorNeg - cbTotal - descTotal);
         const entrada = Number(dp.valorEntrada ?? propSelecionada.proposta_valor_entrada ?? 0);
-        const saldoFinal = Math.max(0, saldoContrato - entrada);
+        const permuta = Number(dp.permuta || 0);
+                const entradaComp = Number(dp.entradaComplementar || 0);
+                const dataEntradaComp = dp.dataEntradaComplementar || '';
+                const saldoFinal = Math.max(0, saldoContrato - entrada - permuta - entradaComp);
         const parcelas = Number(dp.quantidadeParcelas ?? propSelecionada.proposta_parcelas ?? 12);
         const valorParcela = Number(dp.valorParcela ?? propSelecionada.proposta_valor_parcela ?? 0);
         const sociosContrato = Array.isArray(dp.sociosDetalhes)
@@ -434,8 +447,18 @@ export default function Approvals() {
                       Líquido Contrato: <strong>{fmtBRL(saldoContrato)}</strong>
                     </div>
                     <div style={{ fontSize: '0.78rem', color: '#0284c7', fontWeight: '700' }}>
-                      (-) Entrada: -{fmtBRL(entrada)}
+                      (-) Entrada 1: -{fmtBRL(entrada)}
                     </div>
+                    {entradaComp > 0 && (
+                      <div style={{ fontSize: '0.78rem', color: '#0369a1', fontWeight: '700' }}>
+                        (-) Entrada 2: -{fmtBRL(entradaComp)} {dataEntradaComp ? `(${dataEntradaComp})` : ''}
+                      </div>
+                    )}
+                    {permuta > 0 && (
+                      <div style={{ fontSize: '0.78rem', color: '#9333ea', fontWeight: '700' }}>
+                        (-) Permuta: -{fmtBRL(permuta)}
+                      </div>
+                    )}
                     <div style={{ fontSize: '0.95rem', fontWeight: '900', color: '#ff5722', marginTop: '0.25rem', borderTop: '1px dashed #cbd5e1', paddingTop: '0.25rem' }}>
                       Saldo Final: {fmtBRL(saldoFinal)}
                     </div>
@@ -452,6 +475,11 @@ export default function Approvals() {
                     <div style={{ fontSize: '0.78rem', color: '#475569', marginTop: '0.15rem' }}>
                       Parcelas: {parcelas}x de {fmtBRL(valorParcela)} ({dp.formaRestante || 'Pix'})
                     </div>
+                    {(dp.identificadorPagamento || propSelecionada.cv_cartao) && (
+                      <div style={{ fontSize: '0.76rem', color: '#0369a1', background: '#f0f9ff', border: '1px solid #bae6fd', padding: '0.25rem 0.5rem', borderRadius: '6px', marginTop: '0.35rem', fontWeight: '700' }}>
+                        CV / Link / Ref.: {dp.identificadorPagamento || propSelecionada.cv_cartao}
+                      </div>
+                    )}
                   </div>
                 </div>
 

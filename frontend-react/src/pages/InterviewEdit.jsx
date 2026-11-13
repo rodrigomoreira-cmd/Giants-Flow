@@ -57,6 +57,10 @@ export default function InterviewEdit() {
     socios: 1,
     forma_entrada: 'Pix',
     valor_entrada: 10000,
+    valor_entrada_complementar: '',
+    data_entrada_complementar: '',
+    valor_permuta: '',
+    identificador_pagamento: '',
     cashback: 0,
     almoco_pago: false,
     cashback_almoco_cnpj: 0,
@@ -366,6 +370,11 @@ export default function InterviewEdit() {
           historicoProdutosElegiveis: ficha.historico_produtos_elegiveis || '',
           formaEntrada: ficha.forma_entrada || 'Pix',
           formaRestante: ficha.forma_restante || 'Pix',
+          permuta: Number(ficha.valor_permuta || 0),
+        identificadorPagamento: ficha.identificador_pagamento || '',
+          entradaComplementar: Number(ficha.valor_entrada_complementar || 0),
+          dataEntradaComplementar: ficha.data_entrada_complementar || null,
+          identificadorPagamento: ficha.identificador_pagamento || null,
           metodoPagamento: `${ficha.forma_entrada} + ${calc.parcelas}x ${ficha.forma_restante}`,
           quantidadeParcelas: calc.parcelas,
           valorParcela: calc.valorParcela
@@ -910,6 +919,7 @@ export default function InterviewEdit() {
                 >
                   <option value="Pix">Pix</option>
                   <option value="Cartão de Crédito">Cartão de Crédito</option>
+                  <option value="Cheque">Cheque</option>
                   <option value="Boleto">Boleto (Requer Aprovação)</option>
                 </select>
               </div>
@@ -1011,7 +1021,9 @@ export default function InterviewEdit() {
               const descontoComercial = Number(calc?.desconto ?? ficha.desconto_comercial ?? ficha.desconto_concedido ?? ficha.desconto ?? 0);
               const saldoLiquido = Math.max(0, valorNegociado - cbTotalAbatido - descontoComercial);
               const valorEntrada = Number(calc?.entrada ?? ficha.valor_entrada ?? 0);
-              const saldoRestante = Number(calc?.saldo ?? Math.max(0, saldoLiquido - valorEntrada));
+              const valorEntradaComp = Number(calc?.entradaComplementar ?? ficha.valor_entrada_complementar ?? 0);
+              const valorPermuta = Number(calc?.permuta ?? ficha.valor_permuta ?? 0);
+              const saldoRestante = Number(calc?.saldo ?? Math.max(0, saldoLiquido - valorEntrada - valorEntradaComp - valorPermuta));
               const qtdParcelas = Math.max(1, Number(calc?.parcelas || ficha.parcelas || 12));
               const valorParcela = Number(calc?.valorParcela ?? (saldoRestante / qtdParcelas));
               const isAE = /ACELERADOR|\bAE\b|ACE\d/i.test(ficha.historico_produtos_elegiveis || '');
@@ -1168,7 +1180,7 @@ export default function InterviewEdit() {
 
                     <div style={{ background: '#ffffff', padding: '0.75rem 0.9rem', borderRadius: '8px', border: '1px solid #fed7aa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
-                        <div style={{ fontSize: '0.72rem', fontWeight: '800', color: '#9a3412' }}>ENTRADA</div>
+                        <div style={{ fontSize: '0.72rem', fontWeight: '800', color: '#9a3412' }}>ENTRADA 1</div>
                         <div style={{ fontSize: '0.8rem', color: '#c2410c', fontWeight: '600' }}>
                           Forma: {ficha.forma_entrada || 'Pix'}
                         </div>
@@ -1177,6 +1189,38 @@ export default function InterviewEdit() {
                         {fmtBRL(valorEntrada)}
                       </div>
                     </div>
+
+                    {valorEntradaComp > 0 && (
+                      <div style={{ background: '#ffffff', padding: '0.65rem 0.9rem', borderRadius: '8px', border: '1px solid #fed7aa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontSize: '0.72rem', fontWeight: '800', color: '#0369a1' }}>ENTRADA COMPLEMENTAR</div>
+                          <div style={{ fontSize: '0.78rem', color: '#0284c7', fontWeight: '600' }}>
+                            Data: {ficha.data_entrada_complementar || 'Programada'}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: '1.05rem', fontWeight: '900', color: '#0369a1' }}>
+                          {fmtBRL(valorEntradaComp)}
+                        </div>
+                      </div>
+                    )}
+
+                    {valorPermuta > 0 && (
+                      <div style={{ background: '#faf5ff', padding: '0.65rem 0.9rem', borderRadius: '8px', border: '1px solid #e9d5ff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontSize: '0.72rem', fontWeight: '800', color: '#7e22ce' }}>PERMUTA ABATIDA</div>
+                          <div style={{ fontSize: '0.76rem', color: '#9333ea', fontWeight: '600' }}>Crédito em Permuta</div>
+                        </div>
+                        <div style={{ fontSize: '1.05rem', fontWeight: '900', color: '#7e22ce' }}>
+                          - {fmtBRL(valorPermuta)}
+                        </div>
+                      </div>
+                    )}
+
+                    {ficha.identificador_pagamento && (
+                      <div style={{ background: '#f0f9ff', padding: '0.55rem 0.85rem', borderRadius: '8px', border: '1px solid #bae6fd', fontSize: '0.78rem', color: '#0369a1' }}>
+                        <strong>Identificador Pagamento (CV / Link):</strong> {ficha.identificador_pagamento}
+                      </div>
+                    )}
 
                     <div style={{ background: '#ffffff', padding: '0.75rem 0.9rem', borderRadius: '8px', border: '1px solid #fed7aa', flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
