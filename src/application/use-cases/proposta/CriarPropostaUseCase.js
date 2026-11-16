@@ -5,7 +5,7 @@ const propostaRepository = require('../../../infrastructure/database/repositorie
 const { pool } = require('../../../infrastructure/database/connection');
 
 class CriarPropostaUseCase {
-  async execute(dados) {
+  async execute(dados, clientExterno = null) {
     const aplicacaoId = dados.aplicacaoId || dados.aplicacao_id || dados.clienteId || dados.cliente_id;
     const produtoId = dados.produtoId || dados.produto_id;
 
@@ -17,18 +17,21 @@ class CriarPropostaUseCase {
     }
 
     const idNum = Number(aplicacaoId);
-    const client = await pool.connect();
+    const client = clientExterno || (await pool.connect());
+    const gerenciaTransacaoPropria = !clientExterno;
 
     try {
-      await client.query('BEGIN');
-      await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+      if (gerenciaTransacaoPropria) {
+        await client.query('BEGIN');
+        await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+      }
 
-      // 1. Busca o participante em fichas (base operacional atual) e em aplicacoes (legado/FK)
+      // 1. Lock pessimista na ficha e na aplicação para impedir concorrência/duplicidade
       const { rows: fichaRows } = await client.query(
         `SELECT id, turma_id, nome_participante, nome_cracha, empresa, nome_fantasia,
                 COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), '')) AS doc_cnpj,
                 COALESCE(NULLIF(TRIM(telefone), ''), NULLIF(TRIM(whatsapp), ''), 'Não informado') AS tel_contato,
-                email, etapa_funil, cashback, valor_negociado, desconto_concedido
+                email, etapa_funil, status_aprovacao, ficha_fechada, cashback, valor_negociado, desconto_concedido
          FROM fichas
          WHERE id = $1
          FOR UPDATE`,
@@ -48,6 +51,52 @@ class CriarPropostaUseCase {
       const etapaApp = String(appRows[0]?.etapa_atual || '').toLowerCase();
       if (etapaFicha === 'reprovado' || etapaApp === EtapaFunil.REPROVADO) {
         throw new Error('Ação bloqueada: não é permitido emitir proposta comercial para um participante reprovado.');
+      }
+
+      const vTotal = Number(dados.valorTotal ?? dados.valor_total) || 0;
+      const vEntrada = Number(dados.valorEntrada ?? dados.valor_entrada) || 0;
+      const cashback = Number(dados.cashback) || 0;
+      const desconto = Number(
+        dados.desconto ?? dados.descontoAplicado ?? dados.desconto_aplicado ?? dados.desconto_concedido
+      ) || 0;
+
+      // 1.1 Proteção idempotente natural: evita duplicar proposta ativa idêntica para a mesma ficha
+      const { rows: propostasAtivas } = await client.query(
+        `SELECT id, aplicacao_id, produto_id, valor_total, valor_entrada, cashback,
+                desconto_aplicado, quantidade_parcelas, valor_parcela, metodo_pagamento, status
+         FROM propostas
+         WHERE aplicacao_id = $1
+           AND status IN ('enviado_financeiro', 'aprovado')
+         ORDER BY id DESC
+         LIMIT 1`,
+        [idNum]
+      );
+
+      if (propostasAtivas.length > 0) {
+        const existente = propostasAtivas[0];
+        const mesmoProduto = Number(existente.produto_id) === Number(produtoId);
+        const mesmoTotal = Math.abs(Number(existente.valor_total || 0) - vTotal) < 0.01;
+        const mesmaEntrada = Math.abs(Number(existente.valor_entrada || 0) - vEntrada) < 0.01;
+
+        if (mesmoProduto && mesmoTotal && mesmaEntrada) {
+          if (gerenciaTransacaoPropria) {
+            await client.query('COMMIT');
+          }
+          return {
+            id: existente.id,
+            aplicacaoId: existente.aplicacao_id,
+            produtoId: existente.produto_id,
+            valorTotal: Number(existente.valor_total),
+            valorEntrada: Number(existente.valor_entrada),
+            cashback: Number(existente.cashback || 0),
+            desconto: Number(existente.desconto_aplicado || 0),
+            quantidadeParcelas: Number(existente.quantidade_parcelas || 1),
+            valorParcela: Number(existente.valor_parcela || 0),
+            metodoPagamento: existente.metodo_pagamento,
+            status: existente.status,
+            idempotentReplay: true
+          };
+        }
       }
 
       // 2. Sincroniza registro em aplicacoes com o mesmo ID para satisfazer FK propostas_aplicacao_id_fkey e JOIN do Financeiro
@@ -103,12 +152,6 @@ class CriarPropostaUseCase {
       }
 
       // 3. Cálculo atômico garantido do saldo devedor e parcelas (abatendo entrada, cashback e desconto)
-      const vTotal = Number(dados.valorTotal ?? dados.valor_total) || 0;
-      const vEntrada = Number(dados.valorEntrada ?? dados.valor_entrada) || 0;
-      const cashback = Number(dados.cashback) || 0;
-      const desconto = Number(
-        dados.desconto ?? dados.descontoAplicado ?? dados.desconto_aplicado ?? dados.desconto_concedido
-      ) || 0;
       const qtdParcelas = Math.max(
         1,
         Number(dados.quantidadeParcelas ?? dados.quantidade_parcelas ?? dados.parcelas) || 1
@@ -171,13 +214,19 @@ class CriarPropostaUseCase {
         );
       }
 
-      await client.query('COMMIT');
+      if (gerenciaTransacaoPropria) {
+        await client.query('COMMIT');
+      }
       return propostaSalva;
     } catch (err) {
-      await client.query('ROLLBACK');
+      if (gerenciaTransacaoPropria) {
+        await client.query('ROLLBACK');
+      }
       throw err;
     } finally {
-      client.release();
+      if (gerenciaTransacaoPropria) {
+        client.release();
+      }
     }
   }
 }

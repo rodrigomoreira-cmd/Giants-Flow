@@ -1,3 +1,13 @@
+function gerarChaveIdempotencia(endpoint, payload) {
+  const base = JSON.stringify({ endpoint, payload: payload || {} });
+  let hash = 0;
+  for (let i = 0; i < base.length; i++) {
+    hash = ((hash << 5) - hash + base.charCodeAt(i)) | 0;
+  }
+  const janela5s = Math.floor(Date.now() / 5000);
+  return `idem_${Math.abs(hash)}_${janela5s}`;
+}
+
 const API_BASE = '/api';
 
 export async function request(endpoint, options = {}) {

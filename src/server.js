@@ -19,7 +19,12 @@ const PORT = process.env.PORT || 8080;
 const PUBLIC_DIR = path.join(__dirname, '../public');
 
 app.use(cors());
-app.use(express.json({ limit: '25mb' }));
+app.use(express.json({
+  limit: '25mb',
+  verify: (req, _res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 app.get('/favicon.ico', (_req, res) => res.status(204).end());

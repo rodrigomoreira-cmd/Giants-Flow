@@ -1,4 +1,12 @@
-const { exigirPapeis } = require('../middlewares/rbac');
+﻿const { exigirPapeis } = require('../middlewares/rbac');
+const {
+  gerarHashSha256,
+  extrairIdempotencyKey,
+  garantirTabelasIdempotencia,
+  adquirirChaveIdempotencia,
+  concluirChaveIdempotencia,
+  verificarAssinaturaWebhook
+} = require('../../security/idempotencia');
 
 function sanitizarEmpresaLgpd(valor) {
   if (!valor) return valor;
@@ -15,7 +23,7 @@ function extrairCnpjSomentePj(valor) {
   return digits.length === 14 ? String(valor).trim() : null;
 }
 
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const dbModule = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
@@ -47,36 +55,69 @@ function extrairUsuarioRequisicao(req) {
   return { id: null, papel: '' };
 }
 
-// REGISTRO DE PROPOSTA COMERCIAL DA ENTREVISTA
+// REGISTRO DE PROPOSTA COMERCIAL DA ENTREVISTA (COM SUPORTE A IDEMPOTENCY-KEY E TRANSAÇÃO ÚNICA)
 router.post('/propostas', async (req, res) => {
   const client = await pool.connect();
+  let emTransacao = false;
   try {
-    const dados = req.body;
+    const dados = req.body || {};
     const aplicacaoId = Number(dados.aplicacaoId || dados.aplicacao_id || dados.id);
     const userInfo = extrairUsuarioRequisicao(req);
+    const idempotencyKey = extrairIdempotencyKey(req);
 
     if (!aplicacaoId) {
       return res.status(400).json({ error: 'O participante (aplicacaoId) é obrigatório.' });
     }
     await exigirTurmaAtiva({ fichaId: aplicacaoId, turmaId: dados.turmaId || dados.turma_id || null });
 
-    // 1. Executa o caso de uso oficial (salva na tabela propostas com regras e cashback)
-    const propostaSalva = await criarPropostaUseCase.execute({
-      aplicacaoId,
-      produtoId: Number(dados.produtoId || dados.produto_id || 3),
-      valorTotal: dados.valorTotal ?? dados.valor_negociado,
-      valorEntrada: dados.valorEntrada ?? dados.valor_entrada ?? 0,
-      cashback: dados.cashback ?? 0,
-      desconto: dados.desconto ?? 0,
-      valorOriginal: dados.valorOriginal ?? dados.valor_tabela ?? dados.valorTotal,
-      metodoPagamento: dados.metodoPagamento || dados.formaEntrada || dados.forma_entrada || 'Pix',
-      formaPagamento: dados.metodoPagamento || dados.formaPagamento || dados.forma_entrada,
-      quantidadeParcelas: dados.quantidadeParcelas || dados.parcelas || 1,
-      valorParcela: dados.valorParcela ?? dados.valor_parcela
+    await client.query('BEGIN');
+    emTransacao = true;
+    await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+
+    // 0. Trava atômica por Idempotency-Key (impede clique duplo ou retry de rede criar 2 propostas)
+    const lockIdemp = await adquirirChaveIdempotencia(client, {
+      escopo: 'POST:/propostas',
+      key: idempotencyKey,
+      payload: {
+        aplicacaoId,
+        produtoId: Number(dados.produtoId || dados.produto_id || 3),
+        valorTotal: dados.valorTotal ?? dados.valor_negociado,
+        valorEntrada: dados.valorEntrada ?? dados.valor_entrada ?? 0,
+        cashback: dados.cashback ?? 0,
+        desconto: dados.desconto ?? 0
+      }
     });
 
-    await client.query('BEGIN');
-    await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+    if (lockIdemp.conflict) {
+      await client.query('ROLLBACK');
+      emTransacao = false;
+      return res.status(lockIdemp.statusCode).json({ error: lockIdemp.reason });
+    }
+
+    if (lockIdemp.replay) {
+      await client.query('COMMIT');
+      emTransacao = false;
+      res.setHeader('X-Idempotent-Replay', 'true');
+      return res.status(lockIdemp.statusCode).json(lockIdemp.body);
+    }
+
+    // 1. Executa o caso de uso oficial dentro da mesma transação (salva na tabela propostas com regras e cashback)
+    const propostaSalva = await criarPropostaUseCase.execute(
+      {
+        aplicacaoId,
+        produtoId: Number(dados.produtoId || dados.produto_id || 3),
+        valorTotal: dados.valorTotal ?? dados.valor_negociado,
+        valorEntrada: dados.valorEntrada ?? dados.valor_entrada ?? 0,
+        cashback: dados.cashback ?? 0,
+        desconto: dados.desconto ?? 0,
+        valorOriginal: dados.valorOriginal ?? dados.valor_tabela ?? dados.valorTotal,
+        metodoPagamento: dados.metodoPagamento || dados.formaEntrada || dados.forma_entrada || 'Pix',
+        formaPagamento: dados.metodoPagamento || dados.formaPagamento || dados.forma_entrada,
+        quantidadeParcelas: dados.quantidadeParcelas || dados.parcelas || 1,
+        valorParcela: dados.valorParcela ?? dados.valor_parcela
+      },
+      client
+    );
 
     const turmaAlvo = dados.turmaId || dados.turma_id || null;
     if (propostaSalva?.id) {
@@ -214,25 +255,212 @@ router.post('/propostas', async (req, res) => {
       [turmaFinal, aplicacaoId, cnpjLimpo, empNorm]
     );
 
-    await registrarAuditoria(client, {
-      turmaId: turmaFinal,
-      fichaId: aplicacaoId,
-      empresa: empresaFinal,
-      cnpj: cnpjFinal,
-      acao: 'EMISSAO_PROPOSTA',
-      detalhes: `Produto: ${dados.produtoNome || dados.produto_nome || dados.categoriaProduto || 'Plano'} | Negociado: R$ ${Number(propostaSalva.valorTotal || 0).toFixed(2)}`,
-      req
-    });
+    if (!propostaSalva?.idempotentReplay) {
+      await registrarAuditoria(client, {
+        turmaId: turmaFinal,
+        fichaId: aplicacaoId,
+        empresa: empresaFinal,
+        cnpj: cnpjFinal,
+        acao: 'EMISSAO_PROPOSTA',
+        detalhes: `Produto: ${dados.produtoNome || dados.produto_nome || dados.categoriaProduto || 'Plano'} | Negociado: R$ ${Number(propostaSalva.valorTotal || 0).toFixed(2)}`,
+        req
+      });
+    }
 
-    await client.query('COMMIT');
-    res.status(201).json({
+    const statusHttp = propostaSalva?.idempotentReplay ? 200 : 201;
+    const respostaPayload = {
       ...propostaSalva,
       ficha_fechada: true,
       mesa_liberada: true
+    };
+
+    await concluirChaveIdempotencia(client, lockIdemp.keyId, statusHttp, respostaPayload);
+
+    await client.query('COMMIT');
+    emTransacao = false;
+    res.status(statusHttp).json(respostaPayload);
+  } catch (err) {
+    if (emTransacao) {
+      await client.query('ROLLBACK');
+    }
+    res.status(400).json({ error: 'Erro ao emitir proposta comercial: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// WEBHOOK IDEMPOTENTE DE GATEWAYS DE PAGAMENTO (STRIPE / MERCADO PAGO / PIX / CARTÃO)
+router.post('/webhooks/pagamentos', async (req, res) => {
+  const validacaoAssinatura = verificarAssinaturaWebhook(req);
+  if (!validacaoAssinatura.valido) {
+    return res.status(401).json({ error: validacaoAssinatura.motivo });
+  }
+
+  const body = req.body || {};
+  const payloadHash = gerarHashSha256(req.rawBody || body);
+  const eventId = String(
+    body.id ||
+      body.event_id ||
+      body.eventId ||
+      req.headers?.['x-request-id'] ||
+      req.headers?.['idempotency-key'] ||
+      `hash_${payloadHash}`
+  ).slice(0, 180);
+  const eventType = String(body.type || body.action || body.event || 'payment.confirmed').slice(0, 100);
+  const provider = validacaoAssinatura.provider || 'gateway';
+
+  const client = await pool.connect();
+  let emTransacao = false;
+  try {
+    await client.query('BEGIN');
+    emTransacao = true;
+    await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+    await garantirTabelasIdempotencia(client);
+
+    // 1. Garantia atômica de processamento único do evento (Unique Constraint)
+    const { rows: insertedEvent } = await client.query(
+      `INSERT INTO webhook_events (provider, event_id, event_type, payload_hash, status, raw_payload)
+       VALUES ($1, $2, $3, $4, 'PROCESSING', $5::jsonb)
+       ON CONFLICT (provider, event_id) DO NOTHING
+       RETURNING id`,
+      [provider, eventId, eventType, payloadHash, JSON.stringify(body)]
+    );
+
+    if (insertedEvent.length === 0) {
+      const { rows: jaProcessado } = await client.query(
+        `SELECT id, status, resultado, processed_at
+         FROM webhook_events
+         WHERE provider = $1 AND event_id = $2`,
+        [provider, eventId]
+      );
+      await client.query('COMMIT');
+      emTransacao = false;
+      return res.status(200).json({
+        received: true,
+        duplicate: true,
+        eventId,
+        status: jaProcessado[0]?.status || 'PROCESSED',
+        resultado: jaProcessado[0]?.resultado || null
+      });
+    }
+
+    const webhookRecordId = insertedEvent[0].id;
+    const dataObj = body.data?.object || body.data || body;
+    const metadata = dataObj.metadata || body.metadata || {};
+    const fichaId = Number(metadata.fichaId || metadata.ficha_id || metadata.aplicacaoId || metadata.aplicacao_id || body.fichaId || 0) || null;
+    const propostaId = Number(metadata.propostaId || metadata.proposta_id || body.propostaId || 0) || null;
+    const txId = String(dataObj.id || dataObj.payment_intent || dataObj.nsu || body.transaction_id || '').trim();
+
+    let resultadoProcessamento = {
+      acao: 'evento_registrado',
+      fichaId,
+      propostaId,
+      transactionId: txId || null
+    };
+
+    const eventosConfirmacao = new Set([
+      'payment_intent.succeeded',
+      'checkout.session.completed',
+      'charge.succeeded',
+      'payment.created',
+      'payment.updated',
+      'payment.confirmed',
+      'pix.paid'
+    ]);
+
+    const statusPagamento = String(dataObj.status || body.status || '').toLowerCase();
+    const pagoConfirmado =
+      eventosConfirmacao.has(eventType.toLowerCase()) &&
+      (!statusPagamento || ['succeeded', 'paid', 'approved', 'confirmed', 'completed'].includes(statusPagamento));
+
+    if (pagoConfirmado && (fichaId || propostaId)) {
+      let fichaAlvoId = fichaId;
+      if (!fichaAlvoId && propostaId) {
+        const { rows: pRows } = await client.query('SELECT aplicacao_id FROM propostas WHERE id = $1', [propostaId]);
+        fichaAlvoId = pRows[0]?.aplicacao_id || null;
+      }
+
+      if (fichaAlvoId) {
+        const { rows: fichaRows } = await client.query(
+          `SELECT id, turma_id, empresa, COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), '')) AS doc_cnpj
+           FROM fichas WHERE id = $1 FOR UPDATE`,
+          [fichaAlvoId]
+        );
+
+        if (fichaRows.length > 0) {
+          const base = fichaRows[0];
+          const cnpjLimpo = String(base.doc_cnpj || '').replace(/\D/g, '');
+          const empNorm = String(base.empresa || '').trim().toLowerCase();
+
+          await client.query(
+            `UPDATE fichas
+             SET etapa_funil = 'concluido',
+                 status_aprovacao = 'aprovada',
+                 ficha_fechada = true,
+                 cv_cartao = COALESCE(NULLIF($1::varchar, ''), cv_cartao),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2
+                OR (
+                  turma_id = $3
+                  AND (
+                    ($4 <> '' AND LENGTH($4) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $4)
+                    OR ($4 = '' AND $5 <> '' AND $5 <> 'empresa sga' AND LOWER(TRIM(COALESCE(empresa, ''))) = $5)
+                  )
+                )`,
+            [txId, fichaAlvoId, base.turma_id, cnpjLimpo, empNorm]
+          );
+
+          await client.query(
+            `UPDATE propostas
+             SET status = 'aprovado'::status_prop
+             WHERE aplicacao_id = $1 AND status = 'enviado_financeiro'::status_prop`,
+            [fichaAlvoId]
+          );
+
+          await registrarAuditoria(client, {
+            turmaId: base.turma_id,
+            fichaId: fichaAlvoId,
+            empresa: base.empresa,
+            cnpj: base.doc_cnpj,
+            acao: 'WEBHOOK_PAGAMENTO_CONFIRMADO',
+            detalhes: `Gateway: ${provider} | Evento: ${eventId} | TX: ${txId || 'N/A'}`,
+            req
+          });
+
+          resultadoProcessamento = {
+            acao: 'venda_confirmada_por_webhook',
+            fichaId: fichaAlvoId,
+            propostaId,
+            transactionId: txId || null
+          };
+        }
+      }
+    }
+
+    await client.query(
+      `UPDATE webhook_events
+       SET status = 'PROCESSED',
+           proposta_id = $1,
+           ficha_id = $2,
+           resultado = $3::jsonb,
+           processed_at = NOW()
+       WHERE id = $4`,
+      [propostaId, resultadoProcessamento.fichaId || fichaId, JSON.stringify(resultadoProcessamento), webhookRecordId]
+    );
+
+    await client.query('COMMIT');
+    emTransacao = false;
+    return res.status(200).json({
+      received: true,
+      duplicate: false,
+      eventId,
+      resultado: resultadoProcessamento
     });
   } catch (err) {
-    await client.query('ROLLBACK');
-    res.status(400).json({ error: 'Erro ao emitir proposta comercial: ' + err.message });
+    if (emTransacao) {
+      await client.query('ROLLBACK');
+    }
+    return res.status(500).json({ error: 'Falha ao processar webhook idempotente: ' + err.message });
   } finally {
     client.release();
   }
@@ -241,11 +469,33 @@ router.post('/propostas', async (req, res) => {
 // APROVAÇÃO / VENDA DE PROPOSTA (UNIFICADA POR EMPRESA/CNPJ)
 router.patch('/propostas/:id/vender', exigirPapeis('ADMIN', 'FINANCEIRO'), async (req, res) => {
   const client = await pool.connect();
+  let emTransacao = false;
   try {
     const id = Number(req.params.id);
+    const idempotencyKey = extrairIdempotencyKey(req);
     await exigirTurmaAtiva({ fichaId: id });
     await client.query('BEGIN');
+    emTransacao = true;
     await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+
+    const lockIdemp = await adquirirChaveIdempotencia(client, {
+      escopo: `PATCH:/propostas/${id}/vender`,
+      key: idempotencyKey,
+      payload: { id, body: req.body || {} }
+    });
+
+    if (lockIdemp.conflict) {
+      await client.query('ROLLBACK');
+      emTransacao = false;
+      return res.status(lockIdemp.statusCode).json({ error: lockIdemp.reason });
+    }
+
+    if (lockIdemp.replay) {
+      await client.query('COMMIT');
+      emTransacao = false;
+      res.setHeader('X-Idempotent-Replay', 'true');
+      return res.status(lockIdemp.statusCode).json(lockIdemp.body);
+    }
 
     const { rows: baseRows } = await client.query(
       `SELECT id, turma_id, empresa, COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), '')) AS doc_cnpj
@@ -255,6 +505,7 @@ router.patch('/propostas/:id/vender', exigirPapeis('ADMIN', 'FINANCEIRO'), async
 
     if (baseRows.length === 0) {
       await client.query('ROLLBACK');
+      emTransacao = false;
       return res.status(404).json({ error: 'Ficha não encontrada.' });
     }
 
@@ -280,10 +531,16 @@ router.patch('/propostas/:id/vender', exigirPapeis('ADMIN', 'FINANCEIRO'), async
       [id, base.turma_id, cnpjLimpo, empNorm]
     );
 
+    const resposta = rows.find((r) => Number(r.id) === id) || rows[0] || { sucesso: true };
+    await concluirChaveIdempotencia(client, lockIdemp.keyId, 200, resposta);
+
     await client.query('COMMIT');
-    res.json(rows.find((r) => Number(r.id) === id) || rows[0] || { sucesso: true });
+    emTransacao = false;
+    res.json(resposta);
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (emTransacao) {
+      await client.query('ROLLBACK');
+    }
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
