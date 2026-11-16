@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { alertaSistema, confirmarSistema } from '../context/ModalContext';
 
 export default function Entrevistas() {
   const [dadosAux, setDadosAux] = useState({ entrevistadores: [], turmas: [], mesas: [] });
@@ -59,14 +60,14 @@ export default function Entrevistas() {
       await api.patch(`/mesas/${mesaId}/entrevistadores`, { entrevistadores_ids: novosIds });
       carregarDados();
     } catch (err) {
-      alert(`Erro ao atualizar escala da mesa: ${err.message}`);
+      alertaSistema(`Erro ao atualizar escala da mesa: ${err.message}`);
     }
   };
 
   const agendarEntrevista = async (e) => {
     e.preventDefault();
     if (!formAgendamento.cliente_id || !formAgendamento.mesa_id) {
-      alert('Selecione o participante e a mesa.');
+      alertaSistema('Selecione o participante e a mesa.');
       return;
     }
 
@@ -76,12 +77,12 @@ export default function Entrevistas() {
         mesa_id: Number(formAgendamento.mesa_id),
         entrevistador_id: formAgendamento.entrevistador_id ? Number(formAgendamento.entrevistador_id) : null
       });
-      alert('Empresário alocado com sucesso na mesa!');
+      alertaSistema('Empresário alocado com sucesso na mesa!');
       setFormAgendamento({ cliente_id: '', mesa_id: '', entrevistador_id: '' });
       carregarDados();
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'Erro ao agendar';
-      alert(`Erro ao agendar: ${msg}`);
+      alertaSistema(`Erro ao agendar: ${msg}`);
     }
   };
 
@@ -91,21 +92,21 @@ export default function Entrevistas() {
         entrevista_id: entrevistaId,
         resultado: resultado
       });
-      alert(`Etapa atualizada com sucesso (${resultado})!`);
+      alertaSistema(`Etapa atualizada com sucesso (${resultado})!`);
       carregarDados();
     } catch (err) {
-      alert(`Erro ao atualizar resultado: ${err.message}`);
+      alertaSistema(`Erro ao atualizar resultado: ${err.message}`);
     }
   };
 
   const desalocarParticipante = async (entrevistaId) => {
-    if (!window.confirm('Deseja realmente liberar este assento e desalocar o participante da mesa?')) return;
+    if (!(await confirmarSistema('Deseja realmente liberar este assento e desalocar o participante da mesa?', { tipo: 'aviso', titulo: 'Liberar Assento da Mesa', textoConfirmar: 'Liberar Assento', corConfirmar: '#dc2626' }))) return;
     try {
       await api.delete(`/mesas/cadeiras/${entrevistaId}`);
-      alert('Assento liberado com sucesso!');
+      alertaSistema('Assento liberado com sucesso!');
       carregarDados();
     } catch (err) {
-      alert(`Erro ao desalocar participante: ${err.message}`);
+      alertaSistema(`Erro ao desalocar participante: ${err.message}`);
     }
   };
 

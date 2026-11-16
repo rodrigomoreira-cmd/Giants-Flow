@@ -1,6 +1,7 @@
 ﻿import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import { alertaSistema, confirmarSistema } from '../context/ModalContext';
 
 export default function CompanyDetail() {
   const { id } = useParams();
@@ -66,15 +67,15 @@ export default function CompanyDetail() {
       const valorNumerico = parseFloat(valorLimpo);
 
       if (isNaN(valorNumerico)) {
-        alert('Informe um valor numérico válido para o cashback.');
+        alertaSistema('Informe um valor numérico válido para o cashback.');
         return;
       }
       if (valorNumerico < 0) {
-        alert('O cashback não pode ser um valor negativo.');
+        alertaSistema('O cashback não pode ser um valor negativo.');
         return;
       }
       if (valorNumerico > 50000) {
-        alert('O cashback ultrapassa o limite teto permitido (R$ 50.000,00).');
+        alertaSistema('O cashback ultrapassa o limite teto permitido (R$ 50.000,00).');
         return;
       }
 
@@ -83,11 +84,11 @@ export default function CompanyDetail() {
         cashback: valorNumerico
       });
 
-      alert('Cashback atualizado e validado com sucesso!');
+      alertaSistema('Cashback atualizado e validado com sucesso!');
       carregarEmpresa();
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'Erro ao validar cashback';
-      alert(`Erro ao validar cashback: ${msg}`);
+      alertaSistema(`Erro ao validar cashback: ${msg}`);
     } finally {
       setSalvandoCashback(false);
     }

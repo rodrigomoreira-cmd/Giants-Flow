@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
+import { alertaSistema, confirmarSistema } from '../context/ModalContext';
 
 export default function Fichas() {
   const [fichas, setFichas] = useState([]);
@@ -56,7 +57,7 @@ export default function Fichas() {
   const submeterFicha = async (e) => {
     e.preventDefault();
     if (!form.nome_completo.trim() || !form.telefone.trim()) {
-      alert('Nome e Telefone/WhatsApp são obrigatórios.');
+      alertaSistema('Nome e Telefone/WhatsApp são obrigatórios.');
       return;
     }
 
@@ -80,7 +81,7 @@ export default function Fichas() {
       const dados = await api.get(`/clientes?turmaId=${turmaSelecionada}`);
       setFichas(Array.isArray(dados) ? dados : dados.clientes || []);
     } catch (err) {
-      alert(`Erro ao cadastrar ficha: ${err.message}`);
+      alertaSistema(`Erro ao cadastrar ficha: ${err.message}`);
     }
   };
 

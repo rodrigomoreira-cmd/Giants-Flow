@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { alertaSistema, confirmarSistema } from '../context/ModalContext';
 
 export default function AdminRules() {
   const [produtos, setProdutos] = useState([]);
@@ -43,9 +44,9 @@ export default function AdminRules() {
         parcelas_padrao: Number(prod.parcelas_padrao) || 12,
         descricao_entregaveis: prod.descricao_entregaveis
       });
-      alert(`Produto "${prod.nome}" atualizado com sucesso!\nNovo valor: ${Number(prod.valor_base).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (${prod.parcelas_padrao}x).\nVendas já aprovadas permanecem congeladas.`);
+      alertaSistema(`Produto "${prod.nome}" atualizado com sucesso!\nNovo valor: ${Number(prod.valor_base).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (${prod.parcelas_padrao}x).\nVendas já aprovadas permanecem congeladas.`);
     } catch (err) {
-      alert('Erro ao atualizar produto: ' + err.message);
+      alertaSistema('Erro ao atualizar produto: ' + err.message);
     } finally {
       setSalvandoProdutoId(null);
     }
@@ -63,9 +64,9 @@ export default function AdminRules() {
         ativa: r.ativa,
         descricao: r.descricao
       });
-      alert(`Regra "${r.nome}" atualizada com sucesso!`);
+      alertaSistema(`Regra "${r.nome}" atualizada com sucesso!`);
     } catch (err) {
-      alert('Erro ao salvar regra: ' + err.message);
+      alertaSistema('Erro ao salvar regra: ' + err.message);
     } finally {
       setSalvandoId(null);
     }

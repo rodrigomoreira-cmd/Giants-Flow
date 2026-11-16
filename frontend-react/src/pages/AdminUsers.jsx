@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { alertaSistema, confirmarSistema } from '../context/ModalContext';
 
 export default function AdminUsers() {
   const [usuarios, setUsuarios] = useState([]);
@@ -111,7 +112,7 @@ export default function AdminUsers() {
   const salvarUsuario = async (e) => {
     e.preventDefault();
     if (!form.nome.trim() || !form.email.trim()) {
-      alert('Nome e e-mail corporativo são obrigatórios.');
+      alertaSistema('Nome e e-mail corporativo são obrigatórios.');
       return;
     }
 
@@ -119,21 +120,21 @@ export default function AdminUsers() {
       setSalvando(true);
       if (editandoId) {
         await api.put(`/usuarios/${editandoId}`, form);
-        alert('Usuário atualizado com sucesso no banco de dados!');
+        alertaSistema('Usuário atualizado com sucesso no banco de dados!');
       } else {
         if (!form.senha.trim()) {
-          alert('Informe uma senha inicial de acesso para o novo usuário.');
+          alertaSistema('Informe uma senha inicial de acesso para o novo usuário.');
           setSalvando(false);
           return;
         }
         await api.post('/usuarios', form);
-        alert('Novo usuário cadastrado com sucesso no banco de dados!');
+        alertaSistema('Novo usuário cadastrado com sucesso no banco de dados!');
       }
       setModalAberto(false);
       await carregarUsuarios();
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'Erro ao processar requisição';
-      alert('Não foi possível salvar as alterações: ' + msg);
+      alertaSistema('Não foi possível salvar as alterações: ' + msg);
     } finally {
       setSalvando(false);
     }

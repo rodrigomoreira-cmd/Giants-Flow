@@ -1,6 +1,7 @@
 ﻿import { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
+import { alertaSistema, confirmarSistema } from '../context/ModalContext';
 
 const fmtBRL = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtNum = (v) => Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
@@ -107,7 +108,7 @@ export default function WarRoom() {
       window.URL.revokeObjectURL(url);
       carregarResumo(true);
     } catch (err) {
-      alert(err.message || 'Erro ao exportar planilha.');
+      alertaSistema(err.message || 'Erro ao exportar planilha.');
     } finally {
       setExportandoCsv(false);
     }

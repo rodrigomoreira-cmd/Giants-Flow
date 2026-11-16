@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import { alertaSistema, confirmarSistema } from '../context/ModalContext';
 
 const normalizarEmpresa = (emp) =>
   String(emp || '')
@@ -225,7 +226,7 @@ export default function InterviewEdit() {
 
   const adicionarNovoSocio = () => {
     if (!novoSocioNome.trim()) {
-      alert('Informe o nome completo do sócio ou participante adicional.');
+      alertaSistema('Informe o nome completo do sócio ou participante adicional.');
       return;
     }
     const novoItem = {

@@ -2,6 +2,7 @@
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
+import { alertaSistema, confirmarSistema } from '../context/ModalContext';
 
 const fmtBRL = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtNum = (v) => Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
@@ -85,7 +86,7 @@ export default function AdminCohorts() {
     if (irParaWarRoom) {
       navigate('/war-room');
     } else {
-      alert(`Turma operacional alterada para:\n#${t.id} — ${rotulo}`);
+      alertaSistema(`Turma operacional alterada para:\n#${t.id} — ${rotulo}`);
     }
   };
 
@@ -149,7 +150,7 @@ export default function AdminCohorts() {
       await carregarTurmas();
       await recarregarTurmas();
     } catch (err) {
-      alert('Erro ao salvar turma: ' + err.message);
+      alertaSistema('Erro ao salvar turma: ' + err.message);
     } finally {
       setSalvando(false);
     }
@@ -165,18 +166,18 @@ export default function AdminCohorts() {
       );
       await recarregarTurmas();
     } catch (err) {
-      alert('Erro ao alterar status da turma: ' + err.message);
+      alertaSistema('Erro ao alterar status da turma: ' + err.message);
     }
   };
 
   const excluirTurma = async (t) => {
-    if (!confirm(`Deseja excluir a turma #${t.id} — ${t.nome}?`)) return;
+    if (!(await confirmarSistema(`Deseja excluir a turma #${t.id} — ${t.nome}?`, { tipo: 'erro', titulo: 'Excluir Turma', textoConfirmar: 'Excluir Turma', corConfirmar: '#dc2626' }))) return;
     try {
       await api.delete(`/turmas/${t.id}`);
       setTurmas((prev) => prev.filter((item) => item.id !== t.id));
       await recarregarTurmas();
     } catch (err) {
-      alert(err.message || 'Não foi possível excluir esta turma.');
+      alertaSistema(err.message || 'Não foi possível excluir esta turma.');
     }
   };
 

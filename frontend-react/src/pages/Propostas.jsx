@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { alertaSistema, confirmarSistema } from '../context/ModalContext';
 
 export default function Propostas() {
   const [propostas, setPropostas] = useState([]);
@@ -41,7 +42,7 @@ export default function Propostas() {
       await api.patch(`/propostas/${id}/vender`, {});
       carregarPropostas();
     } catch (err) {
-      alert(`Erro ao concretizar venda: ${err.message}`);
+      alertaSistema(`Erro ao concretizar venda: ${err.message}`);
     }
   };
 

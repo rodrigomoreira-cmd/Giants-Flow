@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import { alertaSistema, confirmarSistema } from '../context/ModalContext';
 
 export default function InterviewDetail() {
   const { id } = useParams();
@@ -85,21 +86,21 @@ export default function InterviewDetail() {
         resultado: decisao === 'aprovar' ? 'APROVADO' : 'REJEITADO',
         observacao: `Decisão de aprovação comercial: ${decisao}`
       });
-      alert(`Deliberação registada: ${decisao === 'aprovar' ? 'Aprovada' : 'Devolvida para ajuste'}`);
+      alertaSistema(`Deliberação registada: ${decisao === 'aprovar' ? 'Aprovada' : 'Devolvida para ajuste'}`);
       carregarDados();
     } catch (err) {
-      alert(`Erro na deliberação: ${err.message}`);
+      alertaSistema(`Erro na deliberação: ${err.message}`);
     }
   };
 
   const confirmarEntradaFinanceiro = async () => {
-    if (!confirm('Deseja confirmar o recebimento da entrada? Esta ação concluirá a ficha operacionalmente.')) return;
+    if (!(await confirmarSistema('Deseja confirmar o recebimento da entrada? Esta ação concluirá a ficha operacionalmente.', { tipo: 'sucesso', titulo: 'Confirmar Recebimento da Entrada', textoConfirmar: 'Confirmar Entrada', corConfirmar: '#16a34a' }))) return;
     try {
       await api.patch(`/propostas/${id}/vender`, {});
-      alert('Entrada confirmada com sucesso! Ficha marcada como Concluída.');
+      alertaSistema('Entrada confirmada com sucesso! Ficha marcada como Concluída.');
       carregarDados();
     } catch (err) {
-      alert(`Erro ao confirmar entrada: ${err.message}`);
+      alertaSistema(`Erro ao confirmar entrada: ${err.message}`);
     }
   };
 
@@ -107,7 +108,7 @@ export default function InterviewDetail() {
     if (!cvEntrada.trim()) return;
     setSalvandoCv(true);
     setTimeout(() => {
-      alert('Código/comprovativo de referência salvo com sucesso!');
+      alertaSistema('Código/comprovativo de referência salvo com sucesso!');
       setSalvandoCv(false);
     }, 400);
   };
@@ -116,7 +117,7 @@ export default function InterviewDetail() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) {
-      alert('O arquivo excede o limite máximo permitido de 10 MB.');
+      alertaSistema('O arquivo excede o limite máximo permitido de 10 MB.');
       return;
     }
     setAnexos(prev => [
