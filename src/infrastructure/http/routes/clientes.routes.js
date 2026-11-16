@@ -350,7 +350,8 @@ router.patch('/clientes/:id', async (req, res) => {
     }
 
     await exigirTurmaAtiva({ fichaId });
-    const { almoco_pago, cortesia_almoco, cortesia, valor_almoco } = req.body;
+    const { almoco_pago, cortesia_almoco, cortesia, valor_almoco, cv_cartao } = req.body;
+    const cvFinal = cv_cartao !== undefined ? (String(cv_cartao).trim() || null) : undefined;
     const cortesiaFinal = cortesia_almoco !== undefined ? cortesia_almoco : cortesia;
 
     if (cortesiaFinal === true) {
@@ -395,13 +396,13 @@ router.patch('/clientes/:id', async (req, res) => {
        SET almoco_pago = COALESCE($1, almoco_pago),
            cortesia_almoco = COALESCE($2, cortesia_almoco),
            valor_almoco = COALESCE($3, valor_almoco),
-           cv_cartao = CASE WHEN $2 = true THEN NULL ELSE cv_cartao END,
+           cv_cartao = CASE WHEN $2 = true THEN NULL WHEN $6::varchar IS NOT NULL OR $7::boolean THEN $6::varchar ELSE cv_cartao END,
            mesa_alocada = CASE WHEN $5::boolean THEN mesa_alocada ELSE NULL END,
            assento_alocado = CASE WHEN $5::boolean THEN assento_alocado ELSE NULL END,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $4::int
        RETURNING *`,
-      [pagoFinal, cortesiaFinal, valorFinal, fichaId, permaneceElegivel]
+      [pagoFinal, cortesiaFinal, valorFinal, fichaId, permaneceElegivel, cvFinal ?? null, cv_cartao !== undefined]
     );
 
     await client.query('COMMIT');
