@@ -38,7 +38,6 @@ export default function InterviewEdit() {
   // Lista de sócios da empresa (cadastrados na turma + adicionados na hora do fechamento)
   const [sociosLista, setSociosLista] = useState([]);
   const [novoSocioNome, setNovoSocioNome] = useState('');
-  const [novoSocioCpf, setNovoSocioCpf] = useState('');
   const [novoSocioTelefone, setNovoSocioTelefone] = useState('');
 
   const [ficha, setFicha] = useState({
@@ -108,25 +107,34 @@ export default function InterviewEdit() {
         const clienteEncontrado = lista.find((c) => String(c.id || c.cliente_id || c.aplicacao_id) === String(id));
 
         if (clienteEncontrado) {
-          const cnpjTitular = clienteEncontrado.cnpj || clienteEncontrado.cpf_cnpj || '';
-          const cnpjDigits = String(cnpjTitular).replace(/\D/g, '');
+          const alvoEhGiants =
+            Boolean(clienteEncontrado.membro_giants) ||
+            String(clienteEncontrado.origem || '').toUpperCase().includes('GIAN');
+          const rawCnpj = String(clienteEncontrado.cnpj || '').replace(/\D/g, '');
+          const rawDoc = String(clienteEncontrado.cpf_cnpj || '').replace(/\D/g, '');
+          const cnpjDigits = rawCnpj.length === 14 ? rawCnpj : (rawDoc.length === 14 ? rawDoc : '');
+          const cnpjTitular = cnpjDigits ? (clienteEncontrado.cnpj || clienteEncontrado.cpf_cnpj || '') : '';
           const empTitular = clienteEncontrado.empresa || clienteEncontrado.razao_social || 'Empresa SGA';
           const empNorm = normalizarEmpresa(empTitular);
           const nomeTitular = clienteEncontrado.nome_participante || clienteEncontrado.nome || clienteEncontrado.nome_completo || '';
 
-          // Localiza todos os sócios cadastrados na turma vinculados ao mesmo CNPJ ou mesma empresa
-          const sociosMesmaEmpresa = lista.filter((c) => {
-            if (c.membro_giants) return false;
-            const cDigits = String(c.cnpj || c.cpf_cnpj || '').replace(/\D/g, '');
-            if (cnpjDigits.length >= 11 && cDigits === cnpjDigits) return true;
-            if (empNorm && empNorm !== 'empresa sga' && normalizarEmpresa(c.empresa) === empNorm) return true;
-            return String(c.id) === String(clienteEncontrado.id);
-          });
+          // GIANTS: cliente único (sem agrupar sócios). AE/PAC: agrupa sócios não-GIANTS pelo CNPJ (14 dígitos)
+          const sociosMesmaEmpresa = alvoEhGiants
+            ? [clienteEncontrado]
+            : lista.filter((c) => {
+                if (Boolean(c.membro_giants) || String(c.origem || '').toUpperCase().includes('GIAN')) return false;
+                const cCnpj = String(c.cnpj || '').replace(/\D/g, '');
+                const cDoc = String(c.cpf_cnpj || '').replace(/\D/g, '');
+                const cDigits = cCnpj.length === 14 ? cCnpj : (cDoc.length === 14 ? cDoc : '');
+                if (cnpjDigits.length === 14 && cDigits === cnpjDigits) return true;
+                if (empNorm && empNorm !== 'empresa sga' && normalizarEmpresa(c.empresa) === empNorm) return true;
+                return String(c.id) === String(clienteEncontrado.id);
+              });
 
           const listaInicialSocios = (typeof sociosMesmaEmpresa !== 'undefined' ? sociosMesmaEmpresa : []).map((s, idx) => ({
             id: s.id,
             nome: s.nome_participante || s.nome || `Participante #${s.id}`,
-            cpf: s.cpf_cnpj || s.cnpj || '',
+            cpf: '',
             telefone: s.telefone || '',
             cargo: s.cargo || (idx === 0 ? 'Sócio Titular' : 'Sócio'),
             titular: String(s.id) === String(clienteEncontrado.id),
@@ -223,7 +231,7 @@ export default function InterviewEdit() {
     const novoItem = {
       id: `ext-${Date.now()}`,
       nome: novoSocioNome.trim(),
-      cpf: novoSocioCpf.trim(),
+      cpf: '',
       telefone: novoSocioTelefone.trim(),
       cargo: 'Sócio Adicional (Novo)',
       titular: false,
@@ -232,7 +240,6 @@ export default function InterviewEdit() {
     };
     sincronizarSociosNoContrato([...sociosLista, novoItem]);
     setNovoSocioNome('');
-    setNovoSocioCpf('');
     setNovoSocioTelefone('');
   };
 
@@ -831,7 +838,7 @@ export default function InterviewEdit() {
                             <div>
                               <div style={{ fontWeight: '800', color: '#0f172a', fontSize: '0.88rem' }}>{socio.nome}</div>
                               <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                                {socio.cargo} {socio.cpf && '• ' + socio.cpf}
+                                {socio.cargo}
                               </div>
                             </div>
                           </label>
