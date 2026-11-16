@@ -3,6 +3,7 @@ const { EtapaFunil, StatusProposta } = require('../../../domain/enums/StatusEnum
 const Proposta = require('../../../domain/entities/Proposta');
 const propostaRepository = require('../../../infrastructure/database/repositories/PropostaRepository');
 const { pool } = require('../../../infrastructure/database/connection');
+const regrasComerciaisService = require('../../services/RegrasComerciaisService');
 
 class CriarPropostaUseCase {
   async execute(dados, clientExterno = null) {
@@ -156,6 +157,16 @@ class CriarPropostaUseCase {
         1,
         Number(dados.quantidadeParcelas ?? dados.quantidade_parcelas ?? dados.parcelas) || 1
       );
+      const avaliacaoRegras = await regrasComerciaisService.avaliarProposta(
+        {
+          valorTotal: vTotal,
+          valorEntrada: vEntrada,
+          desconto,
+          formaRestante: dados.formaRestante ?? dados.forma_restante,
+          metodoPagamento: dados.metodoPagamento ?? dados.metodo_pagamento ?? 'Pix'
+        },
+        client
+      );
       const saldoDevedor = Math.max(0, vTotal - vEntrada - cashback - desconto);
       const valorParcelaCalculado = dados.valorParcela
         ? Number(dados.valorParcela)
@@ -217,7 +228,7 @@ class CriarPropostaUseCase {
       if (gerenciaTransacaoPropria) {
         await client.query('COMMIT');
       }
-      return propostaSalva;
+      return { ...propostaSalva, avaliacaoRegras };
     } catch (err) {
       if (gerenciaTransacaoPropria) {
         await client.query('ROLLBACK');

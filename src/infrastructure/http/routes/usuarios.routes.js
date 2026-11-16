@@ -89,7 +89,7 @@ router.put('/usuarios/:id', exigirPapeis('ADMIN'), async (req, res) => {
       novoAtivo
     ];
     if (senha && senha.trim()) {
-      params.push(senha.trim());
+      params.push(await bcrypt.hash(senha.trim(), 10));
       queryUpdate += ' , senha = $' + params.length;
     }
     params.push(id);
