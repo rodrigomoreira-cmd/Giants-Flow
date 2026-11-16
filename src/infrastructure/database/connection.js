@@ -95,3 +95,6 @@ pool.connect = function(callback) {
 };
 
 module.exports = { pool, rlsStorage };
+
+// Garante coluna atendimento_sem_almoco em ambientes existentes e testes isolados
+pool.query('ALTER TABLE fichas ADD COLUMN IF NOT EXISTS atendimento_sem_almoco BOOLEAN DEFAULT false').catch(() => {});
