@@ -1,4 +1,4 @@
-# Dependências
+﻿# Dependências
 node_modules/
 frontend-react/node_modules/
 
@@ -27,3 +27,7 @@ yarn-error.log*
 # Arquivos de sistema operacional
 .DS_Store
 Thumbs.db
+# Environment secrets
+!.env.example
+!frontend-react/.env.example
+

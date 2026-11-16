@@ -11,6 +11,8 @@ const redisModule = require('./infrastructure/redis/client');
 const redisClient = redisModule?.redisClient || redisModule;
 
 const routesModule = require('./infrastructure/http/routes');
+const { validarAmbienteSeguro } = require('./infrastructure/security/envGuard');
+validarAmbienteSeguro();
 const apiRoutes =
   typeof routesModule === 'function' ? routesModule : routesModule.routes || routesModule.default;
 
