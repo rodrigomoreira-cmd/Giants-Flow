@@ -108,11 +108,14 @@ router.post('/propostas', async (req, res) => {
         produtoId: Number(dados.produtoId || dados.produto_id || 3),
         valorTotal: dados.valorTotal ?? dados.valor_negociado,
         valorEntrada: dados.valorEntrada ?? dados.valor_entrada ?? 0,
+        entradaComplementar: Number(dados.entradaComplementar ?? dados.valor_entrada_complementar ?? 0),
+        permuta: Number(dados.permuta ?? dados.valor_permuta ?? 0),
         cashback: dados.cashback ?? 0,
         desconto: dados.desconto ?? 0,
         valorOriginal: dados.valorOriginal ?? dados.valor_tabela ?? dados.valorTotal,
         metodoPagamento: dados.metodoPagamento || dados.formaEntrada || dados.forma_entrada || 'Pix',
         formaPagamento: dados.metodoPagamento || dados.formaPagamento || dados.forma_entrada,
+        formaRestante: dados.formaRestante || dados.forma_restante || 'Pix',
         quantidadeParcelas: dados.quantidadeParcelas || dados.parcelas || 1,
         valorParcela: dados.valorParcela ?? dados.valor_parcela
       },
@@ -804,3 +807,4 @@ router.post('/financeiro/analisar', exigirPapeis('ADMIN', 'FINANCEIRO'), async (
 });
 
 module.exports = router;
+

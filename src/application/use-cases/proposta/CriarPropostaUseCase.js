@@ -157,10 +157,22 @@ class CriarPropostaUseCase {
         1,
         Number(dados.quantidadeParcelas ?? dados.quantidade_parcelas ?? dados.parcelas) || 1
       );
+      const permutaVal = Number(dados.permuta ?? dados.valor_permuta ?? 0) || 0;
+      const entradaCompVal = Number(dados.entradaComplementar ?? dados.valor_entrada_complementar ?? 0) || 0;
+      const saldoDevedorPreliminar = Math.max(0, vTotal - vEntrada - entradaCompVal - cashback - permutaVal - desconto);
+      const valorParcelaPreliminar = dados.valorParcela
+        ? Number(dados.valorParcela)
+        : Number((saldoDevedorPreliminar / qtdParcelas).toFixed(2));
+
       const avaliacaoRegras = await regrasComerciaisService.avaliarProposta(
         {
           valorTotal: vTotal,
           valorEntrada: vEntrada,
+          entradaComplementar: entradaCompVal,
+          cashback,
+          permuta: permutaVal,
+          quantidadeParcelas: qtdParcelas,
+          valorParcela: valorParcelaPreliminar,
           desconto,
           formaRestante: dados.formaRestante ?? dados.forma_restante,
           metodoPagamento: dados.metodoPagamento ?? dados.metodo_pagamento ?? 'Pix'
@@ -244,3 +256,4 @@ class CriarPropostaUseCase {
 
 module.exports = new CriarPropostaUseCase();
 module.exports.CriarPropostaUseCase = CriarPropostaUseCase;
+

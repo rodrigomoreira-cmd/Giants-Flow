@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { alertaSistema, confirmarSistema } from '../context/ModalContext';
@@ -296,13 +296,10 @@ export default function InterviewEdit() {
 
     const motivosAprovacao = [];
     if (desconto > 0) motivosAprovacao.push(`Desconto concedido: R$ ${desconto.toLocaleString('pt-BR')}`);
-    const parcelaPadraoPAC = Math.floor((valorNegociado / 12) * 100) / 100;
-    if (catUpper === 'PAC') {
-      if (entrada + 0.05 < parcelaPadraoPAC) {
-        motivosAprovacao.push(`Entrada PAC de R$ ${entrada.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} abaixo de 1 parcela (R$ ${parcelaPadraoPAC.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`);
-      }
-    } else if (entrada < 10000) {
-      motivosAprovacao.push(`Entrada de R$ ${entrada.toLocaleString('pt-BR')} abaixo do piso mínimo`);
+    if (valorParcela > 0 && entrada + 0.05 < valorParcela) {
+      motivosAprovacao.push(
+        `Entrada de R$ ${entrada.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} abaixo do mínimo de 1 parcela (R$ ${valorParcela.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`
+      );
     }
     if (ficha.forma_restante === 'Boleto') motivosAprovacao.push('Restante em Boleto bancário (requer 2 aprovadores)');
     if (ficha.desc_dif?.trim()) motivosAprovacao.push('Condição especial declarada');
@@ -586,7 +583,7 @@ export default function InterviewEdit() {
           categoria_produto: op.cat,
           produto_nome: nomeSub,
           parcelas: totalPlano,
-          valor_entrada: prev.categoria_produto === 'PAC' ? 10000 : prev.valor_entrada,
+          valor_entrada: calcularParcelaEntradaPAC(obterValorBaseProduto(novaCat, nomeSub), totalPlano),
           cashback: novoCashback
         };
       });
@@ -1072,7 +1069,32 @@ export default function InterviewEdit() {
                         })
                       ) : (
                         <>
-                          {[10000, 20000, 30000, 50000, 100000].map((vEnt) => (
+                          {(() => {
+                          const totalPags = (Number(ficha.parcelas) || 1) + 1;
+                          const valorAPagar = Math.max(0, calc.valorNegociado - calc.cashback - calc.permuta - calc.entradaComplementar);
+                          const ent1Parc = Math.ceil((valorAPagar / totalPags) * 100) / 100;
+                          const ativo1Parc = Math.abs(Number(ficha.valor_entrada) - ent1Parc) < 0.05;
+                          return (
+                            <button
+                              type="button"
+                              disabled={isFechada}
+                              onClick={() => !isFechada && atualizarCampo('valor_entrada', ent1Parc)}
+                              style={{
+                                padding: '0.25rem 0.6rem',
+                                borderRadius: '6px',
+                                border: ativo1Parc ? '1.5px solid #0369a1' : '1px solid #bae6fd',
+                                background: ativo1Parc ? '#e0f2fe' : '#f0f9ff',
+                                color: '#0369a1',
+                                fontSize: '0.74rem',
+                                fontWeight: '800',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              1 Parcela ({fmtBRL(ent1Parc)})
+                            </button>
+                          );
+                        })()}
+                        {[10000, 20000, 30000, 50000, 100000].map((vEnt) => (
                             <button
                               key={vEnt}
                               type="button"
@@ -1158,7 +1180,7 @@ export default function InterviewEdit() {
                                 categoria_produto: novaCat,
                                 produto_nome: nomeSub,
                                 parcelas: totalPlano,
-                                valor_entrada: prev.categoria_produto === 'PAC' ? 10000 : prev.valor_entrada,
+                                valor_entrada: calcularParcelaEntradaPAC(obterValorBaseProduto(novaCat, nomeSub), totalPlano),
                                 cashback: novoCashback,
                                 resultado_comercial: mapaResultado[novaCat] || prev.resultado_comercial
                               };
@@ -1801,3 +1823,4 @@ export default function InterviewEdit() {
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { alertaSistema, confirmarSistema } from '../context/ModalContext';
 
@@ -276,11 +276,11 @@ export default function AdminRules() {
                   <td style={{ padding: '1rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                       <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: '700' }}>
-                        {String(r.chave || '').includes('pct') ? '%' : 'R$'}
+                        {String(r.chave || '').includes('pct') ? '%' : r.chave === 'entrada_minima_padrao' ? 'parc.' : 'R$'}
                       </span>
                       <input
                         type="number"
-                        step="10"
+                        step={r.chave === "entrada_minima_padrao" ? "1" : "10"}
                         value={r.valor_numerico}
                         onChange={(e) => alterarValor(r.id, e.target.value)}
                         style={{ width: '110px', padding: '0.4rem 0.5rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: '700', fontSize: '0.85rem', color: '#0f172a' }}

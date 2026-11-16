@@ -14,12 +14,12 @@ const REGRAS_PADRAO = Object.freeze({
     ativa: true
   },
   entrada_minima_padrao: {
-    nome: 'Piso de Entrada Mínima',
-    tipo_regra: 'MONETARIO',
-    valor_numerico: 10000.0,
-    valor_minimo: 0.0,
-    valor_maximo: 10000000.0,
-    descricao: 'Entradas inferiores a este piso bloqueiam a ficha como Aguardando Aprovação.',
+    nome: 'Entrada Mínima (Valor de 1 Parcela)',
+    tipo_regra: 'INTEIRO',
+    valor_numerico: 1,
+    valor_minimo: 1,
+    valor_maximo: 24,
+    descricao: 'A entrada mínima deve ser maior ou igual ao valor de 1 parcela da proposta. Entradas menores exigem aprovação de alçada.',
     ativa: true
   },
   taxa_almoco_empresa: {
@@ -215,21 +215,48 @@ class RegrasComerciaisService {
   /**
    * Avalia uma proposta comercial contra a Single Source of Truth das regras ativas.
    */
-  async avaliarProposta({ valorTotal, valorEntrada, desconto, formaRestante, metodoPagamento }, executor = pool) {
+  async avaliarProposta({
+    valorTotal,
+    valorEntrada,
+    entradaComplementar = 0,
+    cashback = 0,
+    permuta = 0,
+    quantidadeParcelas = 1,
+    valorParcela = 0,
+    desconto = 0,
+    formaRestante,
+    metodoPagamento
+  }, executor = pool) {
     const regras = await this.obterMapaRegrasAtivas(executor);
     const motivosAlcada = [];
 
+    const vTot = Number(valorTotal || 0);
+    const vEnt = Number(valorEntrada || 0);
+    const vEntComp = Number(entradaComplementar || 0);
+    const vCb = Number(cashback || 0);
+    const vPerm = Number(permuta || 0);
+    const vDesc = Number(desconto || 0);
+    const qtdParc = Math.max(1, Number(quantidadeParcelas) || 1);
+
+    const saldoDevedor = Math.max(0, vTot - vEnt - vEntComp - vCb - vPerm - vDesc);
+    const parcelaEfetiva = Number(valorParcela) > 0
+      ? Number(valorParcela)
+      : (saldoDevedor > 0 ? Number((saldoDevedor / qtdParc).toFixed(2)) : 0);
+
     const regraEntrada = regras.entrada_minima_padrao;
-    if (regraEntrada?.ativa && Number(valorTotal || 0) > 0 && Number(valorEntrada || 0) < regraEntrada.valor_numerico) {
+    const fatorParcelasMin = Math.max(1, Number(regraEntrada?.valor_numerico) || 1);
+    const pisoEntradaCalculado = Number((parcelaEfetiva * fatorParcelasMin).toFixed(2));
+
+    if (regraEntrada?.ativa && vTot > 0 && parcelaEfetiva > 0 && (vEnt + 0.05) < pisoEntradaCalculado) {
       motivosAlcada.push(
-        `Entrada de R$ ${Number(valorEntrada || 0).toFixed(2)} abaixo do piso mínimo de R$ ${regraEntrada.valor_numerico.toFixed(2)}`
+        `Entrada de R$ ${vEnt.toFixed(2)} abaixo do mínimo de ${fatorParcelasMin} parcela(s) (R$ ${pisoEntradaCalculado.toFixed(2)})`
       );
     }
 
     const regraDesconto = regras.desconto_maximo_autonomo;
-    if (regraDesconto?.ativa && Number(desconto || 0) > regraDesconto.valor_numerico) {
+    if (regraDesconto?.ativa && vDesc > regraDesconto.valor_numerico) {
       motivosAlcada.push(
-        `Desconto de R$ ${Number(desconto || 0).toFixed(2)} excede o limite autônomo de R$ ${regraDesconto.valor_numerico.toFixed(2)}`
+        `Desconto de R$ ${vDesc.toFixed(2)} excede o limite autônomo de R$ ${regraDesconto.valor_numerico.toFixed(2)}`
       );
     }
 
@@ -243,7 +270,9 @@ class RegrasComerciaisService {
       exigeAprovacaoAlcada: motivosAlcada.length > 0,
       motivosAlcada,
       parametrosAplicados: {
-        pisoEntradaMinima: regraEntrada?.valor_numerico ?? 10000,
+        pisoEntradaMinima: pisoEntradaCalculado,
+        fatorParcelasEntradaMinima: fatorParcelasMin,
+        valorParcelaReferencia: parcelaEfetiva,
         descontoMaximoAutonomo: regraDesconto?.valor_numerico ?? 0,
         permiteBoletoSaldo: Boolean(regraBoleto?.valor_numerico)
       }
@@ -254,3 +283,4 @@ class RegrasComerciaisService {
 module.exports = new RegrasComerciaisService();
 module.exports.RegrasComerciaisService = RegrasComerciaisService;
 module.exports.TIPOS_REGRA_VALIDOS = TIPOS_REGRA_VALIDOS;
+
