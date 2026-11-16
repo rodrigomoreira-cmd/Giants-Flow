@@ -8,9 +8,9 @@ const unificarPorEmpresa = (lista) => {
   const mapa = new Map();
   for (const item of lista) {
     const isGiant = Boolean(item.membro_giants) || String(item.origem || '').toUpperCase().includes('GIAN');
-    const cpfDigits = String(item.cpf || '').replace(/\D/g, '') ||
-      (String(item.cpf_cnpj || '').replace(/\D/g, '').length === 11 ? String(item.cpf_cnpj || '').replace(/\D/g, '') : '');
-    const cnpjDigits = String(item.cnpj || item.cpf_cnpj || item.dados_proposta?.cnpj || '').replace(/\D/g, '');
+    const cnpjRaw = String(item.cnpj || item.dados_proposta?.cnpj || '').replace(/\D/g, '');
+    const docRaw = String(item.cpf_cnpj || '').replace(/\D/g, '');
+    const cnpjDigits = cnpjRaw.length === 14 ? cnpjRaw : (docRaw.length === 14 ? docRaw : '');
     const empNorm = String(item.empresa || item.cliente_empresa || '')
       .trim()
       .toLowerCase()
@@ -18,8 +18,8 @@ const unificarPorEmpresa = (lista) => {
       .replace(/[\u0300-\u036f]/g, '');
 
     const chave = isGiant
-      ? (cpfDigits.length === 11 ? `${item.turma_id || 0}:giants:cpf:${cpfDigits}` : `${item.turma_id || 0}:giants:id:${item.id}`)
-      : cnpjDigits.length >= 11
+      ? `${item.turma_id || 0}:giants:id:${item.id}`
+      : cnpjDigits.length === 14
       ? `${item.turma_id || 0}:cnpj:${cnpjDigits}`
       : empNorm && empNorm !== 'empresa sga'
       ? `${item.turma_id || 0}:emp:${empNorm}`

@@ -869,13 +869,6 @@ export default function InterviewEdit() {
                       placeholder="+ Nome do sócio adicional"
                       style={{ padding: '0.5rem 0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.82rem' }}
                     />
-                    <input
-                      type="text"
-                      value={novoSocioCpf}
-                      onChange={(e) => setNovoSocioCpf(e.target.value)}
-                      placeholder="CPF (opcional)"
-                      style={{ padding: '0.5rem 0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.82rem' }}
-                    />
                     <button
                       type="button"
                       onClick={adicionarNovoSocio}

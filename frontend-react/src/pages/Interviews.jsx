@@ -6,13 +6,10 @@ import { useTurma } from '../context/TurmaContext';
 const normalizarChaveEmpresa = (empresa, cnpj, fallbackId, extra = {}) => {
   const isGiant = Boolean(extra?.membro_giants) || String(extra?.origem || '').toUpperCase().includes('GIAN');
   if (isGiant) {
-    const cpfCol = String(extra?.cpf || '').replace(/\D/g, '');
-    const docCol = String(extra?.cpf_cnpj || cnpj || '').replace(/\D/g, '');
-    const cpfDigits = cpfCol.length === 11 ? cpfCol : (docCol.length === 11 ? docCol : '');
-    return cpfDigits ? `giants:cpf:${cpfDigits}` : `giants:id:${fallbackId}`;
+    return `giants:id:${fallbackId}`;
   }
   const cnpjDigits = String(cnpj || '').replace(/\D/g, '');
-  if (cnpjDigits.length >= 11) return `cnpj:${cnpjDigits}`;
+  if (cnpjDigits.length === 14) return `cnpj:${cnpjDigits}`;
   const empNorm = String(empresa || '')
     .trim()
     .toLowerCase()

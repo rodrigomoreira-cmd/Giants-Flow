@@ -47,12 +47,8 @@ router.get('/turmas', async (req, res) => {
           COUNT(DISTINCT
             CASE
               WHEN COALESCE(f.membro_giants, false) = true OR UPPER(TRIM(COALESCE(f.origem, ''))) = 'GIANTS'
-                THEN CASE
-                  WHEN LENGTH(regexp_replace(COALESCE(f.cpf, f.cpf_cnpj, ''), '\D', '', 'g')) = 11
-                    THEN 'giants:cpf:' || regexp_replace(COALESCE(f.cpf, f.cpf_cnpj, ''), '\D', '', 'g')
-                  ELSE 'giants:id:' || f.id::text
-                END
-              WHEN LENGTH(regexp_replace(COALESCE(f.cnpj, f.cpf_cnpj, ''), '\D', '', 'g')) >= 11
+                THEN 'giants:id:' || f.id::text
+              WHEN LENGTH(regexp_replace(COALESCE(f.cnpj, f.cpf_cnpj, ''), '\D', '', 'g')) = 14
                 THEN 'cnpj:' || regexp_replace(COALESCE(f.cnpj, f.cpf_cnpj, ''), '\D', '', 'g')
               WHEN LOWER(TRIM(COALESCE(f.empresa, ''))) NOT IN ('', 'empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada')
                 THEN 'emp:' || LOWER(TRIM(f.empresa))

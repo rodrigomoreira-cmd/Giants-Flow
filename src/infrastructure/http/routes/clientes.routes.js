@@ -19,7 +19,6 @@ router.get('/clientes', async (req, res) => {
         empresa,
         cnpj,
         cpf_cnpj,
-        cpf,
         cnpj,
         telefone,
         email,

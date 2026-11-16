@@ -6,32 +6,23 @@ import { useNavigate, useLocation } from 'react-router-dom';
 const isMembroGiants = (emp) =>
   Boolean(emp?.membro_giants) || String(emp?.origem || '').toUpperCase().includes('GIAN');
 
-const extrairCpfCliente = (emp) => {
-  const cpfCol = String(emp?.cpf || '').replace(/\D/g, '');
-  if (cpfCol.length === 11) return cpfCol;
-  const docCol = String(emp?.cpf_cnpj || '').replace(/\D/g, '');
-  if (docCol.length === 11) return docCol;
-  return '';
-};
-
 const extrairCnpjEmpresa = (emp) => {
   const cnpjCol = String(emp?.cnpj || '').replace(/\D/g, '');
-  if (cnpjCol.length >= 11) return cnpjCol;
+  if (cnpjCol.length === 14) return cnpjCol;
   const docCol = String(emp?.cpf_cnpj || '').replace(/\D/g, '');
-  if (docCol.length >= 11) return docCol;
+  if (docCol.length === 14) return docCol;
   return '';
 };
 
 const normalizarChaveEmpresa = (emp) => {
-  // Membro GIANTS: vínculo individual por CPF (1 cliente apenas, não agrupa por CNPJ)
+  // Membro GIANTS: vínculo individual exclusivamente pelo ID da inscrição (conformidade LGPD, sem CPF)
   if (isMembroGiants(emp)) {
-    const cpfDigits = extrairCpfCliente(emp);
-    return cpfDigits ? `giants:cpf:${cpfDigits}` : `giants:id:${emp.id}`;
+    return `giants:id:${emp.id}`;
   }
 
-  // AE e PAC: vínculo agrupado por CNPJ da empresa
+  // AE e PAC: vínculo agrupado por CNPJ da empresa (pessoa jurídica)
   const cnpjDigits = extrairCnpjEmpresa(emp);
-  if (cnpjDigits.length >= 11) return `cnpj:${cnpjDigits}`;
+  if (cnpjDigits.length === 14) return `cnpj:${cnpjDigits}`;
 
   const empNorm = String(emp.empresa || emp.razao_social || '')
     .trim()
@@ -790,7 +781,7 @@ export default function Companies() {
                     </td>
 
                     <td style={{ padding: '1rem', color: '#64748b', fontSize: '0.85rem', fontFamily: 'monospace' }}>
-                      {g.apenasGiants ? (g.titular?.cpf || (String(g.titular?.cpf_cnpj || '').replace(/\D/g, '').length === 11 ? g.titular.cpf_cnpj : g.cnpj || 'CPF não informado')) : (g.cnpj || '-')}
+                      {g.apenasGiants ? `Inscrição Individual • Ref #${g.idPrincipal}` : (g.cnpj || '-')}
                     </td>
 
                     {/* 1. Almoço */}
