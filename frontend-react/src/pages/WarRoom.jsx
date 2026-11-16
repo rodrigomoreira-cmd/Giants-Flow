@@ -485,7 +485,7 @@ export default function WarRoom() {
               {(dados?.ultimosFechamentos || []).length === 0 ? (
                 <p style={{ fontSize: '0.84rem', color: '#64748b' }}>Nenhum contrato fechado nesta turma até o momento.</p>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxHeight: '420px', overflowY: 'auto', paddingRight: '0.25rem' }}>
                   {(dados?.ultimosFechamentos || []).map((item) => (
                     <div key={item.id} style={{ border: '1px solid #e2e8f0', borderRadius: '9px', padding: '0.75rem 0.9rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                       <div>
@@ -522,7 +522,7 @@ export default function WarRoom() {
                   Nenhuma ação crítica registrada ainda.
                 </p>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', maxHeight: '420px', overflowY: 'auto' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', maxHeight: '420px', overflowY: 'auto', paddingRight: '0.25rem' }}>
                   {(dados?.auditoria || []).map((log) => {
                     const badge = BADGE_ACAO[log.acao] || { label: log.acao, bg: '#f1f5f9', color: '#334155' };
                     return (
