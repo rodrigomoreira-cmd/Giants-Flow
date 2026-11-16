@@ -1,0 +1,26 @@
+﻿services:
+  postgres_test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app_evento_user
+      POSTGRES_PASSWORD: test_isolated_password_2026
+      POSTGRES_DB: evento_test
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app_evento_user -d evento_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  redis_test:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
