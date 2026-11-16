@@ -81,12 +81,40 @@ async function main() {
 
       SELECT setval(pg_get_serial_sequence('turmas', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM turmas), 1), 1491));
 
-      INSERT INTO produtos (id, nome, valor_tabela, ativo)
-      VALUES
-        (1, 'PAC', 49000.00, true),
-        (2, 'AE', 99000.00, true),
-        (3, 'GIANTS Individual', 279000.00, true)
-      ON CONFLICT (id) DO NOTHING;
+      DO $
+      DECLARE
+        col_valor text;
+        has_ativo boolean;
+      BEGIN
+        SELECT column_name INTO col_valor
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'produtos'
+          AND column_name IN ('valor_tabela', 'preco_tabela', 'valor_padrao', 'valor', 'preco')
+        LIMIT 1;
+
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'produtos' AND column_name = 'ativo'
+        ) INTO has_ativo;
+
+        IF col_valor IS NOT NULL AND has_ativo THEN
+          EXECUTE format(
+            'INSERT INTO produtos (id, nome, %I, ativo) VALUES (1, ''PAC'', 49000.00, true), (2, ''AE'', 99000.00, true), (3, ''GIANTS Individual'', 279000.00, true) ON CONFLICT (id) DO NOTHING',
+            col_valor
+          );
+        ELSIF col_valor IS NOT NULL THEN
+          EXECUTE format(
+            'INSERT INTO produtos (id, nome, %I) VALUES (1, ''PAC'', 49000.00), (2, ''AE'', 99000.00), (3, ''GIANTS Individual'', 279000.00) ON CONFLICT (id) DO NOTHING',
+            col_valor
+          );
+        ELSE
+          INSERT INTO produtos (id, nome)
+          VALUES (1, 'PAC'), (2, 'AE'), (3, 'GIANTS Individual')
+          ON CONFLICT (id) DO NOTHING;
+        END IF;
+
+        PERFORM setval(pg_get_serial_sequence('produtos', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM produtos), 1), 3));
+      END $;
 
       INSERT INTO usuarios (id, nome, email, senha, papel, pin, ativo)
       VALUES (1, 'Admin Teste Isolado', 'admin.teste@sistema.local', '$2b$10$abcdefghijklmnopqrstuv', 'admin', '1234', true)
