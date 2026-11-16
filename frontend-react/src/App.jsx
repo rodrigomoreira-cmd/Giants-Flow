@@ -67,6 +67,7 @@ export default function App() {
           <Route path="/companies/:id" element={<RotaProtegida><LayoutComSidebar><CompanyDetail /></LayoutComSidebar></RotaProtegida>} />
           <Route path="/interviews" element={<RotaProtegida><LayoutComSidebar><Interviews /></LayoutComSidebar></RotaProtegida>} />
           <Route path="/interviews/:id" element={<RotaProtegida><LayoutComSidebar><InterviewDetail /></LayoutComSidebar></RotaProtegida>} />
+            <Route path="/interviews/:id/pdf" element={<RotaProtegida><FichaPdf /></RotaProtegida>} />
           <Route path="/interviews/:id/edit" element={<RotaProtegida><LayoutComSidebar><InterviewEdit /></LayoutComSidebar></RotaProtegida>} />
           <Route path="/approvals" element={<RotaProtegida><LayoutComSidebar><Approvals /></LayoutComSidebar></RotaProtegida>} />
           <Route path="/lunch" element={<RotaProtegida><LayoutComSidebar><Lunch /></LayoutComSidebar></RotaProtegida>} />
