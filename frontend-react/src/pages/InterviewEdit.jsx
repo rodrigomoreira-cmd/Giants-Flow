@@ -699,7 +699,7 @@ export default function InterviewEdit() {
         >
           <span>2. Desfecho & Negociação</span>
           <span style={{ fontSize: '0.75rem', background: ficha.resultado_comercial ? '#dcfce7' : '#f1f5f9', color: ficha.resultado_comercial ? '#166534' : '#64748b', padding: '0.15rem 0.55rem', borderRadius: '999px' }}>
-            {ficha.resultado_comercial || 'Pendente'}
+            {ficha.resultado_comercial || (isFechada ? 'Encerrada' : 'Pendente')}
           </span>
         </button>
       </div>
@@ -971,14 +971,16 @@ export default function InterviewEdit() {
                         <button
                           key={op.valor}
                           type="button"
-                          onClick={() => selecionarResultadoRapido(op)}
+                          disabled={isFechada}
+                          onClick={() => !isFechada && selecionarResultadoRapido(op)}
                           style={{
                             padding: '0.75rem 0.85rem',
                             borderRadius: '10px',
                             border: selecionado ? '2px solid ' + op.borda : '1px solid #e2e8f0',
                             background: selecionado ? op.bg : '#ffffff',
                             textAlign: 'left',
-                            cursor: 'pointer',
+                            cursor: isFechada ? 'not-allowed' : 'pointer',
+                            opacity: isFechada && !selecionado ? 0.65 : 1,
                             boxShadow: selecionado ? '0 2px 6px rgba(15,23,42,0.06)' : 'none'
                           }}
                         >
@@ -1043,8 +1045,9 @@ export default function InterviewEdit() {
                             <button
                               key={totalPlano}
                               type="button"
+                              disabled={isFechada}
                               onClick={() =>
-                                setFicha((prev) => ({
+                                !isFechada && setFicha((prev) => ({
                                   ...prev,
                                   cashback: 0,
                                   valor_entrada: entParcela,
@@ -1074,7 +1077,8 @@ export default function InterviewEdit() {
                             <button
                               key={vEnt}
                               type="button"
-                              onClick={() => atualizarCampo('valor_entrada', vEnt)}
+                              disabled={isFechada}
+                              onClick={() => !isFechada && atualizarCampo('valor_entrada', vEnt)}
                               style={{
                                 padding: '0.25rem 0.55rem',
                                 borderRadius: '6px',
@@ -1433,7 +1437,7 @@ export default function InterviewEdit() {
                 Resumo ao Vivo
               </span>
               <span style={{ fontSize: '0.74rem', fontWeight: '800', background: gerouFechamentoComercial ? '#dcfce7' : '#f1f5f9', color: gerouFechamentoComercial ? '#166534' : '#475569', padding: '0.18rem 0.55rem', borderRadius: '999px' }}>
-                {ficha.resultado_comercial || 'Selecione o desfecho'}
+                {ficha.resultado_comercial || (isFechada ? 'Ficha Encerrada' : 'Selecione o desfecho')}
               </span>
             </div>
 
