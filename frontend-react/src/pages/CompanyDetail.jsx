@@ -38,7 +38,7 @@ export default function CompanyDetail() {
           empId: id,
           empresa: `Empresa SGA #${id}`,
           nome: `Empresário #${id}`,
-          cpf_cnpj: 'Não informado',
+          cnpj: 'Não informado',
           telefone: '-',
           email: '-',
           entrevistador_nome: 'Rodrigo Moreira',
@@ -156,8 +156,8 @@ export default function CompanyDetail() {
               <span style={{ fontWeight: '600', color: '#1e293b' }}>{empresa?.nome || empresa?.nome_completo || '-'}</span>
             </div>
             <div>
-              <span style={{ color: '#64748b', display: 'block', fontSize: '0.75rem', fontWeight: '600' }}>CNPJ / CPF</span>
-              <span style={{ color: '#334155' }}>{empresa?.cpf_cnpj || '-'}</span>
+              <span style={{ color: '#64748b', display: 'block', fontSize: '0.75rem', fontWeight: '600' }}>CNPJ</span>
+              <span style={{ color: '#334155' }}>{[empresa?.cnpj, empresa?.cpf_cnpj].find((d) => String(d || '').replace(/\D/g, '').length === 14) || 'Não informado'}</span>
             </div>
             <div>
               <span style={{ color: '#64748b', display: 'block', fontSize: '0.75rem', fontWeight: '600' }}>CONTACTO</span>

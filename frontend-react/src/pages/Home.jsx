@@ -121,7 +121,7 @@ export default function Home() {
           chave,
           idPrincipal: c.id,
           empresa: c.empresa || 'Empresa sem nome',
-          cnpj: c.cnpj || c.cpf_cnpj || '',
+          cnpj: extrairCnpjEmpresa(c),
           titular: c.nome_participante || c.nome || 'Participante',
           membros: [],
           almocoPago: false,

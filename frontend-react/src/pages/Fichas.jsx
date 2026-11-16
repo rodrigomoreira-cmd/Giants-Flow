@@ -180,12 +180,12 @@ export default function Fichas() {
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#334155', marginBottom: '0.35rem' }}>CPF / CNPJ</label>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '600', color: '#334155', marginBottom: '0.35rem' }}>CNPJ da Empresa</label>
               <input 
                 type="text" 
                 value={form.cpf_cnpj} 
                 onChange={(e) => setForm({ ...form, cpf_cnpj: e.target.value })} 
-                placeholder="Apenas dígitos"
+                placeholder="00.000.000/0000-00 (14 dígitos)"
                 style={{ width: '100%', padding: '0.65rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
               />
             </div>

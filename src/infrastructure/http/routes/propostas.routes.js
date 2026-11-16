@@ -1,3 +1,19 @@
+
+function sanitizarEmpresaLgpd(valor) {
+  if (!valor) return valor;
+  return String(valor)
+    .replace(/\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/g, '')
+    .replace(/\b\d{11}\b/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function extrairCnpjSomentePj(valor) {
+  if (!valor) return null;
+  const digits = String(valor).replace(/\D/g, '');
+  return digits.length === 14 ? String(valor).trim() : null;
+}
+
 ﻿const express = require('express');
 const router = express.Router();
 const dbModule = require('../../database/connection');
@@ -88,8 +104,8 @@ router.post('/propostas', async (req, res) => {
       [aplicacaoId]
     );
     const fichaBase = fichaBaseRows[0] || {};
-    const empresaFinal = dados.razaoSocial || dados.empresa || fichaBase.empresa || 'Empresa SGA';
-    const cnpjFinal = dados.cnpj || fichaBase.cnpj || fichaBase.cpf_cnpj || null;
+    const empresaFinal = sanitizarEmpresaLgpd(dados.razaoSocial || dados.empresa || fichaBase.empresa || 'Empresa SGA');
+    const cnpjFinal = extrairCnpjSomentePj(dados.cnpj || fichaBase.cnpj || fichaBase.cpf_cnpj);
     const turmaFinal = turmaAlvo || fichaBase.turma_id || 1491;
     const cnpjLimpo = String(cnpjFinal || '').replace(/\D/g, '');
     const empNorm = String(empresaFinal || '').trim().toLowerCase();
@@ -111,7 +127,7 @@ router.post('/propostas', async (req, res) => {
              )
              VALUES ($1, $2, $2, $3, $4, $5, $6, 'Sócio Adicional', 'EVENTO', 'aguardando_aprovacao', true, CURRENT_TIMESTAMP)
              RETURNING id`,
-            [turmaFinal, socio.nome.trim(), empresaFinal, cnpjFinal, socio.cpf || null, socio.telefone || null]
+            [turmaFinal, socio.nome.trim(), empresaFinal, cnpjFinal, null, socio.telefone || null]
           );
           if (novoSocio[0]) socio.id = novoSocio[0].id;
         } else {

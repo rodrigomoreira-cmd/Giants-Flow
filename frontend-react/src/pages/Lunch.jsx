@@ -314,7 +314,7 @@ export default function Lunch() {
           entrevistaId: entrevistaId || c.id,
           nome: c.nome_participante || c.nome_cracha || c.nome || c.nome_completo || 'Participante',
           empresa: (c.empresa || c.razao_social || 'Empresa SGA').trim(),
-          cnpj: c.cnpj || c.cpf_cnpj || '',
+          cnpj: extrairCnpjEmpresa(c),
           isMembroGiants,
           empresaPagou,
           temCortesia,

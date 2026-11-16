@@ -1,3 +1,19 @@
+
+function sanitizarEmpresaLgpd(valor) {
+  if (!valor) return valor;
+  return String(valor)
+    .replace(/\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/g, '')
+    .replace(/\b\d{11}\b/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function extrairCnpjSomentePj(valor) {
+  if (!valor) return null;
+  const digits = String(valor).replace(/\D/g, '');
+  return digits.length === 14 ? String(valor).trim() : null;
+}
+
 ﻿// src/infrastructure/http/controllers/ApiController.js
 const { pool } = require('../../database/connection');
 const criarClienteUseCase = require('../../../application/use-cases/cliente/CriarClienteUseCase');
@@ -511,8 +527,8 @@ class ApiController {
         responsavelFichaId: p.responsavelFichaId || p.responsavel_ficha_id,
         nome: p.nome || p.nomeCompleto || p.nome_completo,
         nomeCracha: p.nomeCracha || p.nome_cracha,
-        empresa: p.empresa,
-        cnpj: p.cnpj || p.cpfCnpj || p.cpf_cnpj,
+        empresa: sanitizarEmpresaLgpd(p.empresa),
+        cnpj: extrairCnpjSomentePj(p.cnpj || p.cpfCnpj || p.cpf_cnpj),
         telefone: p.telefone,
         email: p.email,
       };
@@ -579,10 +595,10 @@ class ApiController {
       const p = req.body;
 
       const nomeFinal = p.nome || p.nomeCompleto || p.nome_completo;
-      const empresaFinal = p.empresa;
+      const empresaFinal = sanitizarEmpresaLgpd(p.empresa);
       const telefoneFinal = p.telefone;
       const crachaFinal = p.nomeCracha || p.nome_cracha || null;
-      const cnpjFinal = p.cnpj || p.cpfCnpj || p.cpf_cnpj || null;
+      const cnpjFinal = extrairCnpjSomentePj(p.cnpj || p.cpfCnpj || p.cpf_cnpj);
       const emailFinal = p.email || null;
       const responsavelFinal = p.responsavelFichaId || p.responsavel_ficha_id || null;
 

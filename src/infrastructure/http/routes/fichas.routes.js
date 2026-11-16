@@ -1,3 +1,19 @@
+
+function sanitizarEmpresaLgpd(valor) {
+  if (!valor) return valor;
+  return String(valor)
+    .replace(/\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/g, '')
+    .replace(/\b\d{11}\b/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function extrairCnpjSomentePj(valor) {
+  if (!valor) return null;
+  const digits = String(valor).replace(/\D/g, '');
+  return digits.length === 14 ? String(valor).trim() : null;
+}
+
 // src/infrastructure/http/routes/fichas.routes.js
 const express = require('express');
 const router = express.Router();
@@ -39,8 +55,8 @@ router.post('/', async (req, res) => {
     const valores = [
       nome.trim(),
       nome_cracha ? nome_cracha.trim() : null,
-      empresa ? empresa.trim() : null,
-      cpf_cnpj ? cpf_cnpj.trim() : null,
+      empresa ? sanitizarEmpresaLgpd(empresa) : null,
+      extrairCnpjSomentePj(cpf_cnpj),
       telefone.trim(),
       email ? email.trim().toLowerCase() : null,
       origem || 'ORGANICO',

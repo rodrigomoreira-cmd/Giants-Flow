@@ -161,14 +161,14 @@ export default function Companies() {
           chave,
           idPrincipal: p.id,
           empresa: (p.empresa || p.razao_social || 'Empresa não informada').trim(),
-          cnpj: p.cnpj || p.cpf_cnpj || '',
+          cnpj: extrairCnpjEmpresa(p),
           todosMembros: [itemNorm]
         });
       } else {
         const g = mapa.get(chave);
         g.todosMembros.push(itemNorm);
-        if (!g.cnpj && (p.cnpj || p.cpf_cnpj)) {
-          g.cnpj = p.cnpj || p.cpf_cnpj;
+        if (!g.cnpj && (extrairCnpjEmpresa(p))) {
+          g.cnpj = extrairCnpjEmpresa(p);
         }
       }
     });

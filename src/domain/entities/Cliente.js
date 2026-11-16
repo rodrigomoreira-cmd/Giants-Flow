@@ -36,7 +36,7 @@ class Cliente {
     const crachaRecebido = nomeCracha || nome_cracha;
     this.nomeCracha = crachaRecebido ? String(crachaRecebido).trim() : null;
 
-    this.empresa = empresa ? String(empresa).trim() : null;
+    this.empresa = empresa ? String(empresa).replace(/\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/g, '').replace(/\b\d{11}\b/g, '').replace(/\s{2,}/g, ' ').trim() : null;
 
     const documentoRecebido = cnpj || cpfCnpj || cpf_cnpj;
     this.cnpj = documentoRecebido ? this.formatarCNPJ(documentoRecebido) : null;
@@ -49,7 +49,8 @@ class Cliente {
   }
 
   formatarCNPJ(cnpj) {
-    return String(cnpj).replace(/\D/g, '');
+    const digits = String(cnpj).replace(/\D/g, '');
+    return digits.length === 14 ? digits : null;
   }
 
   validarFicha() {

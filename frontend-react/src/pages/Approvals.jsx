@@ -312,7 +312,7 @@ export default function Approvals() {
                 const saldoFinal = Math.max(0, saldoContrato - entrada - permuta - entradaComp);
                 const parcelas = Number(dp.quantidadeParcelas ?? prop.proposta_parcelas ?? 12);
                 const valorParcela = Number(dp.valorParcela ?? prop.proposta_valor_parcela ?? 0);
-                const cnpjExibir = prop.cnpj || prop.cpf_cnpj || dp.cnpj || '';
+                const cnpjExibir = [prop.cnpj, prop.cpf_cnpj, dp.cnpj].find((d) => String(d || '').replace(/\D/g, '').length === 14) || '';
                 const idPagamento = dp.identificadorPagamento || prop.cv_cartao || '';
 
                 return (
@@ -456,7 +456,7 @@ export default function Approvals() {
                   <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0.95rem' }}>
                     <div style={{ fontSize: '0.7rem', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>Empresa / CNPJ</div>
                     <div style={{ fontSize: '0.86rem', fontWeight: '700', color: '#0f172a', marginTop: '0.2rem' }}>
-                      {propSelecionada.cnpj || propSelecionada.cpf_cnpj || 'CNPJ não informado'}
+                      {[propSelecionada.cnpj, propSelecionada.cpf_cnpj, propSelecionada.dados_proposta?.cnpj].find((d) => String(d || '').replace(/\D/g, '').length === 14) || 'CNPJ não informado'}
                     </div>
                     <div style={{ fontSize: '0.76rem', color: '#475569', marginTop: '0.25rem' }}>
                       {sociosContrato.length > 0
@@ -525,7 +525,7 @@ export default function Approvals() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                     <span style={{ fontSize: '0.86rem', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                       <span className="material-symbols-outlined" style={{ color: '#ff5722', fontSize: '1.2rem' }}>account_balance</span>
-                      1. Análise de Crédito & Status Serasa (CPF / CNPJ)
+                      1. Análise de Crédito & Status Serasa (CNPJ)
                     </span>
 
                     <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
@@ -534,7 +534,7 @@ export default function Approvals() {
                         onClick={() => {
                           setAnaliseCreditoStatus('APROVADO');
                           setStatusSerasaCodigo('sem_restricao');
-                          setStatusSerasaTexto('APROVADO — SEM RESTRIÇÕES FINANCEIRAS OU PROTESTOS NO CPF/CNPJ.');
+                          setStatusSerasaTexto('APROVADO — SEM RESTRIÇÕES FINANCEIRAS OU PROTESTOS NO CNPJ.');
                         }}
                         style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '0.3rem 0.65rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '700', cursor: 'pointer' }}
                       >
