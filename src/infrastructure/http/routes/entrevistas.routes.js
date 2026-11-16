@@ -48,7 +48,7 @@ router.post('/entrevistas/agendar', async (req, res) => {
     await client.query("SET LOCAL app.user_role = 'SYSTEM'");
 
     const { rows: clienteRows } = await client.query(
-      'SELECT almoco_pago, cortesia_almoco, membro_giants, ficha_fechada FROM fichas WHERE id = $1 FOR UPDATE',
+      'SELECT almoco_pago, cortesia_almoco, atendimento_sem_almoco, membro_giants, ficha_fechada FROM fichas WHERE id = $1 FOR UPDATE',
       [id]
     );
 
@@ -63,7 +63,7 @@ router.post('/entrevistas/agendar', async (req, res) => {
       return res.status(403).json({ error: 'Esta ficha já foi encerrada. Solicite ao Administrador para reabri-la.' });
     }
 
-    const liberadoAlmoco = Boolean(c.membro_giants) || Boolean(c.almoco_pago) || Boolean(c.cortesia_almoco);
+    const liberadoAlmoco = Boolean(c.membro_giants) || Boolean(c.almoco_pago) || Boolean(c.cortesia_almoco) || Boolean(c.atendimento_sem_almoco);
     if (!liberadoAlmoco) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Acesso negado: participante não possui almoço pago nem cortesia ativa.' });

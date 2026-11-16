@@ -30,6 +30,7 @@ router.get('/clientes', async (req, res) => {
         membro_giants,
         valor_almoco,
         cortesia_almoco,
+        atendimento_sem_almoco,
         mesa_alocada,
         assento_alocado,
         status,
@@ -78,7 +79,7 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
     // Lock pessimista na ficha do participante antes de qualquer validação de elegibilidade
     const { rows: fichaRows } = await client.query(
       `SELECT id, turma_id, nome_participante, empresa, origem,
-              almoco_pago, cortesia_almoco, membro_giants,
+              almoco_pago, cortesia_almoco, atendimento_sem_almoco, membro_giants,
               etapa_funil, ficha_fechada, status_aprovacao
        FROM fichas
        WHERE id = $1::integer
@@ -114,6 +115,7 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
         Boolean(fichaAtual.membro_giants) ||
         Boolean(fichaAtual.almoco_pago) ||
         Boolean(fichaAtual.cortesia_almoco) ||
+        Boolean(fichaAtual.atendimento_sem_almoco) ||
         String(fichaAtual.origem || '').toUpperCase() === 'GIANTS';
 
       if (!liberadoAlmoco) {
@@ -259,6 +261,7 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
         `UPDATE fichas
          SET almoco_pago = CASE WHEN id = ANY($2::int[]) THEN true ELSE false END,
              cortesia_almoco = false,
+             atendimento_sem_almoco = false,
              membro_giants = false,
              valor_almoco = CASE WHEN id = $3::int THEN 1000.00 ELSE 0.00 END,
              cv_cartao = CASE WHEN id = ANY($2::int[]) THEN COALESCE($4::varchar, cv_cartao) ELSE NULL END,
@@ -275,6 +278,22 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
              valor_almoco = 0.00,
              cv_cartao = NULL,
              cortesia_almoco = CASE WHEN id = ANY($2::int[]) THEN true ELSE false END,
+             atendimento_sem_almoco = false,
+             membro_giants = false,
+             mesa_alocada = CASE WHEN id = ANY($2::int[]) THEN mesa_alocada ELSE NULL END,
+             assento_alocado = CASE WHEN id = ANY($2::int[]) THEN assento_alocado ELSE NULL END,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ANY($1::int[])`,
+        [todosIds, idsParticipantes]
+      );
+    } else if (tipo === 'sem_almoco') {
+      await client.query(
+        `UPDATE fichas
+         SET almoco_pago = false,
+             cortesia_almoco = false,
+             valor_almoco = 0.00,
+             cv_cartao = NULL,
+             atendimento_sem_almoco = CASE WHEN id = ANY($2::int[]) THEN true ELSE false END,
              membro_giants = false,
              mesa_alocada = CASE WHEN id = ANY($2::int[]) THEN mesa_alocada ELSE NULL END,
              assento_alocado = CASE WHEN id = ANY($2::int[]) THEN assento_alocado ELSE NULL END,
@@ -287,6 +306,7 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
         `UPDATE fichas
          SET almoco_pago = false,
              cortesia_almoco = false,
+             atendimento_sem_almoco = false,
              membro_giants = true,
              valor_almoco = 0.00,
              cv_cartao = NULL,
@@ -299,6 +319,7 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
         `UPDATE fichas
          SET almoco_pago = false,
              cortesia_almoco = false,
+             atendimento_sem_almoco = false,
              valor_almoco = 0.00,
              cv_cartao = NULL,
              mesa_alocada = NULL,
@@ -322,7 +343,7 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
     }
 
     const { rows: atualizadas } = await client.query(
-      'SELECT id, empresa, nome_participante, almoco_pago, cortesia_almoco, membro_giants, valor_almoco, cv_cartao, mesa_alocada, etapa_funil FROM fichas WHERE id = ANY($1::int[]) ORDER BY id ASC',
+      'SELECT id, empresa, nome_participante, almoco_pago, cortesia_almoco, atendimento_sem_almoco, membro_giants, valor_almoco, cv_cartao, mesa_alocada, etapa_funil FROM fichas WHERE id = ANY($1::int[]) ORDER BY id ASC',
       [todosIds]
     );
 

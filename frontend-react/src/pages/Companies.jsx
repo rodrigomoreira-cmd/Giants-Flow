@@ -193,9 +193,10 @@ export default function Companies() {
 
         const algumPago = sociosNaoGiants.some((m) => Boolean(m.almoco_pago) || Number(m.valor_almoco || 0) >= 1000);
         const algumCortesia = !algumPago && sociosNaoGiants.some((m) => Boolean(m.cortesia_almoco));
+        const algumSemAlmoco = !algumPago && !algumCortesia && sociosNaoGiants.some((m) => Boolean(m.atendimento_sem_almoco));
         const apenasGiants = sociosNaoGiants.length === 0 && sociosGiants.length > 0;
 
-        const participantesAlmoco = sociosNaoGiants.filter((m) => Boolean(m.almoco_pago || m.cortesia_almoco));
+        const participantesAlmoco = sociosNaoGiants.filter((m) => Boolean(m.almoco_pago || m.cortesia_almoco || m.atendimento_sem_almoco));
         const alocadosMesa = participantesAlmoco.filter((m) => Boolean(m.mesa_alocada));
         const paganteComCv = sociosNaoGiants.find((m) => m.cv_cartao);
 
@@ -238,13 +239,14 @@ export default function Companies() {
           sociosGiants,
           algumPago,
           algumCortesia,
+          algumSemAlmoco,
           apenasGiants,
           isFechadoAprovado,
           isDecisaoFutura,
           isNaoFechou,
           isAguardandoFinanceiro,
           produtoFechado,
-          isPendente: !apenasGiants && !algumPago && !algumCortesia && !isFechadoAprovado && !isAguardandoFinanceiro,
+          isPendente: !apenasGiants && !algumPago && !algumCortesia && !algumSemAlmoco && !isFechadoAprovado && !isAguardandoFinanceiro,
           participantesAlmoco,
           alocadosMesa,
           cvCartao: paganteComCv?.cv_cartao || ''
@@ -268,6 +270,7 @@ export default function Companies() {
     if (filtroAlmoco === 'pagos') return g.algumPago;
     if (filtroAlmoco === 'giants') return g.apenasGiants || g.sociosGiants.length > 0;
     if (filtroAlmoco === 'cortesia') return g.algumCortesia;
+    if (filtroAlmoco === 'sem_almoco') return g.algumSemAlmoco;
     if (filtroAlmoco === 'pendentes') return g.isPendente;
     return true;
   });
@@ -276,6 +279,7 @@ export default function Companies() {
   const totalPagos = gruposEmpresas.filter((g) => g.algumPago).length;
   const totalGiants = gruposEmpresas.filter((g) => g.apenasGiants || g.sociosGiants.length > 0).length;
   const totalCortesia = gruposEmpresas.filter((g) => g.algumCortesia).length;
+  const totalSemAlmoco = gruposEmpresas.filter((g) => g.algumSemAlmoco).length;
   const totalPendentes = gruposEmpresas.filter((g) => g.isPendente).length;
 
   const totalPaginas = Math.ceil(empresasFiltradas.length / itensPorPagina) || 1;
@@ -290,6 +294,8 @@ export default function Companies() {
       setTipoAlmoco('giants');
     } else if (grupo.algumCortesia) {
       setTipoAlmoco('cortesia');
+    } else if (grupo.algumSemAlmoco) {
+      setTipoAlmoco('sem_almoco');
     } else {
       setTipoAlmoco('pago');
     }
@@ -298,7 +304,7 @@ export default function Companies() {
 
     // Pré-seleciona no checklist quem já está marcado para o almoço ou, se ainda pendente, todos os sócios não-GIANTS
     const jaMarcados = grupo.sociosNaoGiants
-      .filter((m) => Boolean(m.almoco_pago || m.cortesia_almoco))
+      .filter((m) => Boolean(m.almoco_pago || m.cortesia_almoco || m.atendimento_sem_almoco))
       .map((m) => m.id);
 
     setSociosSelecionadosAlmoco(
@@ -377,6 +383,8 @@ export default function Companies() {
         ? `● Pago R$ 1.000 (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
         : g.algumCortesia
         ? `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
+        : g.algumSemAlmoco
+        ? `● Atendimento Sem Almoço (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
         : '● Validado';
       return {
         passo: 4,
@@ -397,6 +405,8 @@ export default function Companies() {
         ? `● Pago R$ 1.000 (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
         : g.algumCortesia
         ? `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
+        : g.algumSemAlmoco
+        ? `● Atendimento Sem Almoço (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
         : '● Validado';
       return {
         passo: 4,
@@ -417,6 +427,8 @@ export default function Companies() {
         ? `● Pago R$ 1.000 (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
         : g.algumCortesia
         ? `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
+        : g.algumSemAlmoco
+        ? `● Atendimento Sem Almoço (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
         : '● Validado';
       return {
         passo: 4,
@@ -437,6 +449,8 @@ export default function Companies() {
         ? `● Pago R$ 1.000 (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
         : g.algumCortesia
         ? `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
+        : g.algumSemAlmoco
+        ? `● Atendimento Sem Almoço (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
         : '● Validado';
       return {
         passo: 3.5,
@@ -480,7 +494,9 @@ export default function Companies() {
     const qtdNoAlmoco = g.participantesAlmoco.length;
     let rotuloAlmoco = g.algumPago
       ? `● Pago R$ 1.000 (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-      : `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`;
+      : g.algumCortesia
+      ? `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
+      : `● Atendimento Sem Almoço (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`;
 
     if (g.algumPago && g.cvCartao) {
       rotuloAlmoco = `● Pago ${g.cvCartao} (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`;
@@ -629,6 +645,7 @@ export default function Companies() {
             <option value="pagos">💰 Almoço Pago ({totalPagos})</option>
             <option value="giants">⚡ Com Membro GIANTS ({totalGiants})</option>
             <option value="cortesia">🎁 Cortesia ({totalCortesia})</option>
+            <option value="sem_almoco">🤝 Atendimento Sem Almoço ({totalSemAlmoco})</option>
             <option value="pendentes">⏳ Pendente ({totalPendentes})</option>
           </select>
         </div>
@@ -764,7 +781,7 @@ export default function Companies() {
                           <span>
                             <strong>Sócios:</strong>{' '}
                             {g.sociosNaoGiants.map((s, i) => {
-                              const vaiAlmoco = Boolean(s.almoco_pago || s.cortesia_almoco);
+                              const vaiAlmoco = Boolean(s.almoco_pago || s.cortesia_almoco || s.atendimento_sem_almoco);
                               return (
                                 <span key={s.id}>
                                   {i > 0 && ', '}
@@ -1136,6 +1153,14 @@ export default function Companies() {
                     </div>
                   </label>
 
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', borderRadius: '8px', border: tipoAlmoco === 'sem_almoco' ? '2px solid #7c3aed' : '1px solid #e2e8f0', background: tipoAlmoco === 'sem_almoco' ? '#f5f3ff' : '#fff', cursor: 'pointer' }}>
+                    <input type="radio" name="tipoAlmoco" value="sem_almoco" checked={tipoAlmoco === 'sem_almoco'} onChange={() => setTipoAlmoco('sem_almoco')} />
+                    <div>
+                      <div style={{ fontWeight: '700', fontSize: '0.9rem', color: '#7c3aed' }}>🤝 Atendimento Comercial (Sem Almoço)</div>
+                      <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Libera mesa/entrevista para fechamento GIANTS ou PAC sem almoço pago, sem cortesia de refeição e sem cashback de R$ 1.000</div>
+                    </div>
+                  </label>
+
                   <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', borderRadius: '8px', border: tipoAlmoco === 'pendente' ? '2px solid #d97706' : '1px solid #e2e8f0', background: tipoAlmoco === 'pendente' ? '#fffbeb' : '#fff', cursor: 'pointer' }}>
                     <input type="radio" name="tipoAlmoco" value="pendente" checked={tipoAlmoco === 'pendente'} onChange={() => setTipoAlmoco('pendente')} />
                     <div>
@@ -1163,7 +1188,7 @@ export default function Companies() {
               )}
 
               {/* 2. Checklist de Sócios (não-GIANTS) que vão participar do Almoço */}
-              {(tipoAlmoco === 'pago' || tipoAlmoco === 'cortesia') && grupoAlvo.sociosNaoGiants.length > 0 && (
+              {(tipoAlmoco === 'pago' || tipoAlmoco === 'cortesia' || tipoAlmoco === 'sem_almoco') && grupoAlvo.sociosNaoGiants.length > 0 && (
                 <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: '10px', padding: '1rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem' }}>
                     <span style={{ fontSize: '0.85rem', fontWeight: '800', color: '#166534' }}>

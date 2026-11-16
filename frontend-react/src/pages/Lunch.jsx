@@ -279,9 +279,10 @@ export default function Lunch() {
           (c.tipo || '').toLowerCase().includes('giants');
 
         const isCortesia = Boolean(c.cortesia_almoco || c.cortesia || cortesiasLocais[c.id]);
+        const isSemAlmoco = !isGiant && !isCortesia && Boolean(c.atendimento_sem_almoco);
         const isPago = !isGiant && (Number(c.valor_almoco || 0) >= 1000 || Boolean(c.almoco_pago));
 
-        return isGiant || isCortesia || isPago;
+        return isGiant || isCortesia || isSemAlmoco || isPago;
       })
       .map((c) => {
         const sentado = idsSentados.has(String(c.id)) || idsSentados.has(String(c.aplicacao_id));
@@ -310,6 +311,7 @@ export default function Lunch() {
           (c.perfil || '').toLowerCase().includes('giants');
 
         const temCortesia = Boolean(c.cortesia_almoco || c.cortesia || cortesiasLocais[c.id]);
+        const ehSemAlmoco = !isMembroGiants && !temCortesia && Boolean(c.atendimento_sem_almoco);
         const empresaPagou = !isMembroGiants && (Number(c.valor_almoco || 0) >= 1000 || Boolean(c.almoco_pago));
 
         return {
@@ -323,7 +325,8 @@ export default function Lunch() {
           empresaPagou,
           temCortesia,
           liberadoAlmoco: true,
-          motivoLiberacao: isMembroGiants ? 'Membro GIANTS' : temCortesia ? 'Cortesia' : 'Almoço Pago',
+          ehSemAlmoco,
+          motivoLiberacao: isMembroGiants ? 'Membro GIANTS' : temCortesia ? 'Cortesia' : ehSemAlmoco ? 'Atendimento Sem Almoço' : 'Almoço Pago',
           sentado,
           mesaNumero,
           mesaId
@@ -365,6 +368,7 @@ export default function Lunch() {
         const isGiants = g.membros.every((m) => m.isMembroGiants);
         const temGiants = g.membros.some((m) => m.isMembroGiants);
         const temCortesia = g.membros.some((m) => m.temCortesia);
+        const temSemAlmoco = g.membros.some((m) => m.ehSemAlmoco);
         const empresaPagou = g.membros.some((m) => m.empresaPagou);
 
         return {
@@ -377,11 +381,14 @@ export default function Lunch() {
           isGiants,
           temGiants,
           temCortesia,
+          temSemAlmoco,
           empresaPagou,
           motivoLiberacao: isGiants
             ? 'Membro GIANTS'
             : temCortesia
             ? 'Cortesia'
+            : temSemAlmoco
+            ? 'Atendimento Sem Almoço'
             : temGiants
             ? 'Almoço Pago + GIANTS'
             : 'Almoço Pago'

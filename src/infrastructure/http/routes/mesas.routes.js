@@ -20,7 +20,7 @@ router.get('/auxiliares', async (req, res) => {
 
     const { rows: ocupantes } = await pool.query(`
       SELECT id, turma_id, nome_participante AS nome, empresa,
-             mesa_alocada, almoco_pago, cortesia_almoco, membro_giants, etapa_funil,
+             mesa_alocada, almoco_pago, cortesia_almoco, atendimento_sem_almoco, membro_giants, etapa_funil,
              entrevistador_id, entrevistadores_ids, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae
       FROM fichas
       WHERE mesa_alocada IS NOT NULL
@@ -72,7 +72,7 @@ router.get('/auxiliares', async (req, res) => {
             etapa_funil: f.etapa_funil,
             membro_giants: Boolean(f.membro_giants),
             tipo: f.membro_giants ? 'giants' : 'cliente',
-            status_almoco: (f.almoco_pago || f.cortesia_almoco || f.membro_giants) ? 'liberado' : 'pendente',
+            status_almoco: (f.almoco_pago || f.cortesia_almoco || f.atendimento_sem_almoco || f.membro_giants) ? 'liberado' : 'pendente',
             entrevistador_id: f.entrevistador_id,
             entrevistador_nome: entrIndividual ? entrIndividual.nome : 'Não definido'
           };
