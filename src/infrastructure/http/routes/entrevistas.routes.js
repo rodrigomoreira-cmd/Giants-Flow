@@ -226,25 +226,22 @@ router.post('/entrevistas/resultado', async (req, res) => {
   }
 });
 
-// REABERTURA DE FICHA ENCERRADA (EXCLUSIVO ADMINISTRADOR)
+// REABERTURA DE FICHA ENCERRADA (ADMIN) OU RETOMADA DE DECISÃO FUTURA (FOLLOW-UP)
 router.post('/entrevistas/:id/reabrir', async (req, res) => {
   const client = await pool.connect();
   try {
     const userInfo = extrairUsuarioRequisicao(req);
-    if (!['ADMIN', 'ADMINISTRADOR', 'SYSTEM'].includes(userInfo.papel)) {
-      return res.status(403).json({
-        error: 'Acesso negado: apenas usuários com perfil Administrador podem reabrir uma ficha encerrada.'
-      });
-    }
+    const isAdminUser = ['ADMIN', 'ADMINISTRADOR', 'SYSTEM'].includes(userInfo.papel);
 
     const id = Number(req.params.id);
-    const motivo = String(req.body?.motivo || 'Reaberta pelo Administrador para revisão/ajuste').trim();
+    const motivo = String(req.body?.motivo || 'Reaberta para revisão/atendimento').trim();
 
     await client.query('BEGIN');
     await client.query("SET LOCAL app.user_role = 'SYSTEM'");
 
     const { rows: baseRows } = await client.query(
-      `SELECT id, turma_id, empresa, COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), '')) AS doc_cnpj
+      `SELECT id, turma_id, empresa, etapa_funil, membro_giants, origem,
+              COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), '')) AS doc_cnpj
        FROM fichas WHERE id = $1 FOR UPDATE`,
       [id]
     );
@@ -255,6 +252,18 @@ router.post('/entrevistas/:id/reabrir', async (req, res) => {
     }
 
     const base = baseRows[0];
+    const ehDecisaoFutura = String(base.etapa_funil || '').trim().toLowerCase() === 'decisao_futura';
+
+    if (!isAdminUser && !ehDecisaoFutura) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        error: 'Acesso negado: apenas usuários com perfil Administrador podem reabrir uma ficha já enviada ao Financeiro ou recusada.'
+      });
+    }
+
+    const ehGiants =
+      Boolean(base.membro_giants) ||
+      String(base.origem || '').toUpperCase().includes('GIAN');
     const cnpjLimpo = String(base.doc_cnpj || '').replace(/\D/g, '');
     const empNorm = String(base.empresa || '').trim().toLowerCase();
 
@@ -268,20 +277,34 @@ router.post('/entrevistas/:id/reabrir', async (req, res) => {
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $3
           OR (
-            turma_id = $4
+            $7::boolean = false
+            AND COALESCE(membro_giants, false) = false
+            AND turma_id = $4
             AND (
-              ($5 <> '' AND LENGTH($5) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $5)
+              ($5 <> '' AND LENGTH($5) = 14 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '[^0-9]', '', 'g') = $5)
               OR ($5 = '' AND $6 <> '' AND $6 <> 'empresa sga' AND LOWER(TRIM(COALESCE(empresa, ''))) = $6)
             )
           )
        RETURNING *`,
-      [userInfo.id, motivo, id, base.turma_id, cnpjLimpo, empNorm]
+      [userInfo.id, motivo, id, base.turma_id, cnpjLimpo, empNorm, ehGiants]
     );
+
+    await registrarAuditoria(client, {
+      turmaId: base.turma_id || 1491,
+      fichaId: id,
+      empresa: base.empresa,
+      cnpj: base.doc_cnpj || null,
+      acao: ehDecisaoFutura && !isAdminUser ? 'RETOMADA_DECISAO_FUTURA' : 'REABERTURA_FICHA_ADMIN',
+      detalhes: motivo,
+      req
+    });
 
     await client.query('COMMIT');
     res.json({
       sucesso: true,
-      mensagem: 'Ficha reaberta com sucesso pelo Administrador.',
+      mensagem: ehDecisaoFutura
+        ? 'Atendimento de Decisão Futura retomado com sucesso.'
+        : 'Ficha reaberta com sucesso pelo Administrador.',
       ficha: rows.find((r) => Number(r.id) === id) || rows[0]
     });
   } catch (err) {

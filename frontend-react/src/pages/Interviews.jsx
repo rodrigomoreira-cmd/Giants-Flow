@@ -44,6 +44,7 @@ export default function Interviews() {
   const [modalReabrirEmpresa, setModalReabrirEmpresa] = useState(null);
   const [motivoReabrir, setMotivoReabrir] = useState('');
   const [reabrindo, setReabrindo] = useState(false);
+  const [retomandoId, setRetomandoId] = useState(null);
 
   const sessaoOperador = (() => {
     try {
@@ -99,6 +100,7 @@ export default function Interviews() {
             String(cliRef?.origem || '').toUpperCase().includes('GIAN');
 
           if (isGiants) return;
+          if (cliRef?.ficha_fechada) return;
 
           const cnpjReal = cliRef?.cnpj || cliRef?.cpf_cnpj || '';
           const empresaRealTmp = cliRef?.empresa || empresa;
@@ -147,9 +149,10 @@ export default function Interviews() {
       listaClientes.forEach((c) => {
         if (c.membro_giants) return;
         if (isAprovadaOuConcluida(c)) return;
+        const etapaNorm = String(c.etapa_funil || '').trim().toLowerCase();
         const fechada =
           Boolean(c.ficha_fechada) ||
-          ['aguardando_aprovacao', 'reprovado'].includes(String(c.etapa_funil || '').toLowerCase());
+          ['aguardando_aprovacao', 'decisao_futura', 'nao_fechou', 'reprovado', 'reprovada'].includes(etapaNorm);
         if (!fechada) return;
 
         const cnpjReal = c.cnpj || c.cpf_cnpj || '';
@@ -223,9 +226,44 @@ export default function Interviews() {
     }
   };
 
+  const isDecisaoFuturaItem = (s) =>
+    String(s?.etapa || '').trim().toLowerCase() === 'decisao_futura';
+
+  const isNaoFechouItem = (s) =>
+    ['reprovado', 'reprovada', 'nao_fechou', 'sem_interesse'].includes(
+      String(s?.etapa || '').trim().toLowerCase()
+    );
+
+  const isAguardandoFinItem = (s) =>
+    Boolean(s?.fichaFechada) && !isDecisaoFuturaItem(s) && !isNaoFechouItem(s);
+
+  const retomarDecisaoFutura = async (s) => {
+    try {
+      setRetomandoId(s.id);
+      await api.post(`/entrevistas/${s.id}/reabrir`, {
+        motivo: 'Retomada de atendimento (Decisão Futura / Follow-up)'
+      });
+      navigate(`/interviews/${s.id}/edit`);
+    } catch (err) {
+      setErro(`Erro ao retomar atendimento: ${err.message}`);
+    } finally {
+      setRetomandoId(null);
+    }
+  };
+
+  const contadoresAbas = {
+    ATIVAS: sessoes.filter((s) => !s.fichaFechada).length,
+    DECISAO_FUTURA: sessoes.filter((s) => isDecisaoFuturaItem(s)).length,
+    ENCERRADAS: sessoes.filter((s) => isAguardandoFinItem(s)).length,
+    NAO_FECHOU: sessoes.filter((s) => isNaoFechouItem(s)).length,
+    TODAS: sessoes.length
+  };
+
   const sessoesFiltradas = sessoes.filter((s) => {
     if (abaFiltro === 'ATIVAS' && s.fichaFechada) return false;
-    if (abaFiltro === 'ENCERRADAS' && !s.fichaFechada) return false;
+    if (abaFiltro === 'DECISAO_FUTURA' && !isDecisaoFuturaItem(s)) return false;
+    if (abaFiltro === 'ENCERRADAS' && !isAguardandoFinItem(s)) return false;
+    if (abaFiltro === 'NAO_FECHOU' && !isNaoFechouItem(s)) return false;
 
     const q = busca.toLowerCase();
     const matchSocio =
@@ -294,27 +332,48 @@ export default function Interviews() {
         <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: '0.3rem', background: '#f1f5f9', padding: '0.25rem', borderRadius: '10px' }}>
             {[
-              { id: 'ATIVAS', label: 'Na Mesa (Em Entrevista)' },
-              { id: 'ENCERRADAS', label: 'Aguardando Financeiro' },
-              { id: 'TODAS', label: 'Todas' }
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setAbaFiltro(tab.id)}
-                style={{
-                  border: 'none',
-                  background: abaFiltro === tab.id ? '#ff5722' : 'transparent',
-                  color: abaFiltro === tab.id ? '#fff' : '#64748b',
-                  padding: '0.45rem 0.85rem',
-                  borderRadius: '8px',
-                  fontWeight: '700',
-                  fontSize: '0.78rem',
-                  cursor: 'pointer'
-                }}
-              >
-                {tab.label}
-              </button>
-            ))}
+              { id: 'ATIVAS', label: 'Na Mesa (Em Entrevista)', corAtiva: '#ff5722' },
+              { id: 'DECISAO_FUTURA', label: 'Decisão Futura (Follow-up)', corAtiva: '#2563eb' },
+              { id: 'ENCERRADAS', label: 'Aguardando Financeiro', corAtiva: '#d97706' },
+              { id: 'NAO_FECHOU', label: 'Não Fechou', corAtiva: '#475569' },
+              { id: 'TODAS', label: 'Todas', corAtiva: '#0f172a' }
+            ].map((tab) => {
+              const ativo = abaFiltro === tab.id;
+              const qtd = contadoresAbas[tab.id] ?? 0;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setAbaFiltro(tab.id)}
+                  style={{
+                    border: 'none',
+                    background: ativo ? tab.corAtiva : 'transparent',
+                    color: ativo ? '#fff' : '#64748b',
+                    padding: '0.45rem 0.85rem',
+                    borderRadius: '8px',
+                    fontWeight: '700',
+                    fontSize: '0.78rem',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem'
+                  }}
+                >
+                  <span>{tab.label}</span>
+                  <span
+                    style={{
+                      background: ativo ? 'rgba(255,255,255,0.22)' : '#e2e8f0',
+                      color: ativo ? '#fff' : '#334155',
+                      padding: '0.08rem 0.42rem',
+                      borderRadius: '999px',
+                      fontSize: '0.7rem',
+                      fontWeight: '800'
+                    }}
+                  >
+                    {qtd}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           <button
@@ -419,13 +478,21 @@ export default function Interviews() {
                       </div>
                     </td>
                     <td style={{ padding: '1rem' }}>
-                      {s.fichaFechada ? (
-                        <span style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '0.22rem 0.55rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                          🔒 Fechada • {s.etapa}
+                      {isDecisaoFuturaItem(s) ? (
+                        <span style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '0.24rem 0.6rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                          ⏳ Decisão Futura (Follow-up)
+                        </span>
+                      ) : isNaoFechouItem(s) ? (
+                        <span style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '0.24rem 0.6rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                          ✕ Não Fechou
+                        </span>
+                      ) : s.fichaFechada ? (
+                        <span style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '0.24rem 0.6rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                          🔒 Aguardando Financeiro
                         </span>
                       ) : (
-                        <span style={{ background: '#eff6ff', color: '#2563eb', padding: '0.22rem 0.55rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '700' }}>
-                          {s.etapa}
+                        <span style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '0.24rem 0.6rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                          ● Em Entrevista
                         </span>
                       )}
                     </td>
@@ -445,7 +512,31 @@ export default function Interviews() {
                     </td>
                     <td style={{ padding: '1rem', textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '0.45rem', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
-                        {s.fichaFechada && isAdmin && (
+                        {isDecisaoFuturaItem(s) && (
+                          <button
+                            disabled={retomandoId === s.id}
+                            onClick={() => retomarDecisaoFutura(s)}
+                            title="Retomar negociação da ficha em Decisão Futura"
+                            style={{
+                              background: '#2563eb',
+                              color: '#fff',
+                              border: 'none',
+                              padding: '0.42rem 0.78rem',
+                              borderRadius: '6px',
+                              fontSize: '0.76rem',
+                              fontWeight: '700',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.3rem'
+                            }}
+                          >
+                            <span className="material-symbols-outlined" style={{ fontSize: '0.95rem' }}>play_arrow</span>
+                            {retomandoId === s.id ? 'Retomando...' : 'Retomar Atendimento'}
+                          </button>
+                        )}
+
+                        {s.fichaFechada && !isDecisaoFuturaItem(s) && isAdmin && (
                           <button
                             onClick={() => abrirModalReabertura(s)}
                             title="Reabrir ficha encerrada (Administrador)"
