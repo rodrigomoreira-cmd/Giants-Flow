@@ -67,6 +67,19 @@ async function main() {
       }
     }
 
+    // Clona os registros reais da tabela produtos (evita erro de colunas NOT NULL específicas)
+    try {
+      let produtosData = '';
+      try {
+        produtosData = runCmd('docker compose exec -T postgres pg_dump -U admin_local -d evento_operacao --data-only --table=public.produtos --column-inserts --no-owner');
+      } catch (_) {
+        produtosData = runCmd('docker compose exec -T postgres pg_dump -U postgres -d eventfunnel --data-only --table=public.produtos --column-inserts --no-owner');
+      }
+      if (produtosData && produtosData.trim()) {
+        execPsql(produtosData);
+      }
+    } catch (_) {}
+
     // Concede privilégios DML e sequences para app_evento_user (sujeito às políticas RLS) e semeia turma/produtos base
     execPsql(`
       GRANT USAGE, CREATE ON SCHEMA public TO app_evento_user;
