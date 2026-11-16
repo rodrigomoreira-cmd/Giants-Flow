@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import { TurmaProvider } from './context/TurmaContext';
+import { MenuProvider } from './context/MenuContext';
 import { SystemModalProvider } from './context/ModalContext';
 
 import Login from './pages/Login';
@@ -55,6 +56,7 @@ export default function App() {
     <BrowserRouter>
       <TurmaProvider>
         <SystemModalProvider>
+        <MenuProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
 
@@ -84,7 +86,8 @@ export default function App() {
 
           <Route path="*" element={<Navigate to="/home" replace />} />
         </Routes>
-              </SystemModalProvider>
+                      </MenuProvider>
+        </SystemModalProvider>
       </TurmaProvider>
     </BrowserRouter>
   );

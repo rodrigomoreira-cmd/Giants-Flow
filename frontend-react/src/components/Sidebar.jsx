@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { Link, useLocation } from 'react-router-dom';
+import { useMenu } from '../context/MenuContext';
 
 export default function Sidebar() {
   const location = useLocation();
@@ -12,6 +13,8 @@ export default function Sidebar() {
   const papel = (usuario.papel || sessao?.papel || 'ADMIN').toUpperCase();
   const isAdmin = papel === 'ADMIN';
   const isAuditor = papel === 'ADMIN' || papel === 'FINANCEIRO';
+
+  const { isMenuOpen, closeMenu } = useMenu();
 
   const menuGeral = [
     { label: 'Início', path: '/home', icon: 'home' },
@@ -90,7 +93,9 @@ export default function Sidebar() {
   }, []);
 
   return (
-    <aside style={{
+    <>
+      <div className={`sidebar-overlay ${isMenuOpen ? 'open' : ''}`} onClick={closeMenu}></div>
+    <aside className={`sidebar-container ${isMenuOpen ? 'open' : ''}`} style={{
       width: '240px',
       minWidth: '240px',
       background: '#fff',
@@ -124,7 +129,7 @@ export default function Sidebar() {
           </span>
           <nav>
             {menuGeral.map((item) => (
-              <Link key={item.path} to={item.path} style={linkEstilo(item.path)}>
+              <Link key={item.path} to={item.path} onClick={closeMenu} style={linkEstilo(item.path)}>
                 <span className="material-symbols-outlined" style={{ fontSize: '1.15rem' }}>{item.icon}</span>
                 {item.label}
               </Link>
@@ -140,7 +145,7 @@ export default function Sidebar() {
             </span>
             <nav>
               {menuAdmin.filter((item) => isAdmin || item.path === '/admin/audit').map((item) => (
-                <Link key={item.path} to={item.path} style={linkEstilo(item.path)}>
+                <Link key={item.path} to={item.path} onClick={closeMenu} style={linkEstilo(item.path)}>
                   <span className="material-symbols-outlined" style={{ fontSize: '1.15rem' }}>{item.icon}</span>
                   {item.label}
                 </Link>
@@ -163,7 +168,7 @@ export default function Sidebar() {
           </div>
 
           <button
-            onClick={handleLogout}
+            onClick={() => { closeMenu(); handleLogout(); }}
             title="Sair do Sistema"
             style={{
               background: 'transparent',
@@ -182,5 +187,6 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   );
 }

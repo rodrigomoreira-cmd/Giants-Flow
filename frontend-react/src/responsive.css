@@ -1,0 +1,67 @@
+﻿/* Esconde o menu hamburguer no Desktop */
+.hamburger-btn {
+  display: none;
+  background: transparent;
+  border: none;
+  color: #334155;
+  cursor: pointer;
+  padding: 0.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+.hamburger-btn:hover {
+  background: #f1f5f9;
+}
+
+/* COMPORTAMENTO MOBILE */
+@media (max-width: 900px) {
+  /* Habilita o botão Hamburguer no Header */
+  .hamburger-btn {
+    display: flex !important;
+  }
+
+  /* Sidebar vira Off-canvas (desliza pela esquerda) */
+  .sidebar-container {
+    position: fixed !important;
+    left: -100%;
+    top: 0;
+    bottom: 0;
+    z-index: 9999;
+    transition: left 0.3s ease;
+    box-shadow: 4px 0 15px rgba(0,0,0,0.15);
+  }
+  .sidebar-container.open {
+    left: 0;
+  }
+
+  /* Overlay escuro atrás da sidebar no mobile */
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(2px);
+    z-index: 9998;
+  }
+  .sidebar-overlay.open {
+    display: block;
+  }
+
+  /* Faz todas as tabelas rolarem horizontalmente em telas pequenas */
+  table {
+    display: block !important;
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+  }
+
+  /* Ajustes gerais de espaçamento */
+  header {
+    padding: 0.75rem 1rem !important;
+  }
+  
+  .conteudo-pagina {
+    padding: 1rem !important;
+  }
+}

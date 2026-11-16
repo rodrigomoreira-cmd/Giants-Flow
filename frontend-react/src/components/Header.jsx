@@ -1,9 +1,11 @@
 ﻿import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTurma } from '../context/TurmaContext';
+import { useMenu } from '../context/MenuContext';
 
 export default function Header() {
   const navigate = useNavigate();
+  const { toggleMenu } = useMenu();
   const { turmasVisiveis, turmaSelecionada, turmaAtual, turmaEncerrada, isAdmin, mudarTurma, carregandoTurmas } = useTurma();
 
   return (
@@ -24,6 +26,9 @@ export default function Header() {
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
+        <button className="hamburger-btn" onClick={toggleMenu} title="Menu Principal">
+          <span className="material-symbols-outlined" style={{ fontSize: '1.5rem' }}>menu</span>
+        </button>
         <span
           style={{
             fontSize: '0.8rem',
