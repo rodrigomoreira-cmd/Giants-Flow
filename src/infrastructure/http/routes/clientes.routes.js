@@ -1,5 +1,5 @@
-const { exigirPapeis, obterPapelUsuario } = require('../middlewares/rbac');
-﻿const express = require('express');
+﻿const { exigirPapeis, obterPapelUsuario } = require('../middlewares/rbac');
+const express = require('express');
 const router = express.Router();
 const dbModule = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
@@ -55,30 +55,40 @@ router.get('/clientes', async (req, res) => {
   }
 });
 
-// 2. ALOCAÇÃO NO SALÃO DE LUNCH (MESA E ASSENTO)
+// 2. ALOCAÇÃO NO SALÃO DE LUNCH (MESA E ASSENTO COM LOCK ATÔMICO + ÍNDICE ÚNICO)
 router.patch('/clientes/:id/mesa', async (req, res) => {
   const { id } = req.params;
   const fichaId = parseInt(id, 10);
+  if (isNaN(fichaId)) {
+    return res.status(400).json({ error: 'ID do participante inválido.' });
+  }
+
   await exigirTurmaAtiva({ fichaId });
   const { mesa, assento } = req.body;
   const mesaNum = mesa !== null && mesa !== undefined && mesa !== '' ? parseInt(mesa, 10) : null;
   const assentoNum = assento !== null && assento !== undefined && assento !== '' ? parseInt(assento, 10) : null;
 
-  if (isNaN(fichaId)) {
-    return res.status(400).json({ error: 'ID do participante inválido.' });
-  }
-
   const client = await pool.connect();
+  let emTransacao = false;
   try {
     await client.query('BEGIN');
+    emTransacao = true;
+    await client.query("SET LOCAL app.user_role = 'SYSTEM'");
 
+    // Lock pessimista na ficha do participante antes de qualquer validação de elegibilidade
     const { rows: fichaRows } = await client.query(
-      'SELECT id, turma_id, nome_participante, empresa, almoco_pago, cortesia_almoco, membro_giants, etapa_funil, ficha_fechada, status_aprovacao, cashback_upgrade_90_pct, historico_produtos_elegiveis, valor_investido_pac_ae FROM fichas WHERE id = $1::integer FOR UPDATE',
+      `SELECT id, turma_id, nome_participante, empresa, origem,
+              almoco_pago, cortesia_almoco, membro_giants,
+              etapa_funil, ficha_fechada, status_aprovacao
+       FROM fichas
+       WHERE id = $1::integer
+       FOR UPDATE`,
       [fichaId]
     );
 
     if (fichaRows.length === 0) {
       await client.query('ROLLBACK');
+      emTransacao = false;
       return res.status(404).json({ error: 'Participante não encontrado no sistema.' });
     }
 
@@ -93,11 +103,13 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
         )
       ) {
         await client.query('ROLLBACK');
+        emTransacao = false;
         return res.status(403).json({
           error: 'Esta empresa já concluiu a entrevista e teve a mesa liberada. Reabra a ficha na aba Empresas caso precise realocar.'
         });
       }
 
+      // Validação executada estritamente DENTRO da transação com a linha bloqueada via FOR UPDATE
       const liberadoAlmoco =
         Boolean(fichaAtual.membro_giants) ||
         Boolean(fichaAtual.almoco_pago) ||
@@ -106,18 +118,26 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
 
       if (!liberadoAlmoco) {
         await client.query('ROLLBACK');
+        emTransacao = false;
         return res.status(403).json({
           error: 'Acesso negado: participante não possui almoço liberado (Membro GIANTS, R$ 1.000 pago ou Cortesia).'
         });
       }
 
       const { rows: ocupante } = await client.query(
-        'SELECT id, nome_participante FROM fichas WHERE mesa_alocada = $1::integer AND assento_alocado = $2::integer AND COALESCE(turma_id, 0) = COALESCE($3::integer, 0) AND id <> $4::integer FOR UPDATE',
+        `SELECT id, nome_participante
+         FROM fichas
+         WHERE mesa_alocada = $1::integer
+           AND assento_alocado = $2::integer
+           AND COALESCE(turma_id, 0) = COALESCE($3::integer, 0)
+           AND id <> $4::integer
+         FOR UPDATE`,
         [mesaNum, assentoNum, turmaId, fichaId]
       );
 
       if (ocupante.length > 0) {
         await client.query('ROLLBACK');
+        emTransacao = false;
         return res.status(409).json({
           error:
             'O assento ' +
@@ -146,21 +166,13 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
 
     const { rows } = await client.query(sqlUpdate, [mesaNum, assentoNum, fichaId]);
 
-    if (cashback !== undefined && cashback !== null && Number(clienteAtual[0]?.cashback || 0) !== Number(cashback)) {
-      await registrarAuditoria(client, {
-        fichaId: Number(id),
-        empresa: rows[0]?.empresa || clienteAtual[0]?.empresa,
-        cnpj: rows[0]?.cnpj,
-        acao: 'EDICAO_CASHBACK',
-        detalhes: `Cashback alterado de R$ ${Number(clienteAtual[0]?.cashback || 0).toFixed(2)} para R$ ${Number(cashback).toFixed(2)}`,
-        req
-      });
-    }
-
     await client.query('COMMIT');
+    emTransacao = false;
     res.json(rows[0]);
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (emTransacao) {
+      await client.query('ROLLBACK');
+    }
     console.error('ERRO ALOCAÇÃO SALÃO DE LUNCH:', err);
     if (err.code === '23505') {
       return res.status(409).json({
@@ -176,8 +188,13 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
 // 3. VALIDADOR DE ALMOÇO (PAGO R$ 1.000, CORTESIA DEBITANDO R$ 1.000 OU GIANTS)
 router.patch('/clientes/:id/almoco', async (req, res) => {
   const client = await pool.connect();
+  let emTransacao = false;
   try {
     const fichaId = parseInt(req.params.id, 10);
+    if (isNaN(fichaId)) {
+      return res.status(400).json({ error: 'ID da ficha inválido.' });
+    }
+
     await exigirTurmaAtiva({ fichaId });
     const { tipo, cv_cartao, participantes_ids, todos_empresa_ids } = req.body;
     const papelReqAlmoco = obterPapelUsuario(req);
@@ -187,13 +204,10 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
       });
     }
 
-    if (isNaN(fichaId)) {
-      return res.status(400).json({ error: 'ID da ficha inválido.' });
-    }
-
     const cv = (cv_cartao || '').trim() || null;
 
     await client.query('BEGIN');
+    emTransacao = true;
     await client.query("SET LOCAL app.user_role = 'SYSTEM'");
 
     const { rows: baseRows } = await client.query(
@@ -203,6 +217,7 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
 
     if (baseRows.length === 0) {
       await client.query('ROLLBACK');
+      emTransacao = false;
       return res.status(404).json({ error: 'Empresa/participante não encontrado.' });
     }
 
@@ -214,6 +229,7 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
       ? todos_empresa_ids.map((x) => parseInt(x, 10)).filter((n) => !isNaN(n))
       : [];
 
+    // Lock pessimista em todos os sócios da mesma empresa/CNPJ para serializar alterações concorrentes
     const { rows: sociosEmpresa } = await client.query(
       `SELECT id, membro_giants
        FROM fichas
@@ -225,7 +241,8 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
            OR ($4::text <> '' AND LENGTH($4::text) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\\D', '', 'g') = $4::text)
            OR ($5::text <> '' AND $5::text NOT IN ('empresa sga', 'sem empresa', 'empresa não informada', 'empresa nao informada') AND LOWER(TRIM(COALESCE(empresa, ''))) = $5::text)
          )
-       ORDER BY id ASC`,
+       ORDER BY id ASC
+       FOR UPDATE`,
       [base.turma_id, fichaId, idsEnviados, cnpjLimpo, empNorm]
     );
 
@@ -252,7 +269,6 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
         [todosIds, idsParticipantes, titularPaganteId, cv]
       );
     } else if (tipo === 'cortesia') {
-      // Debita os R$ 1.000,00 (valor_almoco = 0 e almoco_pago = false), garantindo almoço e mesa para os sócios selecionados
       await client.query(
         `UPDATE fichas
          SET almoco_pago = false,
@@ -311,21 +327,41 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
     );
 
     await client.query('COMMIT');
+    emTransacao = false;
     res.json(atualizadas[0] || { sucesso: true, atualizadas });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (emTransacao) {
+      await client.query('ROLLBACK');
+    }
     res.status(500).json({ error: 'Erro ao validar almoço: ' + err.message });
   } finally {
     client.release();
   }
 });
 
-// 4. ATUALIZAÇÃO RÁPIDA DE ALMOÇO/CORTESIA (ATALHO DO SALÃO DE LUNCH)
+// 4. ATUALIZAÇÃO RÁPIDA DE ALMOÇO/CORTESIA (ATALHO DO SALÃO DE LUNCH COM LOCK TRANSACIONAL E RBAC)
 router.patch('/clientes/:id', async (req, res) => {
+  const client = await pool.connect();
+  let emTransacao = false;
   try {
-    await exigirTurmaAtiva({ fichaId: req.params.id });
+    const fichaId = parseInt(req.params.id, 10);
+    if (isNaN(fichaId)) {
+      return res.status(400).json({ error: 'ID da ficha inválido.' });
+    }
+
+    await exigirTurmaAtiva({ fichaId });
     const { almoco_pago, cortesia_almoco, cortesia, valor_almoco } = req.body;
     const cortesiaFinal = cortesia_almoco !== undefined ? cortesia_almoco : cortesia;
+
+    if (cortesiaFinal === true) {
+      const papelReq = obterPapelUsuario(req);
+      if (!['ADMIN', 'FINANCEIRO'].includes(papelReq)) {
+        return res.status(403).json({
+          error: 'Acesso negado (RBAC): somente perfis Administrador ou Financeiro podem conceder cortesia de almoço.'
+        });
+      }
+    }
+
     const pagoFinal = cortesiaFinal === true && almoco_pago === undefined ? false : almoco_pago;
     const valorFinal =
       cortesiaFinal === true && valor_almoco === undefined
@@ -334,19 +370,50 @@ router.patch('/clientes/:id', async (req, res) => {
         ? 1000
         : valor_almoco;
 
-    const { rows } = await pool.query(
+    await client.query('BEGIN');
+    emTransacao = true;
+    await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+
+    const { rows: atualRows } = await client.query(
+      'SELECT id, membro_giants, almoco_pago, cortesia_almoco FROM fichas WHERE id = $1::int FOR UPDATE',
+      [fichaId]
+    );
+
+    if (atualRows.length === 0) {
+      await client.query('ROLLBACK');
+      emTransacao = false;
+      return res.status(404).json({ error: 'Participante não encontrado.' });
+    }
+
+    const atual = atualRows[0];
+    const novoPago = pagoFinal !== undefined ? Boolean(pagoFinal) : Boolean(atual.almoco_pago);
+    const novaCortesia = cortesiaFinal !== undefined ? Boolean(cortesiaFinal) : Boolean(atual.cortesia_almoco);
+    const permaneceElegivel = Boolean(atual.membro_giants) || novoPago || novaCortesia;
+
+    const { rows } = await client.query(
       `UPDATE fichas
        SET almoco_pago = COALESCE($1, almoco_pago),
            cortesia_almoco = COALESCE($2, cortesia_almoco),
            valor_almoco = COALESCE($3, valor_almoco),
            cv_cartao = CASE WHEN $2 = true THEN NULL ELSE cv_cartao END,
+           mesa_alocada = CASE WHEN $5::boolean THEN mesa_alocada ELSE NULL END,
+           assento_alocado = CASE WHEN $5::boolean THEN assento_alocado ELSE NULL END,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $4 RETURNING *`,
-      [pagoFinal, cortesiaFinal, valorFinal, req.params.id]
+       WHERE id = $4::int
+       RETURNING *`,
+      [pagoFinal, cortesiaFinal, valorFinal, fichaId, permaneceElegivel]
     );
+
+    await client.query('COMMIT');
+    emTransacao = false;
     res.json(rows[0] || { sucesso: true });
   } catch (err) {
+    if (emTransacao) {
+      await client.query('ROLLBACK');
+    }
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
