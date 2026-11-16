@@ -65,3 +65,57 @@
     padding: 1rem !important;
   }
 }
+
+
+/* ========================================================
+   TRAVA GLOBAL ANTI-SCROLL LATERAL E AJUSTE DE GRIDS/CARDS
+   ======================================================== */
+
+html, body, #root {
+  max-width: 100vw !important;
+  overflow-x: hidden !important;
+  margin: 0;
+  padding: 0;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box !important;
+}
+
+@media (max-width: 900px) {
+  /* Impede que paddings exagerados estiquem a tela no mobile */
+  main > div > div {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+    max-width: 100vw !important;
+  }
+
+  /* Converte elementos de Grid fixos em colunas empilhadas */
+  div[style*="grid-template-columns"] {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1rem !important;
+  }
+
+  /* Permite que Flexbox (lado a lado) quebre a linha se nÃ£o couber */
+  div[style*="display: flex"] {
+    flex-wrap: wrap;
+  }
+
+  /* Remove larguras mÃ­nimas fixadas em pixels que quebram a tela */
+  div[style*="min-width: 3"], div[style*="min-width: 4"], 
+  div[style*="min-width: 5"], div[style*="min-width: 6"], 
+  div[style*="min-width: 7"], div[style*="min-width: 8"], 
+  div[style*="min-width: 9"] {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  /* Impede que modais e formulÃ¡rios ultrapassem 95% da tela */
+  div[style*="max-width: 800px"], div[style*="max-width: 600px"], 
+  div[style*="max-width: 700px"] {
+    max-width: 95vw !important;
+    width: 100% !important;
+    margin: 0 auto;
+  }
+}

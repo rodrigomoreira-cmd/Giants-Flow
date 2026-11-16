@@ -35,7 +35,7 @@ function LayoutComSidebar({ children }) {
       <Sidebar />
       <main style={{ flex: 1, height: '100vh', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', minWidth: 0, overflow: 'hidden' }}>
         <Header />
-        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '100vw' }}>
           <Suspense
             fallback={
               <div style={{ padding: '2.5rem', textAlign: 'center', color: '#64748b', fontWeight: 700, fontSize: '0.92rem' }}>
