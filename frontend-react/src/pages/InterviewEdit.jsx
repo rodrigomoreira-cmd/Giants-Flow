@@ -167,7 +167,7 @@ export default function InterviewEdit() {
             cnpj: cnpjTitular,
             nome_fantasia: clienteEncontrado.nome_fantasia || empTitular,
             nome_empresario: nomeTitular,
-            telefone: clienteEncontrado.telefone || clienteEncontrado.whatsapp || '',
+            telefone: clienteEncontrado.telefone || clienteEncontrado.whatsapp || clienteEncontrado.celular || '',
             email: clienteEncontrado.email || '',
             almoco_pago: temAlmocoPago,
             cashback_almoco_cnpj: cashbackAlmocoCnpj,
@@ -755,6 +755,7 @@ export default function InterviewEdit() {
                         type="text"
                         value={ficha.razao_social}
                         onChange={(e) => atualizarCampo('razao_social', e.target.value)}
+                        disabled={isFechada}
                         style={{ width: '100%', padding: '0.6rem 0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontWeight: '600' }}
                       />
                     </div>
@@ -764,6 +765,7 @@ export default function InterviewEdit() {
                         type="text"
                         value={ficha.cnpj}
                         onChange={(e) => atualizarCampo('cnpj', e.target.value)}
+                        disabled={isFechada}
                         placeholder="00.000.000/0001-00"
                         style={{ width: '100%', padding: '0.6rem 0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontFamily: 'monospace' }}
                       />
@@ -778,6 +780,7 @@ export default function InterviewEdit() {
                           atualizarCampo('nome_empresario', novoNome);
                           setSociosLista((prev) => prev.map((s) => (s.titular ? { ...s, nome: novoNome } : s)));
                         }}
+                        disabled={isFechada}
                         style={{ width: '100%', padding: '0.6rem 0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
                       />
                     </div>
@@ -787,6 +790,7 @@ export default function InterviewEdit() {
                         type="text"
                         value={ficha.telefone}
                         onChange={(e) => atualizarCampo('telefone', e.target.value)}
+                        disabled={isFechada}
                         placeholder="(11) 99999-9999"
                         style={{ width: '100%', padding: '0.6rem 0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
                       />
@@ -833,6 +837,7 @@ export default function InterviewEdit() {
                             <input
                               type="checkbox"
                               checked={Boolean(socio.entraNoContrato)}
+                              disabled={isFechada}
                               onChange={() => alternarSocioContrato(idx)}
                               style={{ width: '17px', height: '17px', accentColor: '#ff5722', cursor: 'pointer' }}
                             />
@@ -857,6 +862,7 @@ export default function InterviewEdit() {
                             {socio.externo && (
                               <button
                                 type="button"
+                                disabled={isFechada}
                                 onClick={() => removerSocioExterno(idx)}
                                 style={{ background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', padding: '0.25rem 0.5rem', fontSize: '0.72rem', fontWeight: '700', cursor: 'pointer' }}
                               >
@@ -1565,6 +1571,10 @@ export default function InterviewEdit() {
                     ? '2px solid #22c55e'
                     : '2px solid #f59e0b'
                   : 'none';
+
+                if (isFechada && isAdmin) {
+                  return null;
+                }
 
                 const iconeBotao = isFechada ? 'lock' : 'check_circle';
 
