@@ -69,7 +69,7 @@ async function main() {
 
     // Concede privilégios DML e sequences para app_evento_user (sujeito às políticas RLS) e semeia turma/produtos base
     execPsql(`
-      GRANT USAGE ON SCHEMA public TO app_evento_user;
+      GRANT USAGE, CREATE ON SCHEMA public TO app_evento_user;
       GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_evento_user;
       GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO app_evento_user;
       ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_evento_user;
@@ -87,6 +87,12 @@ async function main() {
         (2, 'AE', 99000.00, true),
         (3, 'GIANTS Individual', 279000.00, true)
       ON CONFLICT (id) DO NOTHING;
+
+      INSERT INTO usuarios (id, nome, email, senha, papel, pin, ativo)
+      VALUES (1, 'Admin Teste Isolado', 'admin.teste@sistema.local', '$2b$10$abcdefghijklmnopqrstuv', 'admin', '1234', true)
+      ON CONFLICT (id) DO NOTHING;
+
+      SELECT setval(pg_get_serial_sequence('usuarios', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM usuarios), 1), 1));
     `);
 
     console.log('🚀 [TEST:ISOLATED] Executando suíte completa contra evento_test (com RLS ativo)...\n');
