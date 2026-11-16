@@ -1,3 +1,4 @@
+const { exigirPapeis } = require('../middlewares/rbac');
 ﻿const express = require('express');
 const router = express.Router();
 const dbModule = require('../../database/connection');
@@ -102,7 +103,7 @@ router.get('/auxiliares', async (req, res) => {
 });
 
 // ESCALA DE ENTREVISTADORES NA MESA (PATCH /mesas/:id/entrevistadores)
-router.patch('/mesas/:id/entrevistadores', async (req, res) => {
+router.patch('/mesas/:id/entrevistadores', exigirPapeis('ADMIN', 'FINANCEIRO', 'OPERADOR'), async (req, res) => {
   try {
     let ids = req.body.entrevistadores_ids || [];
     if (!Array.isArray(ids)) ids = ids ? [ids] : [];
@@ -127,7 +128,7 @@ router.patch('/mesas/:id/entrevistadores', async (req, res) => {
 });
 
 
-router.delete('/mesas/cadeiras/:id', async (req, res) => {
+router.delete('/mesas/cadeiras/:id', exigirPapeis('ADMIN', 'FINANCEIRO', 'OPERADOR'), async (req, res) => {
   try {
     const { rows } = await pool.query(
       "UPDATE fichas SET mesa_alocada = NULL, assento_alocado = NULL WHERE id = $1 RETURNING *",
@@ -140,7 +141,7 @@ router.delete('/mesas/cadeiras/:id', async (req, res) => {
 });
 
 // CRIAÇÃO REAL DE MESAS COM PERSISTÊNCIA NO POSTGRESQL
-router.post('/mesas', async (req, res) => {
+router.post('/mesas', exigirPapeis('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { numero, capacidade_total } = req.body;
@@ -172,7 +173,7 @@ router.post('/mesas', async (req, res) => {
 });
 
 // ALTERAÇÃO DE CAPACIDADE DE ASSENTOS DA MESA
-router.patch('/mesas/:id', async (req, res) => {
+router.patch('/mesas/:id', exigirPapeis('ADMIN'), async (req, res) => {
   try {
     const { id } = req.params;
     const { capacidade_total } = req.body;
@@ -193,7 +194,7 @@ router.patch('/mesas/:id', async (req, res) => {
 });
 
 // EXCLUSÃO DE MESA E DESALOCAÇÃO DE PARTICIPANTES
-router.delete('/mesas/:id', async (req, res) => {
+router.delete('/mesas/:id', exigirPapeis('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
@@ -223,7 +224,7 @@ router.delete('/mesas/:id', async (req, res) => {
 
 
 // LIBERAÇÃO EM LOTE DE TODOS OS MEMBROS GIANTS DAS MESAS (PÓS-ALMOÇO)
-router.post('/mesas/liberar-giants', async (req, res) => {
+router.post('/mesas/liberar-giants', exigirPapeis('ADMIN', 'FINANCEIRO', 'OPERADOR'), async (req, res) => {
   const client = await pool.connect();
   try {
     const rawTurma = req.body?.turmaId || req.body?.turma_id || req.query?.turmaId || '';

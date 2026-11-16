@@ -1,3 +1,4 @@
+const { exigirPapeis, obterPapelUsuario } = require('../middlewares/rbac');
 ﻿const express = require('express');
 const router = express.Router();
 const dbModule = require('../../database/connection');
@@ -179,6 +180,12 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
     const fichaId = parseInt(req.params.id, 10);
     await exigirTurmaAtiva({ fichaId });
     const { tipo, cv_cartao, participantes_ids, todos_empresa_ids } = req.body;
+    const papelReqAlmoco = obterPapelUsuario(req);
+    if (String(tipo || '').trim().toLowerCase() === 'cortesia' && !['ADMIN', 'FINANCEIRO'].includes(papelReqAlmoco)) {
+      return res.status(403).json({
+        error: 'Acesso negado (RBAC): somente perfis Administrador ou Financeiro podem conceder cortesia de almoço.'
+      });
+    }
 
     if (isNaN(fichaId)) {
       return res.status(400).json({ error: 'ID da ficha inválido.' });
@@ -376,6 +383,19 @@ router.put('/clientes/:id', async (req, res) => {
       return res.status(404).json({ error: 'Cliente não encontrado.' });
     }
 
+    if (cashback !== undefined && cashback !== null) {
+      const cashbackAnterior = Number(clienteAtual[0].cashback || 0);
+      if (Math.abs(cashback - cashbackAnterior) > 0.009) {
+        const papelReqCashback = obterPapelUsuario(req);
+        if (!['ADMIN', 'FINANCEIRO'].includes(papelReqCashback)) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({
+            error: 'Acesso negado (RBAC): somente perfis Administrador ou Financeiro podem alterar o valor de cashback.'
+          });
+        }
+      }
+    }
+
     const { rows } = await client.query(
       `UPDATE fichas
        SET empresa = COALESCE($1, empresa),
@@ -401,7 +421,7 @@ router.put('/clientes/:id', async (req, res) => {
 });
 
 // 6. SINCRONIZAÇÃO EM LOTE DE CASHBACK DE UPGRADE POR CNPJ
-router.post('/clientes/sincronizar-cashback-cnpj', async (req, res) => {
+router.post('/clientes/sincronizar-cashback-cnpj', exigirPapeis('ADMIN', 'FINANCEIRO'), async (req, res) => {
   const client = await pool.connect();
   try {
     const registros = Array.isArray(req.body) ? req.body : req.body.registros || [];

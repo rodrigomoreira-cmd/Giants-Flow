@@ -1,3 +1,4 @@
+const { exigirPapeis } = require('../middlewares/rbac');
 
 function sanitizarEmpresaLgpd(valor) {
   if (!valor) return valor;
@@ -238,7 +239,7 @@ router.post('/propostas', async (req, res) => {
 });
 
 // APROVAÇÃO / VENDA DE PROPOSTA (UNIFICADA POR EMPRESA/CNPJ)
-router.patch('/propostas/:id/vender', async (req, res) => {
+router.patch('/propostas/:id/vender', exigirPapeis('ADMIN', 'FINANCEIRO'), async (req, res) => {
   const client = await pool.connect();
   try {
     const id = Number(req.params.id);
@@ -383,7 +384,7 @@ router.get('/financeiro/propostas', async (req, res) => {
 });
 
 // DELIBERAÇÃO FINANCEIRA + ANÁLISE DE CRÉDITO / STATUS SERASA (PROPAGADA PARA TODOS OS SÓCIOS DO CNPJ)
-router.post('/financeiro/analisar', async (req, res) => {
+router.post('/financeiro/analisar', exigirPapeis('ADMIN', 'FINANCEIRO'), async (req, res) => {
   const client = await pool.connect();
   try {
     const {

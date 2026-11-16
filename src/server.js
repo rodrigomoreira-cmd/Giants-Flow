@@ -91,6 +91,11 @@ app.use('/api', async (req, res, next) => {
     }
   }
 
+  const rotasPublicasApi = ['/auth/login', '/health'];
+  if (!req.usuario && !rotasPublicasApi.includes(req.path)) {
+    return res.status(401).json({ error: 'Autenticação obrigatória. Faça login para acessar a API.' });
+  }
+
   rlsStorage.run({ userId, userRole }, () => {
     next();
   });

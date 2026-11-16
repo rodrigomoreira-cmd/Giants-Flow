@@ -1,3 +1,4 @@
+const { exigirPapeis } = require('../middlewares/rbac');
 ﻿const express = require('express');
 const router = express.Router();
 const dbModule = require('../../database/connection');
@@ -317,7 +318,7 @@ router.post('/entrevistas/:id/reabrir', async (req, res) => {
 
 
 // REABRIR FICHA DA EMPRESA (LIBERA EDIÇÃO APÓS FECHAMENTO / APROVAÇÃO)
-router.post('/entrevistas/reabrir', async (req, res) => {
+router.post('/entrevistas/reabrir', exigirPapeis('ADMIN'), async (req, res) => {
   await exigirTurmaAtiva({ fichaId: req.body?.fichaId || null, turmaId: req.body?.turmaId || null });
   await registrarAuditoria(pool, {
     turmaId: req.body?.turmaId || 1491,
@@ -328,10 +329,6 @@ router.post('/entrevistas/reabrir', async (req, res) => {
     detalhes: req.body?.motivo || 'Reabertura administrativa da ficha encerrada',
     req
   });
-  const roleHeader = String(req.user?.papel || req.user?.role || req.user?.perfil || req.body?.papel || req.headers['x-user-role'] || '').trim().toLowerCase();
-  if (roleHeader && !['admin', 'administrador', 'superadmin', 'master', 'system', 'diretor'].includes(roleHeader)) {
-    return res.status(403).json({ error: 'Acesso negado: somente administradores podem reabrir fichas encerradas.' });
-  }
   const client = await pool.connect();
   try {
     const fichaId = Number(req.body.fichaId || req.body.id || 0);

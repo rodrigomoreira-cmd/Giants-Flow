@@ -1,9 +1,10 @@
+const { exigirPapeis } = require('../middlewares/rbac');
 const express = require('express');
 const router = express.Router();
 const dbModule = require('../../database/connection');
 const pool = dbModule.pool || dbModule;
 
-router.get('/', async (req, res) => {
+router.get('/', exigirPapeis('ADMIN', 'FINANCEIRO'), async (req, res) => {
   const papel = String(req.usuario?.papel || '').toUpperCase();
   if (!['ADMIN', 'FINANCEIRO'].includes(papel)) {
     return res.status(403).json({ error: 'Acesso restrito a perfis ADMIN ou FINANCEIRO.' });

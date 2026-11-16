@@ -1,3 +1,4 @@
+const { exigirPapeis } = require('../middlewares/rbac');
 const express = require('express');
 const router = express.Router();
 
@@ -144,7 +145,7 @@ router.get('/turmas', async (req, res) => {
   }
 });
 
-router.post('/turmas', async (req, res) => {
+router.post('/turmas', exigirPapeis('ADMIN'), async (req, res) => {
   try {
     const {
       codigo,
@@ -193,7 +194,7 @@ router.post('/turmas', async (req, res) => {
   }
 });
 
-router.put('/turmas/:id', async (req, res) => {
+router.put('/turmas/:id', exigirPapeis('ADMIN'), async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -254,7 +255,7 @@ router.put('/turmas/:id', async (req, res) => {
   }
 });
 
-router.patch('/turmas/:id/status', async (req, res) => {
+router.patch('/turmas/:id/status', exigirPapeis('ADMIN'), async (req, res) => {
   try {
     const { id } = req.params;
     const { ativa, status_evento } = req.body;
@@ -276,7 +277,7 @@ router.patch('/turmas/:id/status', async (req, res) => {
   }
 });
 
-router.delete('/turmas/:id', async (req, res) => {
+router.delete('/turmas/:id', exigirPapeis('ADMIN'), async (req, res) => {
   try {
     const { id } = req.params;
     const { rows: vinc } = await pool.query(
@@ -310,7 +311,7 @@ router.get('/regras', async (req, res) => {
 });
 
 // PUT /regras/:id - Atualização atômica com validação de limites no servidor
-router.put('/regras/:id', async (req, res) => {
+router.put('/regras/:id', exigirPapeis('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;

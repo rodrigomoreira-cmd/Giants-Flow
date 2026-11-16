@@ -1,3 +1,4 @@
+const { exigirPapeis } = require('../middlewares/rbac');
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
@@ -14,7 +15,7 @@ router.get('/usuarios', async (req, res) => {
   }
 });
 
-router.post('/usuarios', async (req, res) => {
+router.post('/usuarios', exigirPapeis('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { nome, email, papel, senha, ativo } = req.body;
@@ -52,7 +53,7 @@ router.post('/usuarios', async (req, res) => {
 });
 
 // ATUALIZAR DADOS COMPLETOS DO USUÁRIO COM SALVAGUARDAS
-router.put('/usuarios/:id', async (req, res) => {
+router.put('/usuarios/:id', exigirPapeis('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
@@ -104,7 +105,7 @@ router.put('/usuarios/:id', async (req, res) => {
   }
 });
 
-router.patch('/usuarios/:id/papel', async (req, res) => {
+router.patch('/usuarios/:id/papel', exigirPapeis('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
@@ -156,7 +157,7 @@ router.patch('/usuarios/:id/papel', async (req, res) => {
   }
 });
 
-router.patch('/usuarios/:id/status', async (req, res) => {
+router.patch('/usuarios/:id/status', exigirPapeis('ADMIN'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
