@@ -15,13 +15,21 @@ function runCmd(cmd, opts = {}) {
   });
 }
 
+function execPsql(sql) {
+  return spawnSync(
+    'docker',
+    ['compose', '-p', PROJECT_NAME, '-f', COMPOSE_FILE, 'exec', '-T', 'postgres_test', 'psql', '-U', 'postgres', '-d', 'evento_test'],
+    { cwd: ROOT, input: sql, encoding: 'utf8', stdio: ['pipe', 'ignore', 'pipe'] }
+  );
+}
+
 async function main() {
   let exitCode = 1;
   try {
     console.log('🧪 [TEST:ISOLATED] Subindo Postgres e Redis efêmeros em memória (portas 55432 / 56379)...');
     runCmd(`docker compose -p ${PROJECT_NAME} -f "${COMPOSE_FILE}" up -d --wait`, { stdio: 'inherit' });
 
-    console.log('📐 [TEST:ISOLATED] Sincronizando schema limpo para o banco evento_test...');
+    console.log('📐 [TEST:ISOLATED] Sincronizando schema limpo e permissões RLS para evento_test...');
     let schemaSql = '';
     try {
       schemaSql = runCmd('docker compose exec -T postgres pg_dump -U admin_local -d evento_operacao --schema-only --no-owner --no-privileges');
@@ -29,33 +37,25 @@ async function main() {
       schemaSql = runCmd('docker compose exec -T postgres pg_dump -U postgres -d eventfunnel --schema-only --no-owner --no-privileges');
     }
 
-    if (schemaSql && schemaSql.trim()) {
-      spawnSync(
-        'docker',
-        ['compose', '-p', PROJECT_NAME, '-f', COMPOSE_FILE, 'exec', '-T', 'postgres_test', 'psql', '-U', 'app_evento_user', '-d', 'evento_test'],
-        { cwd: ROOT, input: schemaSql, encoding: 'utf8', stdio: ['pipe', 'ignore', 'pipe'] }
-      );
-    }
-
-    // Garante usuário e role compatíveis caso o dump referencie roles específicas
-    const bootstrapRoles = `
+    // Cria roles antes do schema: app_evento_user SEM superuser para que o PostgreSQL aplique RLS de verdade
+    execPsql(`
       DO $$
       BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'admin_local') THEN
-          CREATE ROLE admin_local SUPERUSER LOGIN;
+          CREATE ROLE admin_local SUPERUSER LOGIN PASSWORD 'test_isolated_password_2026';
         END IF;
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_evento_user') THEN
-          CREATE ROLE app_evento_user SUPERUSER LOGIN;
+          CREATE ROLE app_evento_user NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS LOGIN PASSWORD 'test_isolated_password_2026';
         ELSE
-          ALTER ROLE app_evento_user WITH SUPERUSER;
+          ALTER ROLE app_evento_user WITH NOSUPERUSER NOBYPASSRLS;
         END IF;
       END $$;
-    `;
-    spawnSync(
-      'docker',
-      ['compose', '-p', PROJECT_NAME, '-f', COMPOSE_FILE, 'exec', '-T', 'postgres_test', 'psql', '-U', 'app_evento_user', '-d', 'evento_test'],
-      { cwd: ROOT, input: bootstrapRoles, encoding: 'utf8', stdio: ['pipe', 'ignore', 'pipe'] }
-    );
+      GRANT ALL PRIVILEGES ON DATABASE evento_test TO app_evento_user;
+    `);
+
+    if (schemaSql && schemaSql.trim()) {
+      execPsql(schemaSql);
+    }
 
     // Aplica migrations incrementais
     const migrationsDir = path.join(ROOT, 'src', 'infrastructure', 'database', 'migrations');
@@ -63,15 +63,33 @@ async function main() {
       const arquivos = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
       for (const arq of arquivos) {
         const sql = fs.readFileSync(path.join(migrationsDir, arq), 'utf8');
-        spawnSync(
-          'docker',
-          ['compose', '-p', PROJECT_NAME, '-f', COMPOSE_FILE, 'exec', '-T', 'postgres_test', 'psql', '-U', 'app_evento_user', '-d', 'evento_test'],
-          { cwd: ROOT, input: sql, encoding: 'utf8', stdio: ['pipe', 'ignore', 'pipe'] }
-        );
+        execPsql(sql);
       }
     }
 
-    console.log('🚀 [TEST:ISOLATED] Executando suíte de testes de integração contra evento_test...\n');
+    // Concede privilégios DML e sequences para app_evento_user (sujeito às políticas RLS) e semeia turma/produtos base
+    execPsql(`
+      GRANT USAGE ON SCHEMA public TO app_evento_user;
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_evento_user;
+      GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO app_evento_user;
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_evento_user;
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO app_evento_user;
+
+      INSERT INTO turmas (id, codigo, nome, ativa, status_evento)
+      VALUES (1491, 'TURMA-TESTE', 'Turma Isolada de Testes', true, 'AO_VIVO')
+      ON CONFLICT (id) DO NOTHING;
+
+      SELECT setval(pg_get_serial_sequence('turmas', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM turmas), 1), 1491));
+
+      INSERT INTO produtos (id, nome, valor_tabela, ativo)
+      VALUES
+        (1, 'PAC', 49000.00, true),
+        (2, 'AE', 99000.00, true),
+        (3, 'GIANTS Individual', 279000.00, true)
+      ON CONFLICT (id) DO NOTHING;
+    `);
+
+    console.log('🚀 [TEST:ISOLATED] Executando suíte completa contra evento_test (com RLS ativo)...\n');
     const envTest = {
       ...process.env,
       NODE_ENV: 'test',
