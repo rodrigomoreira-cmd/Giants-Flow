@@ -523,7 +523,6 @@ export default function InterviewEdit() {
   const OPCOES_RESULTADO = [
     { valor: 'Fechou GIANTS', titulo: 'Fechou GIANTS', sub: 'Programa 360°', cat: 'GIANTS', cor: '#15803d', bg: '#f0fdf4', borda: '#22c55e' },
     { valor: 'Fechou PAC', titulo: 'Fechou PAC', sub: 'Aceleração Pré-GIANTS', cat: 'PAC', cor: '#0369a1', bg: '#f0f9ff', borda: '#0ea5e9' },
-    { valor: 'Downsell PAC', titulo: 'Downsell PAC', sub: 'Condição PAC', cat: 'PAC', cor: '#0369a1', bg: '#f0f9ff', borda: '#38bdf8' },
     { valor: 'Fechou AE', titulo: 'Fechou AE', sub: 'Acelerador Empresarial', cat: 'AE', cor: '#7e22ce', bg: '#faf5ff', borda: '#a855f7' },
     { valor: 'Decisão futura', titulo: 'Decisão Futura', sub: 'Follow-up / Retomada', cat: null, cor: '#b45309', bg: '#fffbeb', borda: '#f59e0b' },
     { valor: 'Não fechou', titulo: 'Não Fechou', sub: 'Encerrar sem venda', cat: null, cor: '#475569', bg: '#f8fafc', borda: '#94a3b8' }
@@ -966,7 +965,7 @@ export default function InterviewEdit() {
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: '0.65rem' }}>
                     {OPCOES_RESULTADO.map((op) => {
-                      const selecionado = ficha.resultado_comercial === op.valor;
+                      const selecionado = ficha.resultado_comercial === op.valor || (op.valor === 'Fechou PAC' && ficha.resultado_comercial === 'Downsell PAC');
                       return (
                         <button
                           key={op.valor}
