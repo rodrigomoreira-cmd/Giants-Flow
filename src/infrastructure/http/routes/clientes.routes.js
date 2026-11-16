@@ -17,8 +17,11 @@ router.get('/clientes', async (req, res) => {
         nome_participante,
         nome_cracha,
         empresa,
-        cnpj,
-        CASE WHEN LENGTH(regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g')) = 14 THEN COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), '')) ELSE NULL END AS cnpj,
+        CASE
+          WHEN LENGTH(regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '[^0-9]', '', 'g')) = 14
+            THEN COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), ''))
+          ELSE NULL
+        END AS cnpj,
         telefone,
         email,
         turma_id,

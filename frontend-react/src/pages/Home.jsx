@@ -18,9 +18,13 @@ const isMembroGiants = (emp) =>
 
 const extrairCnpjEmpresa = (emp) => {
   const cnpjCol = String(emp?.cnpj || '').replace(/\D/g, '');
-  if (cnpjCol.length === 14) return cnpjCol;
+  if (cnpjCol.length === 14) {
+    return cnpjCol.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  }
   const docCol = String(emp?.cpf_cnpj || '').replace(/\D/g, '');
-  if (docCol.length === 14) return docCol;
+  if (docCol.length === 14) {
+    return docCol.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  }
   return '';
 };
 
@@ -31,7 +35,7 @@ const normalizarChaveEmpresa = (emp) => {
   }
 
   // AE e PAC: vínculo agrupado por CNPJ da empresa (pessoa jurídica)
-  const cnpjDigits = extrairCnpjEmpresa(emp);
+  const cnpjDigits = extrairCnpjEmpresa(emp).replace(/\D/g, '');
   if (cnpjDigits.length === 14) return `cnpj:${cnpjDigits}`;
 
   const empNorm = String(emp.empresa || emp.razao_social || '')
