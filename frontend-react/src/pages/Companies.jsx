@@ -40,60 +40,24 @@ const normalizarChaveEmpresa = (emp) => {
 };
 
 const obterPapelUsuarioLogado = () => {
-  const papeisAdmin = ['admin', 'administrador', 'superadmin', 'master', 'system', 'diretor'];
   try {
-    // 1. Verifica sessao_operador (padrão oficial do sistema)
     const rawSessao = localStorage.getItem('sessao_operador') || sessionStorage.getItem('sessao_operador');
     if (rawSessao) {
       const s = JSON.parse(rawSessao);
       const papelSessao = String(
-        s?.usuario?.papel || s?.usuario?.role || s?.usuario?.perfil || s?.papel || s?.role || ''
-      ).trim().toLowerCase();
-      if (papeisAdmin.includes(papelSessao) || s?.usuario?.is_admin === true || s?.is_admin === true) {
-        return papelSessao || 'admin';
-      }
-    }
-
-    // 2. Verifica chaves diretas no storage
-    for (const storage of [localStorage, sessionStorage]) {
-      const directRole = String(
-        storage.getItem('role') ||
-        storage.getItem('perfil') ||
-        storage.getItem('papel') ||
-        storage.getItem('user_role') ||
-        ''
-      ).trim().toLowerCase();
-      if (papeisAdmin.includes(directRole)) return directRole;
-
-      // 3. Varre objetos JSON salvos no storage
-      for (let i = 0; i < storage.length; i++) {
-        const k = storage.key(i);
-        const val = storage.getItem(k);
-        if (!val || (!val.startsWith('{') && !val.startsWith('eyJ'))) continue;
-        if (val.startsWith('eyJ') && val.split('.').length === 3) {
-          try {
-            const payload = JSON.parse(atob(val.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-            const r = String(payload?.papel || payload?.role || payload?.perfil || payload?.tipo || '').trim().toLowerCase();
-            if (papeisAdmin.includes(r) || payload?.is_admin === true) return r || 'admin';
-          } catch (_) {}
-        } else if (val.startsWith('{')) {
-          try {
-            const obj = JSON.parse(val);
-            const r = String(
-              obj?.usuario?.papel || obj?.usuario?.role || obj?.papel || obj?.role || obj?.perfil || obj?.tipo || ''
-            ).trim().toLowerCase();
-            if (papeisAdmin.includes(r) || obj?.usuario?.is_admin === true || obj?.is_admin === true) {
-              return r || 'admin';
-            }
-          } catch (_) {}
-        }
-      }
+        s?.usuario?.papel || s?.usuario?.role || s?.papel || s?.role || ''
+      ).trim().toUpperCase();
+      if (papelSessao) return papelSessao;
+      if (s?.usuario?.is_admin === true || s?.is_admin === true) return 'ADMIN';
     }
   } catch (_) {}
   return '';
 };
 
-const isUsuarioAdmin = () => Boolean(obterPapelUsuarioLogado());
+const isUsuarioAdmin = () => {
+  const p = obterPapelUsuarioLogado();
+  return ['ADMIN', 'ADMINISTRADOR', 'SUPERADMIN', 'MASTER', 'SYSTEM', 'DIRETOR'].includes(p);
+};
 
 export default function Companies() {
   const { turmaSelecionada } = useTurma();
@@ -109,6 +73,7 @@ export default function Companies() {
   const location = useLocation();
   const [avisoRetornoFicha, setAvisoRetornoFicha] = useState(location.state?.fichaFinalizada || null);
   const usuarioEhAdmin = useMemo(() => isUsuarioAdmin(), []);
+  const usuarioEhFinanceiro = useMemo(() => obterPapelUsuarioLogado() === 'FINANCEIRO', []);
 
   // Modal Unificado da Empresa (Sócios não-GIANTS + Pagamento + Checklist de Participantes no Almoço)
   const [modalEmpresaAberto, setModalEmpresaAberto] = useState(false);
@@ -288,6 +253,7 @@ export default function Companies() {
 
   // Abre o modal consolidado da empresa mostrando os sócios não-GIANTS e o checklist do almoço
   const abrirModalEmpresa = (grupo) => {
+    if (usuarioEhFinanceiro) return;
     setGrupoAlvo(grupo);
 
     if (grupo.apenasGiants) {
@@ -326,6 +292,7 @@ export default function Companies() {
 
   const salvarModalEmpresa = async (e) => {
     e.preventDefault();
+    if (usuarioEhFinanceiro) return;
     if (!grupoAlvo) return;
 
     try {
@@ -363,7 +330,7 @@ export default function Companies() {
         turmaId: turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491',
         cnpj: grupoReabrir.cnpj,
         empresa: grupoReabrir.empresa,
-        papel: obterPapelUsuarioLogado() || 'ADMIN'
+        papel: obterPapelUsuarioLogado() || 'ENTREVISTADOR'
       });
       const idDestino = grupoReabrir.idPrincipal;
       setGrupoReabrir(null);
@@ -572,7 +539,7 @@ export default function Companies() {
           </span>
           <button
             onClick={() => navigate('/lunch')}
-            style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#0284c7' }}
+            style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: '600', cursor: usuarioEhFinanceiro ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#0284c7' }}
           >
             <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>restaurant</span>
             Ver Salão de Lunch
@@ -682,8 +649,8 @@ export default function Companies() {
                     {/* Empresa + Sócios clicável para abrir o modal */}
                     <td style={{ padding: '1rem' }}>
                       <div
-                        onClick={() => abrirModalEmpresa(g)}
-                        title="Clique para abrir os sócios da empresa e configurar o almoço"
+                        onClick={() => !usuarioEhFinanceiro && abrirModalEmpresa(g)}
+                        title={usuarioEhFinanceiro ? "Visualização somente leitura (Financeiro não valida almoço)" : "Clique para abrir os sócios da empresa e configurar o almoço"}
                         style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', cursor: 'pointer' }}
                       >
                         <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '0.92rem' }}>
@@ -808,7 +775,7 @@ export default function Companies() {
                     {/* 1. Almoço */}
                     <td style={{ padding: '1rem' }}>
                       <button
-                        onClick={() => abrirModalEmpresa(g)}
+                        onClick={() => !usuarioEhFinanceiro && abrirModalEmpresa(g)}
                         style={{
                           background: estagio.bgAlmoco,
                           color: estagio.corAlmoco,
@@ -825,7 +792,7 @@ export default function Companies() {
                         title="Clique para validar almoço e marcar quais sócios vão participar"
                       >
                         {estagio.rotuloAlmoco}
-                        <span className="material-symbols-outlined" style={{ fontSize: '0.85rem' }}>edit</span>
+                        {!usuarioEhFinanceiro && <span className="material-symbols-outlined" style={{ fontSize: '0.85rem' }}>edit</span>}
                       </button>
                     </td>
 
@@ -865,7 +832,7 @@ export default function Companies() {
                         </span>
                       ) : estagio.passo === 1 ? (
                         <button
-                          onClick={() => abrirModalEmpresa(g)}
+                          onClick={() => !usuarioEhFinanceiro && abrirModalEmpresa(g)}
                           style={{
                             background: '#f8fafc',
                             color: '#94a3b8',
@@ -1057,7 +1024,7 @@ export default function Companies() {
                         </button>
                       ) : (
                         <button
-                          onClick={() => abrirModalEmpresa(g)}
+                          onClick={() => !usuarioEhFinanceiro && abrirModalEmpresa(g)}
                           style={{
                             background: '#f1f5f9',
                             color: '#64748b',

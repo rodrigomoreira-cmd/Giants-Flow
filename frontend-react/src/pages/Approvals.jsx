@@ -1,8 +1,45 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
 
 const fmtBRL = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+const obterPapelLogado = () => {
+  try {
+    const raw = localStorage.getItem('sessao_operador');
+    if (!raw) return 'ADMIN';
+    const s = JSON.parse(raw);
+    return String(s?.usuario?.papel || s?.papel || 'ADMIN').toUpperCase();
+  } catch (_) {
+    return 'ADMIN';
+  }
+};
+
+const extrairMotivosAlcada = (prop) => {
+  if (Array.isArray(prop.motivos_alcada_json) && prop.motivos_alcada_json.length > 0) {
+    return prop.motivos_alcada_json;
+  }
+  const dp = prop.dados_proposta || {};
+  if (Array.isArray(dp.motivosAlcada) && dp.motivosAlcada.length > 0) {
+    return dp.motivosAlcada;
+  }
+  const motivos = [];
+  const desc = Number(prop.desconto_concedido ?? dp.desconto ?? prop.proposta_desconto ?? 0);
+  if (desc > 0) motivos.push(`Desconto comercial concedido: ${fmtBRL(desc)}`);
+  const formaRest = String(dp.formaRestante || prop.proposta_metodo_pagamento || '').toLowerCase();
+  if (formaRest.includes('boleto')) motivos.push('Saldo com pagamento via Boleto Bancário');
+  if (dp.observacoes) motivos.push(`Condição especial: ${dp.observacoes}`);
+  return motivos;
+};
+
+const obterStatusComercial = (prop) => {
+  const raw = String(prop.aprovacao_comercial_status || '').toUpperCase();
+  if (raw === 'PENDENTE' || raw === 'APROVADA' || raw === 'RECUSADA' || raw === 'NAO_EXIGIDA') {
+    return raw;
+  }
+  const motivos = extrairMotivosAlcada(prop);
+  return motivos.length > 0 ? 'PENDENTE' : 'NAO_EXIGIDA';
+};
 
 const unificarPorEmpresa = (lista) => {
   const mapa = new Map();
@@ -41,15 +78,34 @@ const unificarPorEmpresa = (lista) => {
 
 export default function Approvals() {
   const { turmaSelecionada } = useTurma();
+  const papelUsuario = obterPapelLogado();
+  const isAdmin = papelUsuario === 'ADMIN';
+  const isGestorComercial = papelUsuario === 'APROVADOR' || isAdmin;
+  const isFinanceiro = papelUsuario === 'FINANCEIRO' || isAdmin;
+
+  const filtroInicial =
+    papelUsuario === 'APROVADOR'
+      ? 'ALCADA_COMERCIAL'
+      : papelUsuario === 'FINANCEIRO'
+      ? 'FILA_FINANCEIRO'
+      : 'PENDENTE';
+
   const [propostas, setPropostas] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
-  const [filtro, setFiltro] = useState('PENDENTE');
+  const [filtro, setFiltro] = useState(filtroInicial);
+  const [busca, setBusca] = useState('');
 
-  // Estado do Modal de Análise de Crédito & Deliberação
+  // Estado do Modal de Análise & Deliberação
   const [propSelecionada, setPropSelecionada] = useState(null);
   const [erroModal, setErroModal] = useState('');
   const [modalFeedback, setModalFeedback] = useState(null);
+
+  // Etapa 1: Parecer Comercial (Gestor)
+  const [parecerComercial, setParecerComercial] = useState('');
+  const [salvandoComercial, setSalvandoComercial] = useState(false);
+
+  // Etapa 2: Análise Financeira & Serasa
   const [analiseCreditoStatus, setAnaliseCreditoStatus] = useState('APROVADO');
   const [statusSerasaCodigo, setStatusSerasaCodigo] = useState('sem_restricao');
   const [statusSerasaTexto, setStatusSerasaTexto] = useState('');
@@ -57,6 +113,11 @@ export default function Approvals() {
   const [condicaoEspecial, setCondicaoEspecial] = useState('');
   const [parecerFinanceiro, setParecerFinanceiro] = useState('');
   const [salvandoAnalise, setSalvandoAnalise] = useState(false);
+  const [modoDevolucao, setModoDevolucao] = useState(false);
+  const [motivoDevolucao, setMotivoDevolucao] = useState('');
+  const [devolvendo, setDevolvendo] = useState(false);
+  const [comprovanteModal, setComprovanteModal] = useState(null);
+  const [carregandoComprovante, setCarregandoComprovante] = useState(false);
 
   const carregarAprovacoes = async () => {
     try {
@@ -90,7 +151,10 @@ export default function Approvals() {
       String(prop.status_serasa_codigo || prop.af_status_serasa || '').includes('restricao');
 
     setErroModal('');
+    setModoDevolucao(false);
+    setMotivoDevolucao('');
     setPropSelecionada(prop);
+    setParecerComercial(prop.aprovacao_comercial_parecer || '');
     setAnaliseCreditoStatus(
       prop.analise_credito_status || prop.af_decisao_financeiro || (temRestricaoPrev ? 'NEGADO' : 'APROVADO')
     );
@@ -105,7 +169,101 @@ export default function Approvals() {
     setParecerFinanceiro(prop.parecer_financeiro || prop.af_parecer || '');
   };
 
-  const submeterDeliberacao = async (decisaoFinal) => {
+  // Submissão Etapa 1: Gestor Comercial (APROVADOR / ADMIN)
+  const submeterAlcadaComercial = async (decisaoComercial) => {
+    if (!propSelecionada) return;
+    setErroModal('');
+
+    if (decisaoComercial === 'recusado' && !parecerComercial.trim()) {
+      setErroModal('Informe a justificativa comercial antes de recusar a condição negociada.');
+      return;
+    }
+
+    try {
+      setSalvandoComercial(true);
+      await api.post('/comercial/analisar', {
+        fichaId: propSelecionada.id,
+        proposta_id: propSelecionada.id,
+        decisao: decisaoComercial,
+        parecer: parecerComercial
+      });
+
+      const empresaNome = propSelecionada.empresa || propSelecionada.nome_participante;
+      const protocolo = `PROP-${String(propSelecionada.id).padStart(3, '0')}`;
+      setPropSelecionada(null);
+      await carregarAprovacoes();
+
+      setModalFeedback({
+        tipo: decisaoComercial === 'recusado' ? 'recusado' : 'aprovado',
+        protocolo,
+        empresa: empresaNome,
+        titulo:
+          decisaoComercial === 'recusado'
+            ? 'Alçada Comercial Recusada'
+            : 'Alçada Comercial Aprovada — Encaminhada ao Financeiro',
+        credito: decisaoComercial === 'recusado' ? 'RECUSADO PELO GESTOR' : 'AGUARDANDO VALIDAÇÃO FINANCEIRA',
+        serasa: parecerComercial || (decisaoComercial === 'aprovado' ? 'Condição comercial autorizada pelo gestor.' : '')
+      });
+    } catch (err) {
+      setErroModal(`Erro ao registrar aval comercial: ${err.message}`);
+    } finally {
+      setSalvandoComercial(false);
+    }
+  };
+
+
+  const abrirComprovanteProposta = async (prop, indice = null, labelForma = '') => {
+    try {
+      setCarregandoComprovante(true);
+      const qs = indice !== null && indice !== undefined ? `?indice=${indice}` : '';
+      const comp = await api.get(`/financeiro/propostas/${prop.id}/comprovante${qs}`);
+      setComprovanteModal({
+        empresa: `${prop.empresa || prop.nome_participante}${labelForma ? ' — ' + labelForma : ''}`,
+        protocolo: `PROP-${String(prop.id).padStart(3, '0')}`,
+        ...comp
+      });
+    } catch (err) {
+      setErroModal(err.message || 'Não foi possível carregar o comprovante anexado.');
+    } finally {
+      setCarregandoComprovante(false);
+    }
+  };
+
+  const submeterDevolucaoAjuste = async () => {
+    if (!propSelecionada) return;
+    if (!motivoDevolucao.trim()) {
+      setErroModal('Informe o motivo / orientação de ajuste para devolver à mesa.');
+      return;
+    }
+    try {
+      setDevolvendo(true);
+      setErroModal('');
+      await api.post('/financeiro/devolver', {
+        fichaId: propSelecionada.id,
+        motivo: motivoDevolucao.trim()
+      });
+      const empresaNome = propSelecionada.empresa || propSelecionada.nome_participante;
+      const protocolo = `PROP-${String(propSelecionada.id).padStart(3, '0')}`;
+      setPropSelecionada(null);
+      setModoDevolucao(false);
+      await carregarAprovacoes();
+      setModalFeedback({
+        tipo: 'ressalva',
+        protocolo,
+        empresa: empresaNome,
+        titulo: 'Proposta Devolvida para Ajuste na Mesa',
+        credito: 'AJUSTE SOLICITADO',
+        serasa: motivoDevolucao.trim()
+      });
+    } catch (err) {
+      setErroModal(`Erro ao devolver proposta: ${err.message}`);
+    } finally {
+      setDevolvendo(false);
+    }
+  };
+
+  // Submissão Etapa 2: Financeiro & Serasa (FINANCEIRO / ADMIN)
+  const submeterDeliberacaoFinanceira = async (decisaoFinal) => {
     if (!propSelecionada) return;
     setErroModal('');
 
@@ -144,52 +302,142 @@ export default function Approvals() {
         empresa: empresaNome,
         titulo:
           decisaoFinal === 'recusado'
-            ? 'Proposta Recusada / Negada'
+            ? 'Proposta Recusada pelo Financeiro'
             : decisaoFinal === 'aprovado_com_ressalva'
             ? 'Proposta Aprovada com Ressalva'
-            : 'Proposta Aprovada com Sucesso',
+            : 'Proposta Aprovada e Concluída',
         credito: analiseCreditoStatus,
         serasa: statusSerasaTexto || 'Sem restrições apontadas'
       });
     } catch (err) {
-      setErroModal(`Erro ao registrar deliberação: ${err.message}`);
+      setErroModal(`Erro ao registrar deliberação financeira: ${err.message}`);
     } finally {
       setSalvandoAnalise(false);
     }
   };
 
-  const propostasFiltradas = propostas.filter((p) => {
+  const propostasVisiveis = isGestorComercial
+    ? propostas
+    : propostas.filter((p) => obterStatusComercial(p) !== 'PENDENTE');
+
+  const propostasFiltradas = propostasVisiveis.filter((p) => {
     if (filtro === 'TODOS') return true;
     const st = String(p.status_aprovacao || 'PENDENTE').toUpperCase();
-    if (filtro === 'PENDENTE') return st === 'PENDENTE' || st === 'ENVIADO_FINANCEIRO';
+    const isPendenteGeral = st === 'PENDENTE' || st === 'ENVIADO_FINANCEIRO';
+    const stComercial = obterStatusComercial(p);
+
+    if (filtro === 'ALCADA_COMERCIAL') {
+      return isPendenteGeral && stComercial === 'PENDENTE';
+    }
+    if (filtro === 'FILA_FINANCEIRO') {
+      return isPendenteGeral && stComercial !== 'PENDENTE';
+    }
+    if (filtro === 'PENDENTE') return isPendenteGeral;
     if (filtro === 'APROVADO') return st === 'APROVADA' || st === 'APROVADO';
     if (filtro === 'RESSALVA') return st === 'APROVADA_COM_RESSALVA';
+    if (filtro === 'AJUSTE') return st === 'AJUSTE_SOLICITADO';
     if (filtro === 'RECUSADO') return st === 'RECUSADA' || st === 'RECUSADO';
-    return st === filtro;
+    if (st !== filtro) return false;
+    return true;
+  }).filter((p) => {
+    const termo = busca.trim().toLowerCase();
+    if (!termo) return true;
+
+    const termoDigits = termo.replace(/\D/g, '');
+    const dp = p.dados_proposta || {};
+    const empresa = String(p.empresa || p.cliente_empresa || '').toLowerCase();
+    const titular = String(p.nome_participante || p.cliente_nome || '').toLowerCase();
+    const produto = String(p.produto_nome || dp.produtoNome || dp.categoriaProduto || '').toLowerCase();
+    const propRef = `prop-${String(p.id).padStart(3, '0')}`;
+    const idStr = String(p.id || '');
+    const sociosStr = Array.isArray(p.socios_empresa)
+      ? p.socios_empresa.map((s) => String(s.nome || '')).join(' ').toLowerCase()
+      : '';
+
+    const docRaw = String(p.cnpj || p.cpf_cnpj || dp.cnpj || '');
+    const docDigits = docRaw.replace(/\D/g, '');
+
+    const matchTexto =
+      empresa.includes(termo) ||
+      titular.includes(termo) ||
+      sociosStr.includes(termo) ||
+      produto.includes(termo) ||
+      propRef.includes(termo) ||
+      idStr === termo;
+
+    const matchDoc =
+      termoDigits.length >= 2 &&
+      (docDigits.includes(termoDigits) || idStr.includes(termoDigits));
+
+    return matchTexto || matchDoc;
   });
+
+  const qtdAlcadaComercial = propostasVisiveis.filter((p) => {
+    const st = String(p.status_aprovacao || 'PENDENTE').toUpperCase();
+    return (st === 'PENDENTE' || st === 'ENVIADO_FINANCEIRO') && obterStatusComercial(p) === 'PENDENTE';
+  }).length;
+
+  const qtdFilaFinanceiro = propostasVisiveis.filter((p) => {
+    const st = String(p.status_aprovacao || 'PENDENTE').toUpperCase();
+    return (st === 'PENDENTE' || st === 'ENVIADO_FINANCEIRO') && obterStatusComercial(p) !== 'PENDENTE';
+  }).length;
 
   const renderBadgeStatus = (prop) => {
     const st = String(prop.status_aprovacao || 'PENDENTE').toUpperCase();
+    const stCom = obterStatusComercial(prop);
+    const motivos = extrairMotivosAlcada(prop);
     const credito = String(prop.analise_credito_status || prop.af_decisao_financeiro || '').toUpperCase();
     const serasaTxt = prop.status_serasa_texto || prop.af_observacoes_auditoria || '';
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.28rem' }}>
+        {/* Etapa 1: Alçada Comercial */}
+        {stCom === 'PENDENTE' ? (
+          <span style={{ display: 'inline-block', width: 'fit-content', background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '0.18rem 0.55rem', borderRadius: '999px', fontSize: '0.7rem', fontWeight: '800' }}>
+            1. Aguardando Gestor Comercial
+          </span>
+        ) : stCom === 'APROVADA' ? (
+          <span style={{ display: 'inline-block', width: 'fit-content', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '0.68rem', fontWeight: '800' }}>
+            ✔ 1. Alçada Comercial Aprovada{prop.aprovacao_comercial_por_nome ? ` (${prop.aprovacao_comercial_por_nome.split(' ')[0]})` : ''}
+          </span>
+        ) : stCom === 'RECUSADA' ? (
+          <span style={{ display: 'inline-block', width: 'fit-content', background: '#fee2e2', color: '#991b1b', padding: '0.18rem 0.55rem', borderRadius: '999px', fontSize: '0.7rem', fontWeight: '800' }}>
+            ✖ Recusada na Alçada Comercial
+          </span>
+        ) : (
+          <span style={{ display: 'inline-block', width: 'fit-content', background: '#f1f5f9', color: '#475569', padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '0.68rem', fontWeight: '700' }}>
+            1. Padrão Autônomo (Sem Exceção)
+          </span>
+        )}
+
+        {/* Etapa 2: Status Financeiro */}
         {st === 'APROVADA' || st === 'APROVADO' ? (
           <span style={{ display: 'inline-block', width: 'fit-content', background: '#dcfce7', color: '#166534', padding: '0.18rem 0.55rem', borderRadius: '999px', fontSize: '0.72rem', fontWeight: '800' }}>
-            ✔ Aprovada
+            ✔ 2. Aprovada pelo Financeiro
+          </span>
+        ) : st === 'AJUSTE_SOLICITADO' ? (
+          <span style={{ display: 'inline-block', width: 'fit-content', background: '#ffedd5', color: '#9a3412', border: '1px solid #fdba74', padding: '0.18rem 0.55rem', borderRadius: '999px', fontSize: '0.72rem', fontWeight: '800' }}>
+            ↩ Devolvida p/ Ajuste na Mesa
           </span>
         ) : st === 'APROVADA_COM_RESSALVA' ? (
           <span style={{ display: 'inline-block', width: 'fit-content', background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '0.18rem 0.55rem', borderRadius: '999px', fontSize: '0.72rem', fontWeight: '800' }}>
-            ⚠ Aprovada c/ Ressalva
+            ⚠ 2. Aprovada c/ Ressalva
           </span>
         ) : st === 'RECUSADA' || st === 'RECUSADO' ? (
-          <span style={{ display: 'inline-block', width: 'fit-content', background: '#fee2e2', color: '#991b1b', padding: '0.18rem 0.55rem', borderRadius: '999px', fontSize: '0.72rem', fontWeight: '800' }}>
-            ✖ Recusada / Negada
-          </span>
-        ) : (
+          stCom !== 'RECUSADA' && (
+            <span style={{ display: 'inline-block', width: 'fit-content', background: '#fee2e2', color: '#991b1b', padding: '0.18rem 0.55rem', borderRadius: '999px', fontSize: '0.72rem', fontWeight: '800' }}>
+              ✖ 2. Recusada pelo Financeiro
+            </span>
+          )
+        ) : stCom !== 'PENDENTE' ? (
           <span style={{ display: 'inline-block', width: 'fit-content', background: '#eff6ff', color: '#1d4ed8', padding: '0.18rem 0.55rem', borderRadius: '999px', fontSize: '0.72rem', fontWeight: '800' }}>
-            ⏳ Aguardando Análise
+            ⏳ 2. Aguardando Financeiro / Serasa
+          </span>
+        ) : null}
+
+        {motivos.length > 0 && (
+          <span style={{ fontSize: '0.69rem', color: '#b45309', background: '#fffbeb', padding: '0.15rem 0.45rem', borderRadius: '4px', maxWidth: '250px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={motivos.join(' | ')}>
+            Alçada: {motivos[0]}
           </span>
         )}
 
@@ -216,61 +464,87 @@ export default function Approvals() {
       {/* Cabeçalho */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1 style={{ fontSize: '1.75rem', fontWeight: '800', color: '#0f172a', margin: 0 }}>
-            Fila de Aprovações & Análise de Crédito
-          </h1>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.85rem' }}>
-        <a
-          href={`${import.meta.env.VITE_API_URL || '/api'}/financeiro/exportar-csv?turmaId=${turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491'}`}
-          target="_blank"
-          rel="noreferrer"
-          style={{
-            background: '#059669',
-            color: '#ffffff',
-            padding: '0.55rem 1rem',
-            borderRadius: '8px',
-            fontWeight: '800',
-            fontSize: '0.82rem',
-            textDecoration: 'none',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.4rem'
-          }}
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: '1.05rem' }}>download</span>
-          Exportar Planilha (Excel/CSV)
-        </a>
-      </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+            <h1 style={{ fontSize: '1.75rem', fontWeight: '800', color: '#0f172a', margin: 0 }}>
+              Fila de Aprovações (Alçada Comercial & Financeiro)
+            </h1>
+            <span style={{
+              fontSize: '0.72rem',
+              fontWeight: '800',
+              padding: '0.22rem 0.6rem',
+              borderRadius: '999px',
+              background: papelUsuario === 'APROVADOR' ? '#fef3c7' : papelUsuario === 'FINANCEIRO' ? '#dcfce7' : '#fff7ed',
+              color: papelUsuario === 'APROVADOR' ? '#92400e' : papelUsuario === 'FINANCEIRO' ? '#166534' : '#c2410c',
+              border: '1px solid #fed7aa'
+            }}>
+              Perfil: {papelUsuario}
+            </span>
+          </div>
           <p style={{ color: '#64748b', margin: '0.25rem 0 0', fontSize: '0.9rem' }}>
-            Consulta Serasa, validação de restrições financeiras, cashback por CNPJ e deliberação de contratos
+            {isGestorComercial
+              ? 'Etapa 1: Aval Comercial do Gestor (descontos, entrada abaixo de 1 parcela e exceções) • Etapa 2: Crédito/Serasa e liberação Financeira'
+              : 'Análise de Crédito/Serasa, conferência de entrada/cashback e liberação financeira de contratos'}
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.4rem', background: '#f1f5f9', padding: '0.3rem', borderRadius: '10px', flexWrap: 'wrap' }}>
-          {[
-            { id: 'PENDENTE', label: 'Pendentes' },
-            { id: 'APROVADO', label: 'Aprovadas' },
-            { id: 'RESSALVA', label: 'Com Ressalva' },
-            { id: 'RECUSADO', label: 'Recusadas' },
-            { id: 'TODOS', label: 'Todas' }
-          ].map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setFiltro(item.id)}
-              style={{
-                border: 'none',
-                background: filtro === item.id ? '#ff5722' : 'transparent',
-                color: filtro === item.id ? '#fff' : '#64748b',
-                padding: '0.45rem 0.85rem',
-                borderRadius: '8px',
-                fontWeight: '700',
-                fontSize: '0.78rem',
-                cursor: 'pointer'
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.65rem' }}>
+          <a
+            href={`${import.meta.env.VITE_API_URL || '/api'}/financeiro/exportar-csv?turmaId=${turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491'}`}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              background: '#059669',
+              color: '#ffffff',
+              padding: '0.5rem 0.95rem',
+              borderRadius: '8px',
+              fontWeight: '800',
+              fontSize: '0.8rem',
+              textDecoration: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem'
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: '1.05rem' }}>download</span>
+            Exportar Planilha (Excel/CSV)
+          </a>
+
+          <div style={{ display: 'flex', gap: '0.35rem', background: '#f1f5f9', padding: '0.3rem', borderRadius: '10px', flexWrap: 'wrap' }}>
+            {[
+              ...(isGestorComercial
+                ? [{ id: 'ALCADA_COMERCIAL', label: `1. Gestor Comercial (${qtdAlcadaComercial})` }]
+                : []),
+              {
+                id: 'FILA_FINANCEIRO',
+                label: isGestorComercial
+                  ? `2. Fila Financeiro (${qtdFilaFinanceiro})`
+                  : `Fila Financeiro (${qtdFilaFinanceiro})`
+              },
+              { id: 'PENDENTE', label: 'Todas Pendentes' },
+              { id: 'APROVADO', label: 'Aprovadas' },
+              { id: 'RESSALVA', label: 'Com Ressalva' },
+              { id: 'AJUSTE', label: 'Devolvidas' },
+              { id: 'RECUSADO', label: 'Recusadas' },
+              { id: 'TODOS', label: 'Todas' }
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setFiltro(item.id)}
+                style={{
+                  border: 'none',
+                  background: filtro === item.id ? '#ff5722' : 'transparent',
+                  color: filtro === item.id ? '#fff' : '#64748b',
+                  padding: '0.42rem 0.78rem',
+                  borderRadius: '8px',
+                  fontWeight: '700',
+                  fontSize: '0.76rem',
+                  cursor: 'pointer'
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -279,6 +553,30 @@ export default function Approvals() {
           {erro}
         </div>
       )}
+
+      {/* Barra de Pesquisa */}
+      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: '300px', background: '#fff', padding: '0.85rem 1.25rem', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '0.75rem', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+          <span className="material-symbols-outlined" style={{ color: '#94a3b8' }}>search</span>
+          <input
+            type="text"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="Pesquisar por Razão Social, Nome do Sócio, CNPJ, Produto ou ID..."
+            style={{ width: '100%', border: 'none', outline: 'none', fontSize: '0.95rem', color: '#1e293b' }}
+          />
+          {busca && (
+            <button
+              type="button"
+              onClick={() => setBusca('')}
+              title="Limpar pesquisa"
+              style={{ background: '#f1f5f9', border: 'none', borderRadius: '6px', padding: '0.2rem 0.5rem', fontWeight: '800', color: '#475569', cursor: 'pointer', fontSize: '0.8rem' }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Tabela */}
       <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflowX: 'auto' }}>
@@ -289,13 +587,13 @@ export default function Approvals() {
               <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Empresa / Proponente</th>
               <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Produto & Sócios</th>
               <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Valores & Cashback</th>
-              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Crédito / Serasa</th>
+              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Fluxo de Alçada & Crédito</th>
               <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem', textAlign: 'right' }}>Ações</th>
             </tr>
           </thead>
           <tbody>
             {carregando ? (
-              <tr><td colSpan="6" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>Carregando propostas e análises financeiras...</td></tr>
+              <tr><td colSpan="6" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>Carregando propostas e análises...</td></tr>
             ) : propostasFiltradas.length === 0 ? (
               <tr><td colSpan="6" style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8' }}>Nenhuma proposta encontrada neste filtro.</td></tr>
             ) : (
@@ -308,12 +606,12 @@ export default function Approvals() {
                 const entrada = Number(dp.valorEntrada ?? prop.proposta_valor_entrada ?? 0);
                 const permuta = Number(dp.permuta || 0);
                 const entradaComp = Number(dp.entradaComplementar || 0);
-                const dataEntradaComp = dp.dataEntradaComplementar || '';
                 const saldoFinal = Math.max(0, saldoContrato - entrada - permuta - entradaComp);
                 const parcelas = Number(dp.quantidadeParcelas ?? prop.proposta_parcelas ?? 12);
                 const valorParcela = Number(dp.valorParcela ?? prop.proposta_valor_parcela ?? 0);
                 const cnpjExibir = [prop.cnpj, prop.cpf_cnpj, dp.cnpj].find((d) => String(d || '').replace(/\D/g, '').length === 14) || '';
                 const idPagamento = dp.identificadorPagamento || prop.cv_cartao || '';
+                const stCom = obterStatusComercial(prop);
 
                 return (
                   <tr key={prop.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
@@ -360,6 +658,7 @@ export default function Approvals() {
                       </div>
                       <div style={{ fontSize: '0.74rem', color: '#334155' }}>
                         Líquido: <strong>{fmtBRL(saldoContrato)}</strong>
+                        {descTotal > 0 && <span style={{ color: '#dc2626', fontWeight: '700' }}> • Desc: -{fmtBRL(descTotal)}</span>}
                         {permuta > 0 && <span style={{ color: '#9333ea', fontWeight: '700' }}> • Permuta: -{fmtBRL(permuta)}</span>}
                         {cbTotal > 0 && <span style={{ color: '#047857', fontWeight: '700' }}> • CB: -{fmtBRL(cbTotal)}</span>}
                       </div>
@@ -376,10 +675,33 @@ export default function Approvals() {
                       {renderBadgeStatus(prop)}
                     </td>
                     <td style={{ padding: '1rem', textAlign: 'right' }}>
+                      <div style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      <a
+                        href={`/proposals/${prop.id}/contract`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Gerar Resumo Contratual / Termo de Adesão em PDF"
+                        style={{
+                          background: '#f1f5f9',
+                          color: '#0f172a',
+                          border: '1px solid #cbd5e1',
+                          padding: '0.48rem 0.7rem',
+                          borderRadius: '8px',
+                          fontSize: '0.76rem',
+                          fontWeight: '700',
+                          textDecoration: 'none',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.28rem'
+                        }}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '0.95rem' }}>picture_as_pdf</span>
+                        Termo PDF
+                      </a>
                       <button
                         onClick={() => abrirModalAnalise(prop)}
                         style={{
-                          background: '#ff5722',
+                          background: stCom === 'PENDENTE' ? '#d97706' : '#ff5722',
                           color: '#fff',
                           border: 'none',
                           padding: '0.5rem 0.95rem',
@@ -392,9 +714,12 @@ export default function Approvals() {
                           gap: '0.35rem'
                         }}
                       >
-                        <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>policy</span>
-                        Analisar Crédito / Deliberar
+                        <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>
+                          {stCom === 'PENDENTE' ? 'gavel' : 'policy'}
+                        </span>
+                        {stCom === 'PENDENTE' ? 'Avaliar Alçada / Ver' : 'Analisar Crédito / Deliberar'}
                       </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -404,7 +729,7 @@ export default function Approvals() {
         </table>
       </div>
 
-      {/* MODAL DE ANÁLISE DE CRÉDITO, STATUS SERASA E DELIBERAÇÃO (PADRÃO DO SISTEMA) */}
+      {/* MODAL DE DELIBERAÇÃO EM 2 ETAPAS */}
       {propSelecionada && (() => {
         const dp = propSelecionada.dados_proposta || {};
         const valorNeg = Number(propSelecionada.valor_negociado ?? dp.valorTotal ?? propSelecionada.proposta_valor_total ?? 0);
@@ -413,19 +738,23 @@ export default function Approvals() {
         const saldoContrato = Math.max(0, valorNeg - cbTotal - descTotal);
         const entrada = Number(dp.valorEntrada ?? propSelecionada.proposta_valor_entrada ?? 0);
         const permuta = Number(dp.permuta || 0);
-                const entradaComp = Number(dp.entradaComplementar || 0);
-                const dataEntradaComp = dp.dataEntradaComplementar || '';
-                const saldoFinal = Math.max(0, saldoContrato - entrada - permuta - entradaComp);
+        const entradaComp = Number(dp.entradaComplementar || 0);
+        const dataEntradaComp = dp.dataEntradaComplementar || '';
+        const saldoFinal = Math.max(0, saldoContrato - entrada - permuta - entradaComp);
         const parcelas = Number(dp.quantidadeParcelas ?? propSelecionada.proposta_parcelas ?? 12);
         const valorParcela = Number(dp.valorParcela ?? propSelecionada.proposta_valor_parcela ?? 0);
         const sociosContrato = Array.isArray(dp.sociosDetalhes)
           ? dp.sociosDetalhes.filter((s) => s.entraNoContrato)
           : [];
 
+        const stCom = obterStatusComercial(propSelecionada);
+        const motivosAlcada = extrairMotivosAlcada(propSelecionada);
+        const bloqueadoFinanceiroPorComercial = stCom === 'PENDENTE';
+
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.55)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}>
-            <div style={{ background: '#ffffff', borderRadius: '14px', maxWidth: '800px', width: '100%', overflow: 'hidden', boxShadow: '0 20px 45px rgba(15, 23, 42, 0.22)', border: '1px solid #e2e8f0', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
-              {/* Cabeçalho Limpo Padrão do Sistema */}
+            <div style={{ background: '#ffffff', borderRadius: '14px', maxWidth: '820px', width: '100%', overflow: 'hidden', boxShadow: '0 20px 45px rgba(15, 23, 42, 0.22)', border: '1px solid #e2e8f0', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
+              {/* Cabeçalho */}
               <div style={{ background: '#ffffff', padding: '1.25rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.3rem', flexWrap: 'wrap' }}>
@@ -433,7 +762,7 @@ export default function Approvals() {
                       PROP-{String(propSelecionada.id).padStart(3, '0')}
                     </span>
                     <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#475569', background: '#f1f5f9', padding: '0.18rem 0.55rem', borderRadius: '6px' }}>
-                      Mesa de Crédito & Aprovação Financeira
+                      Governança em 2 Etapas • Perfil: {papelUsuario}
                     </span>
                   </div>
                   <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '800', color: '#0f172a' }}>
@@ -451,7 +780,7 @@ export default function Approvals() {
 
               {/* Corpo Rolável */}
               <div style={{ padding: '1.35rem 1.5rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.15rem', background: '#f8fafc' }}>
-                {/* Resumo da Proposta & Cashback */}
+                {/* Resumo da Proposta */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.85rem' }}>
                   <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0.95rem' }}>
                     <div style={{ fontSize: '0.7rem', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>Empresa / CNPJ</div>
@@ -504,8 +833,68 @@ export default function Approvals() {
                   <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0.95rem' }}>
                     <div style={{ fontSize: '0.7rem', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>Pagamento Acordado</div>
                     <div style={{ fontSize: '0.82rem', color: '#0f172a', fontWeight: '700', marginTop: '0.2rem' }}>
-                      Entrada: {fmtBRL(entrada)} ({dp.formaEntrada || 'Pix'})
+                      Entrada Total: {fmtBRL(entrada)}
                     </div>
+                    {Array.isArray(dp.pagamentosEntrada) && dp.pagamentosEntrada.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.3rem', paddingLeft: '0.45rem', borderLeft: '2px solid #bae6fd' }}>
+                        {dp.pagamentosEntrada.map((pg, idxPg) => (
+                          <div key={idxPg} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem', fontSize: '0.74rem', color: '#334155' }}>
+                            <span>
+                              • <strong>{pg.forma}</strong>: {fmtBRL(pg.valor)} {pg.identificador ? `(${pg.identificador})` : ''}
+                            </span>
+                            {pg.temComprovante && (
+                              <button
+                                type="button"
+                                disabled={carregandoComprovante}
+                                onClick={() => abrirComprovanteProposta(propSelecionada, idxPg, `${pg.forma} (${fmtBRL(pg.valor)})`)}
+                                style={{
+                                  background: '#ecfdf5',
+                                  color: '#047857',
+                                  border: '1px solid #86efac',
+                                  borderRadius: '5px',
+                                  padding: '0.18rem 0.5rem',
+                                  fontSize: '0.7rem',
+                                  fontWeight: '800',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.2rem'
+                                }}
+                              >
+                                <span className="material-symbols-outlined" style={{ fontSize: '0.85rem' }}>receipt_long</span>
+                                Comprovante
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '0.75rem', color: '#475569' }}>Forma: {dp.formaEntrada || 'Pix'}</div>
+                    )}
+                    {propSelecionada.tem_comprovante && !(Array.isArray(dp.pagamentosEntrada) && dp.pagamentosEntrada.some((p) => p.temComprovante)) && (
+                      <button
+                        type="button"
+                        disabled={carregandoComprovante}
+                        onClick={() => abrirComprovanteProposta(propSelecionada)}
+                        style={{
+                          marginTop: '0.4rem',
+                          background: '#ecfdf5',
+                          color: '#047857',
+                          border: '1px solid #86efac',
+                          borderRadius: '6px',
+                          padding: '0.3rem 0.6rem',
+                          fontSize: '0.74rem',
+                          fontWeight: '800',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem'
+                        }}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '0.95rem' }}>receipt_long</span>
+                        {carregandoComprovante ? 'Abrindo...' : `Ver Comprovante (${propSelecionada.comprovante_nome || 'Anexo'})`}
+                      </button>
+                    )}
                     <div style={{ fontSize: '0.82rem', color: '#0f172a', fontWeight: '700', marginTop: '0.15rem' }}>
                       A Parcelar: {fmtBRL(saldoFinal)}
                     </div>
@@ -520,162 +909,305 @@ export default function Approvals() {
                   </div>
                 </div>
 
-                {/* Seção 1: Análise de Crédito & Consulta Serasa */}
-                <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '1.15rem', background: '#ffffff' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                    <span style={{ fontSize: '0.86rem', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <span className="material-symbols-outlined" style={{ color: '#ff5722', fontSize: '1.2rem' }}>account_balance</span>
-                      1. Análise de Crédito & Status Serasa (CNPJ)
+                {/* ETAPA 1: ALÇADA COMERCIAL (GESTOR / APROVADOR) */}
+                <div style={{
+                  border: stCom === 'PENDENTE' ? '1.5px solid #f59e0b' : '1px solid #e2e8f0',
+                  borderRadius: '12px',
+                  padding: '1.15rem',
+                  background: stCom === 'PENDENTE' ? '#fffbeb' : '#ffffff'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '0.88rem', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <span className="material-symbols-outlined" style={{ color: '#d97706', fontSize: '1.2rem' }}>gavel</span>
+                      Etapa 1 — Alçada Comercial (Gestor / Aprovador)
                     </span>
-
-                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAnaliseCreditoStatus('APROVADO');
-                          setStatusSerasaCodigo('sem_restricao');
-                          setStatusSerasaTexto('APROVADO — SEM RESTRIÇÕES FINANCEIRAS OU PROTESTOS NO CNPJ.');
-                        }}
-                        style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '0.3rem 0.65rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '700', cursor: 'pointer' }}
-                      >
-                        + Sem Restrição
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAnaliseCreditoStatus('NEGADO');
-                          setStatusSerasaCodigo('com_restricao');
-                          if (!statusSerasaTexto || statusSerasaTexto.startsWith('APROVADO')) {
-                            setStatusSerasaTexto('CLIENTE POSSUI X PENDÊNCIAS FINANCEIRAS (DÍVIDA COM BANCOS) NO VALOR TOTAL DE R$ 0,00 / POSSUI TAMBÉM X PROTESTOS QUE TOTALIZAM R$ 0,00');
-                          }
-                        }}
-                        style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '0.3rem 0.65rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '700', cursor: 'pointer' }}
-                      >
-                        + Modelo Pendências / Protestos
-                      </button>
-                    </div>
+                    <span style={{
+                      fontSize: '0.72rem',
+                      fontWeight: '800',
+                      padding: '0.2rem 0.6rem',
+                      borderRadius: '999px',
+                      background: stCom === 'PENDENTE' ? '#fef3c7' : stCom === 'APROVADA' ? '#dcfce7' : stCom === 'RECUSADA' ? '#fee2e2' : '#f1f5f9',
+                      color: stCom === 'PENDENTE' ? '#92400e' : stCom === 'APROVADA' ? '#166534' : stCom === 'RECUSADA' ? '#991b1b' : '#475569'
+                    }}>
+                      {stCom === 'PENDENTE'
+                        ? 'PENDENTE DE AVAL COMERCIAL'
+                        : stCom === 'APROVADA'
+                        ? `APROVADA POR ${(propSelecionada.aprovacao_comercial_por_nome || 'GESTOR').toUpperCase()}`
+                        : stCom === 'RECUSADA'
+                        ? 'RECUSADA PELO GESTOR'
+                        : 'DISPENSADA (DENTRO DO PADRÃO AUTÔNOMO)'}
+                    </span>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.85rem', marginBottom: '0.85rem' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
-                        Parecer Análise de Crédito
-                      </label>
-                      <select
-                        value={analiseCreditoStatus}
-                        onChange={(e) => setAnaliseCreditoStatus(e.target.value)}
-                        style={{
-                          width: '100%',
-                          padding: '0.58rem',
-                          borderRadius: '8px',
-                          border: '1px solid #cbd5e1',
-                          fontWeight: '800',
-                          fontSize: '0.84rem',
-                          color: analiseCreditoStatus === 'NEGADO' ? '#dc2626' : '#059669',
-                          background: '#fff'
-                        }}
-                      >
-                        <option value="APROVADO">APROVADO</option>
-                        <option value="NEGADO">NEGADO (COM RESTRIÇÃO)</option>
-                      </select>
+                  {motivosAlcada.length > 0 && (
+                    <div style={{ background: '#ffffff', border: '1px solid #fde68a', borderRadius: '8px', padding: '0.65rem 0.85rem', marginBottom: '0.75rem' }}>
+                      <div style={{ fontSize: '0.74rem', fontWeight: '800', color: '#92400e', marginBottom: '0.3rem' }}>
+                        Motivos que exigem autorização do Gestor Comercial:
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.78rem', color: '#78350f', fontWeight: '600' }}>
+                        {motivosAlcada.map((m, idx) => (
+                          <li key={idx}>{m}</li>
+                        ))}
+                      </ul>
                     </div>
+                  )}
 
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
-                        Classificação Serasa
-                      </label>
-                      <select
-                        value={statusSerasaCodigo}
-                        onChange={(e) => setStatusSerasaCodigo(e.target.value)}
-                        style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.84rem', background: '#fff', color: '#0f172a' }}
-                      >
-                        <option value="sem_restricao">Sem Restrição</option>
-                        <option value="score_alto_sem_restricao">Score Alto / Sem Restrição</option>
-                        <option value="score_medio_atencao">Score Médio / Atenção</option>
-                        <option value="com_restricao">Com Restrição (Pendências / Protestos)</option>
-                        <option value="score_baixo_restricao_grave">Score Baixo / Restrição Grave</option>
-                        <option value="restricao_impeditiva">Restrição Impeditiva</option>
-                      </select>
+                  {stCom === 'PENDENTE' ? (
+                    isGestorComercial ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#78350f', marginBottom: '0.25rem' }}>
+                            Parecer / Justificativa do Gestor Comercial
+                          </label>
+                          <input
+                            type="text"
+                            value={parecerComercial}
+                            onChange={(e) => setParecerComercial(e.target.value)}
+                            placeholder="Ex: Desconto autorizado em função de fechamento à vista / reforço de entrada..."
+                            style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #fcd34d', background: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.55rem', flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            disabled={salvandoComercial}
+                            onClick={() => submeterAlcadaComercial('recusado')}
+                            style={{ background: '#fff', color: '#dc2626', border: '1.5px solid #fca5a5', padding: '0.52rem 0.95rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.78rem', cursor: 'pointer' }}
+                          >
+                            Recusar Condição Comercial
+                          </button>
+                          <button
+                            type="button"
+                            disabled={salvandoComercial}
+                            onClick={() => submeterAlcadaComercial('aprovado')}
+                            style={{ background: '#d97706', color: '#fff', border: 'none', padding: '0.52rem 1.05rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.78rem', cursor: 'pointer' }}
+                          >
+                            {salvandoComercial ? 'Registrando...' : '✔ Aprovar Alçada Comercial (Liberar p/ Financeiro)'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '0.79rem', color: '#92400e', fontWeight: '700' }}>
+                        Aguardando aprovação de um usuário com perfil <strong>APROVADOR (Gestor Comercial)</strong> ou <strong>ADMIN</strong>. O Financeiro só poderá concluir esta ficha após o aval comercial.
+                      </div>
+                    )
+                  ) : (
+                    <div style={{ fontSize: '0.78rem', color: '#475569' }}>
+                      {propSelecionada.aprovacao_comercial_parecer
+                        ? `Parecer do Gestor: "${propSelecionada.aprovacao_comercial_parecer}"`
+                        : stCom === 'APROVADA'
+                        ? 'Condição comercial validada. Proposta liberada para conferência financeira.'
+                        : 'Proposta dentro dos parâmetros comerciais padrão (sem desconto ou exceção de entrada).'}
                     </div>
-
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
-                        Score Serasa (opcional)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="1000"
-                        value={scoreSerasa}
-                        onChange={(e) => setScoreSerasa(e.target.value)}
-                        placeholder="Ex: 740"
-                        style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.84rem', boxSizing: 'border-box' }}
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{ marginBottom: '0.85rem' }}>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
-                      Detalhamento STATUS SERASA (Pendências, Dívidas Bancárias, Protestos e Valores)
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={statusSerasaTexto}
-                      onChange={(e) => setStatusSerasaTexto(e.target.value)}
-                      placeholder="Ex: CLIENTE POSSUI 3 PENDÊNCIAS FINANCEIRAS (DÍVIDA COM BANCOS) NO VALOR TOTAL DE 45.502,83 / POSSUI TAMBÉM 311 PROTESTOS QUE TOTALIZAM 7.197.788,35"
-                      style={{
-                        width: '100%',
-                        padding: '0.65rem',
-                        borderRadius: '8px',
-                        border: analiseCreditoStatus === 'NEGADO' ? '1.5px solid #fca5a5' : '1px solid #cbd5e1',
-                        background: analiseCreditoStatus === 'NEGADO' ? '#fef2f2' : '#fff',
-                        color: analiseCreditoStatus === 'NEGADO' ? '#991b1b' : '#0f172a',
-                        fontSize: '0.82rem',
-                        fontWeight: '600',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.85rem' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
-                        Condição Especial / Garantia (se aprovar com restrição)
-                      </label>
-                      <input
-                        type="text"
-                        value={condicaoEspecial}
-                        onChange={(e) => setCondicaoEspecial(e.target.value)}
-                        placeholder="Ex: Aprovado mediante entrada via Pix + Cartão de terceiro / Avalista"
-                        style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
-                        Parecer Geral do Financeiro
-                      </label>
-                      <input
-                        type="text"
-                        value={parecerFinanceiro}
-                        onChange={(e) => setParecerFinanceiro(e.target.value)}
-                        placeholder="Observação interna para auditoria e comercial..."
-                        style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                      />
-                    </div>
-                  </div>
+                  )}
                 </div>
 
-                {/* Alerta orientativo quando há restrição Serasa */}
-                {(analiseCreditoStatus === 'NEGADO' || statusSerasaCodigo !== 'sem_restricao') && (
-                  <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '10px', padding: '0.8rem 1rem', fontSize: '0.8rem', color: '#92400e', display: 'flex', alignItems: 'flex-start', gap: '0.55rem' }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: '1.15rem', color: '#d97706' }}>warning</span>
-                    <div>
-                      <strong>Cliente com Restrição / Atenção no Serasa:</strong> Você pode <strong>Recusar</strong> a proposta ou, caso o financeiro aceite mediante garantia (entrada reforçada, cartão ou avalista), utilizar <strong>Aprovar com Ressalva</strong> para manter o histórico da restrição registrado na ficha.
+                {/* ETAPA 2: ANÁLISE DE CRÉDITO, SERASA & DELIBERAÇÃO FINANCEIRA */}
+                <div style={{
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '12px',
+                  padding: '1.15rem',
+                  background: '#ffffff',
+                  opacity: bloqueadoFinanceiroPorComercial ? 0.65 : 1
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '0.88rem', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <span className="material-symbols-outlined" style={{ color: '#ff5722', fontSize: '1.2rem' }}>account_balance</span>
+                      Etapa 2 — Validação Financeira, Pagamento & Status Serasa (CNPJ)
+                    </span>
+
+                    {!bloqueadoFinanceiroPorComercial && isFinanceiro && (
+                      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAnaliseCreditoStatus('APROVADO');
+                            setStatusSerasaCodigo('sem_restricao');
+                            setStatusSerasaTexto('APROVADO — SEM RESTRIÇÕES FINANCEIRAS OU PROTESTOS NO CNPJ.');
+                          }}
+                          style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '0.3rem 0.65rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '700', cursor: 'pointer' }}
+                        >
+                          + Sem Restrição
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAnaliseCreditoStatus('NEGADO');
+                            setStatusSerasaCodigo('com_restricao');
+                            if (!statusSerasaTexto || statusSerasaTexto.startsWith('APROVADO')) {
+                              setStatusSerasaTexto('CLIENTE POSSUI X PENDÊNCIAS FINANCEIRAS (DÍVIDA COM BANCOS) NO VALOR TOTAL DE R$ 0,00 / POSSUI TAMBÉM X PROTESTOS QUE TOTALIZAM R$ 0,00');
+                            }
+                          }}
+                          style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '0.3rem 0.65rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '700', cursor: 'pointer' }}
+                        >
+                          + Modelo Pendências / Protestos
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {bloqueadoFinanceiroPorComercial ? (
+                    <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '8px', padding: '0.85rem', fontSize: '0.8rem', color: '#475569' }}>
+                      🔒 A deliberação financeira será habilitada assim que a <strong>Etapa 1 (Alçada Comercial)</strong> for aprovada pelo Gestor.
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.85rem', marginBottom: '0.85rem' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
+                            Parecer Análise de Crédito
+                          </label>
+                          <select
+                            disabled={!isFinanceiro}
+                            value={analiseCreditoStatus}
+                            onChange={(e) => setAnaliseCreditoStatus(e.target.value)}
+                            style={{
+                              width: '100%',
+                              padding: '0.58rem',
+                              borderRadius: '8px',
+                              border: '1px solid #cbd5e1',
+                              fontWeight: '800',
+                              fontSize: '0.84rem',
+                              color: analiseCreditoStatus === 'NEGADO' ? '#dc2626' : '#059669',
+                              background: '#fff'
+                            }}
+                          >
+                            <option value="APROVADO">APROVADO</option>
+                            <option value="NEGADO">NEGADO (COM RESTRIÇÃO)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
+                            Classificação Serasa
+                          </label>
+                          <select
+                            disabled={!isFinanceiro}
+                            value={statusSerasaCodigo}
+                            onChange={(e) => setStatusSerasaCodigo(e.target.value)}
+                            style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.84rem', background: '#fff', color: '#0f172a' }}
+                          >
+                            <option value="sem_restricao">Sem Restrição</option>
+                            <option value="score_alto_sem_restricao">Score Alto / Sem Restrição</option>
+                            <option value="score_medio_atencao">Score Médio / Atenção</option>
+                            <option value="com_restricao">Com Restrição (Pendências / Protestos)</option>
+                            <option value="score_baixo_restricao_grave">Score Baixo / Restrição Grave</option>
+                            <option value="restricao_impeditiva">Restrição Impeditiva</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
+                            Score Serasa (opcional)
+                          </label>
+                          <input
+                            disabled={!isFinanceiro}
+                            type="number"
+                            min="0"
+                            max="1000"
+                            value={scoreSerasa}
+                            onChange={(e) => setScoreSerasa(e.target.value)}
+                            placeholder="Ex: 740"
+                            style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.84rem', boxSizing: 'border-box' }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ marginBottom: '0.85rem' }}>
+                        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
+                          Detalhamento STATUS SERASA (Pendências, Dívidas Bancárias, Protestos e Valores)
+                        </label>
+                        <textarea
+                          disabled={!isFinanceiro}
+                          rows={3}
+                          value={statusSerasaTexto}
+                          onChange={(e) => setStatusSerasaTexto(e.target.value)}
+                          placeholder="Ex: CLIENTE POSSUI 3 PENDÊNCIAS FINANCEIRAS (DÍVIDA COM BANCOS) NO VALOR TOTAL DE 45.502,83..."
+                          style={{
+                            width: '100%',
+                            padding: '0.65rem',
+                            borderRadius: '8px',
+                            border: analiseCreditoStatus === 'NEGADO' ? '1.5px solid #fca5a5' : '1px solid #cbd5e1',
+                            background: analiseCreditoStatus === 'NEGADO' ? '#fef2f2' : '#fff',
+                            color: analiseCreditoStatus === 'NEGADO' ? '#991b1b' : '#0f172a',
+                            fontSize: '0.82rem',
+                            fontWeight: '600',
+                            boxSizing: 'border-box'
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.85rem' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
+                            Condição Especial / Garantia (se aprovar com restrição)
+                          </label>
+                          <input
+                            disabled={!isFinanceiro}
+                            type="text"
+                            value={condicaoEspecial}
+                            onChange={(e) => setCondicaoEspecial(e.target.value)}
+                            placeholder="Ex: Aprovado mediante entrada via Pix + Cartão de terceiro / Avalista"
+                            style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
+                            Parecer Geral do Financeiro
+                          </label>
+                          <input
+                            disabled={!isFinanceiro}
+                            type="text"
+                            value={parecerFinanceiro}
+                            onChange={(e) => setParecerFinanceiro(e.target.value)}
+                            placeholder="Observação interna para auditoria e comercial..."
+                            style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                          />
+                        </div>
+                      </div>
+
+                      {!isFinanceiro && (
+                        <div style={{ marginTop: '0.75rem', fontSize: '0.78rem', color: '#1d4ed8', fontWeight: '700' }}>
+                          Visualização apenas leitura: a conclusão financeira pertence ao perfil <strong>FINANCEIRO</strong> ou <strong>ADMIN</strong>.
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {modoDevolucao && (
+                  <div style={{ background: '#fffbeb', border: '1.5px solid #f59e0b', borderRadius: '10px', padding: '0.9rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+                    <div style={{ fontSize: '0.82rem', fontWeight: '800', color: '#92400e' }}>
+                      Devolver Proposta para Ajuste na Mesa (Reabre a ficha para o entrevistador)
+                    </div>
+                    <input
+                      type="text"
+                      value={motivoDevolucao}
+                      onChange={(e) => setMotivoDevolucao(e.target.value)}
+                      placeholder="Ex: Divergência no valor do comprovante Pix / Corrigir CNPJ ou parcelas..."
+                      style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #fcd34d', background: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => setModoDevolucao(false)}
+                        style={{ background: '#fff', border: '1px solid #cbd5e1', color: '#475569', padding: '0.45rem 0.85rem', borderRadius: '7px', fontWeight: '700', fontSize: '0.78rem', cursor: 'pointer' }}
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        disabled={devolvendo}
+                        onClick={submeterDevolucaoAjuste}
+                        style={{ background: '#d97706', color: '#fff', border: 'none', padding: '0.45rem 0.95rem', borderRadius: '7px', fontWeight: '800', fontSize: '0.78rem', cursor: 'pointer' }}
+                      >
+                        {devolvendo ? 'Devolvendo...' : 'Confirmar Devolução para Mesa'}
+                      </button>
                     </div>
                   </div>
                 )}
 
-                {/* Banner de Erro Interno no Padrão do Sistema (sem alert nativo) */}
+                {/* Banner de Erro Interno */}
                 {erroModal && (
                   <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '0.8rem 1rem', color: '#b91c1c', fontSize: '0.82rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <span className="material-symbols-outlined" style={{ fontSize: '1.15rem', color: '#dc2626' }}>error</span>
@@ -686,52 +1218,112 @@ export default function Approvals() {
 
               {/* Rodapé de Deliberação */}
               <div style={{ padding: '1rem 1.5rem', background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setPropSelecionada(null)}
-                  style={{ background: '#fff', border: '1px solid #cbd5e1', color: '#475569', padding: '0.6rem 1rem', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '0.82rem' }}
-                >
-                  Fechar
-                </button>
-
-                <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                   <button
                     type="button"
-                    disabled={salvandoAnalise}
-                    onClick={() => submeterDeliberacao('recusado')}
-                    style={{ background: '#fff', color: '#dc2626', border: '1.5px solid #fca5a5', padding: '0.6rem 1.05rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                    onClick={() => setPropSelecionada(null)}
+                    style={{ background: '#fff', border: '1px solid #cbd5e1', color: '#475569', padding: '0.6rem 1rem', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '0.82rem' }}
                   >
-                    <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>close</span>
-                    Recusar Proposta
+                    Fechar
                   </button>
-
-                  <button
-                    type="button"
-                    disabled={salvandoAnalise}
-                    onClick={() => submeterDeliberacao('aprovado_com_ressalva')}
-                    style={{ background: '#d97706', color: '#fff', border: 'none', padding: '0.6rem 1.05rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                  <a
+                    href={`/proposals/${propSelecionada.id}/contract`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ background: '#0f172a', color: '#fff', border: 'none', padding: '0.6rem 0.95rem', borderRadius: '8px', fontWeight: '700', fontSize: '0.82rem', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
                   >
-                    <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>warning</span>
-                    Aprovar c/ Ressalva
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={salvandoAnalise}
-                    onClick={() => submeterDeliberacao('aprovado')}
-                    style={{ background: '#059669', color: '#fff', border: 'none', padding: '0.6rem 1.2rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-                  >
-                    <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>check_circle</span>
-                    {salvandoAnalise ? 'Gravando...' : 'Aprovar Proposta'}
-                  </button>
+                    <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>picture_as_pdf</span>
+                    Resumo Contratual PDF
+                  </a>
+                  {(isFinanceiro || isGestorComercial) && (
+                    <button
+                      type="button"
+                      onClick={() => setModoDevolucao((v) => !v)}
+                      style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fcd34d', padding: '0.6rem 0.95rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>reply</span>
+                      Devolver p/ Ajuste
+                    </button>
+                  )}
                 </div>
+
+                {!bloqueadoFinanceiroPorComercial && isFinanceiro && (
+                  <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      disabled={salvandoAnalise}
+                      onClick={() => submeterDeliberacaoFinanceira('recusado')}
+                      style={{ background: '#fff', color: '#dc2626', border: '1.5px solid #fca5a5', padding: '0.6rem 1.05rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>close</span>
+                      Recusar Proposta
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={salvandoAnalise}
+                      onClick={() => submeterDeliberacaoFinanceira('aprovado_com_ressalva')}
+                      style={{ background: '#d97706', color: '#fff', border: 'none', padding: '0.6rem 1.05rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>warning</span>
+                      Aprovar c/ Ressalva
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={salvandoAnalise}
+                      onClick={() => submeterDeliberacaoFinanceira('aprovado')}
+                      style={{ background: '#059669', color: '#fff', border: 'none', padding: '0.6rem 1.2rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>check_circle</span>
+                      {salvandoAnalise ? 'Gravando...' : 'Aprovar Proposta'}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         );
       })()}
 
-      {/* MODAL DE CONFIRMAÇÃO DA DELIBERAÇÃO NO PADRÃO DO SISTEMA */}
+      {/* MODAL DE PREVIEW DO COMPROVANTE */}
+      {comprovanteModal && (
+        <div onClick={() => setComprovanteModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10005, padding: '1rem' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', borderRadius: '14px', maxWidth: '720px', width: '100%', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ padding: '0.95rem 1.25rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <span style={{ fontSize: '0.72rem', fontWeight: '800', color: '#059669' }}>{comprovanteModal.protocolo} • COMPROVANTE ANEXADO</span>
+                <div style={{ fontWeight: '800', color: '#0f172a', fontSize: '0.98rem' }}>{comprovanteModal.empresa} ({comprovanteModal.nome})</div>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <a
+                  href={comprovanteModal.dataUrl}
+                  download={comprovanteModal.nome || 'comprovante'}
+                  style={{ background: '#0284c7', color: '#fff', padding: '0.45rem 0.85rem', borderRadius: '7px', fontSize: '0.78rem', fontWeight: '700', textDecoration: 'none' }}
+                >
+                  Baixar Arquivo
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setComprovanteModal(null)}
+                  style={{ background: '#f1f5f9', border: 'none', borderRadius: '7px', padding: '0.45rem 0.75rem', fontWeight: '800', cursor: 'pointer' }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div style={{ padding: '1rem', overflowY: 'auto', textAlign: 'center', background: '#f8fafc' }}>
+              {String(comprovanteModal.tipo || '').includes('pdf') ? (
+                <iframe src={comprovanteModal.dataUrl} title="Comprovante PDF" style={{ width: '100%', height: '65vh', border: 'none' }} />
+              ) : (
+                <img src={comprovanteModal.dataUrl} alt="Comprovante" style={{ maxWidth: '100%', maxHeight: '68vh', borderRadius: '8px', boxShadow: '0 4px 14px rgba(0,0,0,0.12)' }} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO */}
       {modalFeedback && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.55)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: '1rem' }}>
           <div style={{ background: '#ffffff', borderRadius: '14px', maxWidth: '460px', width: '100%', overflow: 'hidden', boxShadow: '0 20px 45px rgba(15, 23, 42, 0.22)', border: '1px solid #e2e8f0' }}>
@@ -758,10 +1350,12 @@ export default function Approvals() {
 
             <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.84rem', color: '#334155' }}>
               <div><strong>Empresa:</strong> {modalFeedback.empresa}</div>
-              <div><strong>Análise de Crédito:</strong> {modalFeedback.credito}</div>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.65rem 0.8rem', fontSize: '0.78rem', color: '#475569' }}>
-                <strong>Status Serasa:</strong> {modalFeedback.serasa}
-              </div>
+              <div><strong>Status:</strong> {modalFeedback.credito}</div>
+              {modalFeedback.serasa && (
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.65rem 0.8rem', fontSize: '0.78rem', color: '#475569' }}>
+                  <strong>Detalhamento:</strong> {modalFeedback.serasa}
+                </div>
+              )}
             </div>
 
             <div style={{ padding: '0.9rem 1.5rem', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end' }}>

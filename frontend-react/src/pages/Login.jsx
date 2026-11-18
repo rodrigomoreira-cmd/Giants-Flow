@@ -51,6 +51,7 @@ export default function Login() {
       };
 
       localStorage.setItem('sessao_operador', JSON.stringify(sessao));
+      window.dispatchEvent(new Event('sessao_atualizada'));
       navigate('/');
     } catch (err) {
       setErro(err.message || 'Credenciais inválidas. Verifique e tente novamente.');
@@ -128,3 +129,4 @@ export default function Login() {
     </div>
   );
 }
+

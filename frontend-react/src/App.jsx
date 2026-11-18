@@ -1,3 +1,4 @@
+import ProposalContractPdf from './pages/ProposalContractPdf';
 import FichaPdf from './pages/FichaPdf';
 ﻿import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
@@ -18,12 +19,52 @@ const Interviews = lazy(() => import('./pages/Interviews'));
 const InterviewDetail = lazy(() => import('./pages/InterviewDetail'));
 const InterviewEdit = lazy(() => import('./pages/InterviewEdit'));
 const Approvals = lazy(() => import('./pages/Approvals'));
+const CashbackCompanies = lazy(() => import('./pages/CashbackCompanies'));
 const Lunch = lazy(() => import('./pages/Lunch'));
 const AdminUsers = lazy(() => import('./pages/AdminUsers'));
 const AdminCompanies = lazy(() => import('./pages/AdminCompanies'));
 const AdminCohorts = lazy(() => import('./pages/AdminCohorts'));
 const AdminRules = lazy(() => import('./pages/AdminRules'));
 const AuditLogs = lazy(() => import('./pages/AuditLogs'));
+
+function RotaAdmin({ children }) {
+  try {
+    const raw = localStorage.getItem('sessao_operador');
+    const s = raw ? JSON.parse(raw) : null;
+    const papel = String(s?.usuario?.papel || s?.papel || '').toUpperCase();
+    if (!s) return <Navigate to="/login" replace />;
+    if (papel !== 'ADMIN') return <Navigate to="/home" replace />;
+    return children;
+  } catch (_) {
+    return <Navigate to="/home" replace />;
+  }
+}
+
+function RotaSemFinanceiro({ children }) {
+  try {
+    const raw = localStorage.getItem('sessao_operador');
+    const s = raw ? JSON.parse(raw) : null;
+    if (!s) return <Navigate to="/login" replace />;
+    const papel = String(s?.usuario?.papel || s?.papel || '').toUpperCase();
+    if (papel === 'FINANCEIRO') return <Navigate to="/home" replace />;
+    return children;
+  } catch (_) {
+    return <Navigate to="/home" replace />;
+  }
+}
+
+function RotaFinanceiroOuAdmin({ children }) {
+  try {
+    const raw = localStorage.getItem('sessao_operador');
+    const s = raw ? JSON.parse(raw) : null;
+    if (!s) return <Navigate to="/login" replace />;
+    const papel = String(s?.usuario?.papel || s?.papel || '').toUpperCase();
+    if (!['ADMIN', 'FINANCEIRO'].includes(papel)) return <Navigate to="/home" replace />;
+    return children;
+  } catch (_) {
+    return <Navigate to="/home" replace />;
+  }
+}
 
 function RotaProtegida({ children }) {
   const sessao = localStorage.getItem('sessao_operador');
@@ -66,18 +107,20 @@ export default function App() {
           <Route path="/companies" element={<RotaProtegida><LayoutComSidebar><Companies /></LayoutComSidebar></RotaProtegida>} />
           <Route path="/war-room" element={<RotaProtegida><LayoutComSidebar><WarRoom /></LayoutComSidebar></RotaProtegida>} />
           <Route path="/companies/:id" element={<RotaProtegida><LayoutComSidebar><CompanyDetail /></LayoutComSidebar></RotaProtegida>} />
-          <Route path="/interviews" element={<RotaProtegida><LayoutComSidebar><Interviews /></LayoutComSidebar></RotaProtegida>} />
-          <Route path="/interviews/:id" element={<RotaProtegida><LayoutComSidebar><InterviewDetail /></LayoutComSidebar></RotaProtegida>} />
-            <Route path="/interviews/:id/pdf" element={<RotaProtegida><FichaPdf /></RotaProtegida>} />
-          <Route path="/interviews/:id/edit" element={<RotaProtegida><LayoutComSidebar><InterviewEdit /></LayoutComSidebar></RotaProtegida>} />
+          <Route path="/interviews" element={<RotaSemFinanceiro><LayoutComSidebar><Interviews /></LayoutComSidebar></RotaSemFinanceiro>} />
+          <Route path="/interviews/:id" element={<RotaSemFinanceiro><LayoutComSidebar><InterviewDetail /></LayoutComSidebar></RotaSemFinanceiro>} />
+            <Route path="/interviews/:id/pdf" element={<RotaSemFinanceiro><FichaPdf /></RotaSemFinanceiro>} />
+          <Route path="/interviews/:id/edit" element={<RotaSemFinanceiro><LayoutComSidebar><InterviewEdit /></LayoutComSidebar></RotaSemFinanceiro>} />
           <Route path="/approvals" element={<RotaProtegida><LayoutComSidebar><Approvals /></LayoutComSidebar></RotaProtegida>} />
-          <Route path="/lunch" element={<RotaProtegida><LayoutComSidebar><Lunch /></LayoutComSidebar></RotaProtegida>} />
+          <Route path="/proposals/:id/contract" element={<RotaProtegida><ProposalContractPdf /></RotaProtegida>} />
+          <Route path="/cashback" element={<RotaFinanceiroOuAdmin><LayoutComSidebar><CashbackCompanies /></LayoutComSidebar></RotaFinanceiroOuAdmin>} />
+          <Route path="/lunch" element={<RotaSemFinanceiro><LayoutComSidebar><Lunch /></LayoutComSidebar></RotaSemFinanceiro>} />
           <Route path="/reports" element={<Navigate to="/home" replace />} />
-          <Route path="/admin/users" element={<RotaProtegida><LayoutComSidebar><AdminUsers /></LayoutComSidebar></RotaProtegida>} />
-          <Route path="/admin/companies" element={<RotaProtegida><LayoutComSidebar><AdminCompanies /></LayoutComSidebar></RotaProtegida>} />
-          <Route path="/admin/cohorts" element={<RotaProtegida><LayoutComSidebar><AdminCohorts /></LayoutComSidebar></RotaProtegida>} />
-          <Route path="/admin/rules" element={<RotaProtegida><LayoutComSidebar><AdminRules /></LayoutComSidebar></RotaProtegida>} />
-          <Route path="/admin/audit" element={<RotaProtegida><LayoutComSidebar><AuditLogs /></LayoutComSidebar></RotaProtegida>} />
+          <Route path="/admin/users" element={<RotaAdmin><LayoutComSidebar><AdminUsers /></LayoutComSidebar></RotaAdmin>} />
+          <Route path="/admin/companies" element={<RotaAdmin><LayoutComSidebar><AdminCompanies /></LayoutComSidebar></RotaAdmin>} />
+          <Route path="/admin/cohorts" element={<RotaAdmin><LayoutComSidebar><AdminCohorts /></LayoutComSidebar></RotaAdmin>} />
+          <Route path="/admin/rules" element={<RotaAdmin><LayoutComSidebar><AdminRules /></LayoutComSidebar></RotaAdmin>} />
+          <Route path="/admin/audit" element={<RotaAdmin><LayoutComSidebar><AuditLogs /></LayoutComSidebar></RotaAdmin>} />
 
           {/* Redirecionamentos de Compatibilidade */}
           <Route path="/" element={<Navigate to="/home" replace />} />

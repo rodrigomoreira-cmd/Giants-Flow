@@ -10,19 +10,23 @@ export default function Sidebar() {
   const sessaoRaw = localStorage.getItem('sessao_operador');
   const sessao = sessaoRaw ? JSON.parse(sessaoRaw) : null;
   const usuario = sessao?.usuario || sessao || {};
-  const papel = (usuario.papel || sessao?.papel || 'ADMIN').toUpperCase();
+  const papel = (usuario.papel || sessao?.papel || 'ENTREVISTADOR').toUpperCase();
   const isAdmin = papel === 'ADMIN';
-  const isAuditor = papel === 'ADMIN' || papel === 'FINANCEIRO';
+  const isAuditor = papel === 'ADMIN';
 
   const { isMenuOpen, closeMenu } = useMenu();
+
+  const isFinanceiro = papel === 'FINANCEIRO';
+  const podeVerCashback = papel === 'ADMIN' || papel === 'FINANCEIRO';
 
   const menuGeral = [
     { label: 'Início', path: '/home', icon: 'home' },
     { label: 'Empresas', path: '/companies', icon: 'domain' },
-  { label: 'War Room', path: '/war-room', icon: 'monitoring' },
-    { label: 'Entrevistas', path: '/interviews', icon: 'assignment' },
+    { label: 'War Room', path: '/war-room', icon: 'monitoring' },
+    ...(!isFinanceiro ? [{ label: 'Entrevistas', path: '/interviews', icon: 'assignment' }] : []),
     { label: 'Aprovações', path: '/approvals', icon: 'verified' },
-    { label: 'Almoço', path: '/lunch', icon: 'restaurant' },
+    ...(podeVerCashback ? [{ label: 'Cashback Empresas', path: '/cashback', icon: 'savings' }] : []),
+    ...(!isFinanceiro ? [{ label: 'Almoço', path: '/lunch', icon: 'restaurant' }] : []),
   ];
 
   const menuAdmin = [
@@ -138,13 +142,13 @@ export default function Sidebar() {
         </div>
 
         {/* Bloco 2: Administração (Visível apenas para ADMIN) */}
-        {isAuditor && (
+        {isAdmin && (
           <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '1rem' }}>
             <span style={{ display: 'block', fontSize: '0.7rem', fontWeight: '800', color: '#ea580c', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '0.5rem', paddingLeft: '0.5rem' }}>
               Administração
             </span>
             <nav>
-              {menuAdmin.filter((item) => isAdmin || item.path === '/admin/audit').map((item) => (
+              {menuAdmin.map((item) => (
                 <Link key={item.path} to={item.path} onClick={closeMenu} style={linkEstilo(item.path)}>
                   <span className="material-symbols-outlined" style={{ fontSize: '1.15rem' }}>{item.icon}</span>
                   {item.label}

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
+import { formatarEventoAoVivo, tempoRelativo } from '../components/NotificationBell';
 
 const ROTAS_SISTEMA = {
   "companies": "/companies",
@@ -55,10 +56,21 @@ const isCadastradoGiants = (p) =>
 export default function Home() {
   const navigate = useNavigate();
   const { turmaSelecionada, turmaAtual, turmaEncerrada, isAdmin } = useTurma();
+  const papelUsuario = (() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('sessao_operador') || '{}');
+      return String(s?.usuario?.papel || s?.papel || '').toUpperCase();
+    } catch (_) {
+      return '';
+    }
+  })();
+  const isFinanceiro = papelUsuario === 'FINANCEIRO';
 
   const [clientes, setClientes] = useState([]);
   const [mesas, setMesas] = useState([]);
   const [propostas, setPropostas] = useState([]);
+  const [feedAoVivo, setFeedAoVivo] = useState([]);
+  const [resumoAlcada, setResumoAlcada] = useState({ pendentes_comercial: 0, pendentes_financeiro: 0 });
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
   const [buscaRapida, setBuscaRapida] = useState('');
@@ -71,15 +83,18 @@ export default function Home() {
       setErro('');
       const tId = turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491';
 
-      const [cliRes, auxRes, propRes] = await Promise.all([
+      const [cliRes, auxRes, propRes, notifRes] = await Promise.all([
         api.get(`/clientes?turmaId=${tId}`),
         api.get(`/auxiliares?turmaId=${tId}`).catch(() => ({ mesas: [] })),
-        api.get(`/financeiro/propostas?turmaId=${tId}`).catch(() => [])
+        api.get(`/financeiro/propostas?turmaId=${tId}`).catch(() => []),
+        api.get(`/notificacoes?turmaId=${tId}`).catch(() => ({ eventos: [], resumo: {} }))
       ]);
 
       setClientes(Array.isArray(cliRes) ? cliRes : cliRes?.clientes || []);
       setMesas(Array.isArray(auxRes?.mesas) ? auxRes.mesas : []);
       setPropostas(Array.isArray(propRes) ? propRes : propRes?.propostas || []);
+      setFeedAoVivo(Array.isArray(notifRes?.eventos) ? notifRes.eventos : []);
+      if (notifRes?.resumo) setResumoAlcada(notifRes.resumo);
       setAtualizadoEm(new Date());
     } catch (err) {
       setErro(err.message || 'Erro ao carregar indicadores operacionais.');
@@ -101,6 +116,10 @@ export default function Home() {
   }, [autoRefresh, turmaSelecionada, carregarCockpit]);
 
   const abrirFichaEmpresa = (idFicha) => {
+    if (isFinanceiro) {
+      navigate(ROTAS_SISTEMA.companies);
+      return;
+    }
     if (ROTAS_SISTEMA.interviewEdit && ROTAS_SISTEMA.interviewEdit.includes(':id')) {
       navigate(ROTAS_SISTEMA.interviewEdit.replace(':id', String(idFicha)));
     } else {
@@ -220,31 +239,35 @@ export default function Home() {
   const atalhosRapidos = [
     {
       titulo: 'Base de Empresas',
-      subtitulo: 'Check-in de almoço (R$ 1.000 / Cortesia) e abertura de fichas',
+      subtitulo: isFinanceiro ? 'Consulta de empresas, sócios, status de almoço e CNPJ' : 'Check-in de almoço (R$ 1.000 / Cortesia) e status por CNPJ',
       icone: 'domain',
       cor: '#ff5722',
       bgIcone: '#fff7ed',
       rota: ROTAS_SISTEMA.companies,
       badge: `${resumoSalao.fichasPreenchidasQtd} fichas liberadas`
     },
-    {
-      titulo: 'Salão de Lunch',
-      subtitulo: 'Alocar casais/sócios nas mesas e acompanhar ocupação ao vivo',
-      icone: 'table_restaurant',
-      cor: '#0369a1',
-      bgIcone: '#f0f9ff',
-      rota: ROTAS_SISTEMA.lunch,
-      badge: `${resumoSalao.aguardandoMesa.length} aguardando mesa`
-    },
-    {
-      titulo: 'Entrevistas & Fechamento',
-      subtitulo: 'Conduzir negociação comercial, cashback e emissão de proposta',
-      icone: 'assignment',
-      cor: '#7c3aed',
-      bgIcone: '#f5f3ff',
-      rota: ROTAS_SISTEMA.interviews,
-      badge: `${resumoSalao.emAtendimentoMesaQtd} em mesa agora`
-    },
+    ...(!isFinanceiro
+      ? [
+          {
+            titulo: 'Salão de Lunch',
+            subtitulo: 'Alocar casais/sócios nas mesas e acompanhar ocupação ao vivo',
+            icone: 'table_restaurant',
+            cor: '#0369a1',
+            bgIcone: '#f0f9ff',
+            rota: ROTAS_SISTEMA.lunch,
+            badge: `${resumoSalao.aguardandoMesa.length} aguardando mesa`
+          },
+          {
+            titulo: 'Entrevistas & Fechamento',
+            subtitulo: 'Conduzir negociação comercial, cashback e emissão de proposta',
+            icone: 'assignment',
+            cor: '#7c3aed',
+            bgIcone: '#f5f3ff',
+            rota: ROTAS_SISTEMA.interviews,
+            badge: `${resumoSalao.emAtendimentoMesaQtd} em mesa agora`
+          }
+        ]
+      : []),
     {
       titulo: 'Aprovações (Financeiro)',
       subtitulo: 'Análise de crédito/Serasa, aprovação de contratos e CSV',
@@ -254,6 +277,19 @@ export default function Home() {
       rota: ROTAS_SISTEMA.approvals,
       badge: `${resumoSalao.propPendentesQtd} pendente(s)`
     },
+    ...(isFinanceiro || isAdmin
+      ? [
+          {
+            titulo: 'Cashback por Empresa',
+            subtitulo: 'Consulta de créditos de almoço, upgrade 90%/100% e abatimentos',
+            icone: 'savings',
+            cor: '#15803d',
+            bgIcone: '#dcfce7',
+            rota: '/cashback',
+            badge: 'Consulta CNPJ'
+          }
+        ]
+      : []),
     {
       titulo: 'War Room Executivo',
       subtitulo: 'Placar Caixa vs. Competência, GIANTS/PAC e Panorama PDF',
@@ -507,6 +543,40 @@ export default function Home() {
         </div>
       </div>
 
+      {!isFinanceiro && Number(resumoAlcada.pendentes_comercial || 0) > 0 && (
+        <div
+          onClick={() => navigate(ROTAS_SISTEMA.approvals)}
+          style={{
+            background: '#fffbeb',
+            border: '1.5px solid #f59e0b',
+            borderRadius: '12px',
+            padding: '0.95rem 1.25rem',
+            marginBottom: '1.25rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '1rem',
+            flexWrap: 'wrap',
+            cursor: 'pointer'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+            <span className="material-symbols-outlined" style={{ color: '#d97706', fontSize: '1.5rem' }}>gavel</span>
+            <div>
+              <div style={{ fontSize: '0.88rem', fontWeight: '900', color: '#92400e' }}>
+                {resumoAlcada.pendentes_comercial} Proposta(s) Aguardando Alçada Comercial do Gestor
+              </div>
+              <div style={{ fontSize: '0.76rem', color: '#b45309' }}>
+                Exceção de desconto, entrada abaixo de 1 parcela ou condição especial aguardando aval antes do Financeiro.
+              </div>
+            </div>
+          </div>
+          <span style={{ background: '#d97706', color: '#ffffff', padding: '0.42rem 0.85rem', borderRadius: '8px', fontSize: '0.78rem', fontWeight: '800' }}>
+            Analisar Agora →
+          </span>
+        </div>
+      )}
+
       {erro && (
         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', padding: '0.85rem 1rem', borderRadius: '10px', marginBottom: '1.25rem', fontWeight: '600' }}>
           {erro}
@@ -537,7 +607,7 @@ export default function Home() {
         </div>
 
         <div
-          onClick={() => navigate(ROTAS_SISTEMA.lunch)}
+          onClick={() => navigate(isFinanceiro ? ROTAS_SISTEMA.companies : ROTAS_SISTEMA.lunch)}
           style={{
             background: resumoSalao.aguardandoMesa.length > 0 ? '#fff7ed' : '#ffffff',
             border: resumoSalao.aguardandoMesa.length > 0 ? '1.5px solid #fdba74' : '1px solid #e2e8f0',
@@ -561,7 +631,7 @@ export default function Home() {
         </div>
 
         <div
-          onClick={() => navigate(ROTAS_SISTEMA.lunch)}
+          onClick={() => navigate(isFinanceiro ? ROTAS_SISTEMA.companies : ROTAS_SISTEMA.lunch)}
           style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1.2rem', cursor: 'pointer' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -675,7 +745,7 @@ export default function Home() {
             </h3>
             <button
               type="button"
-              onClick={() => navigate(ROTAS_SISTEMA.lunch)}
+              onClick={() => navigate(isFinanceiro ? ROTAS_SISTEMA.companies : ROTAS_SISTEMA.lunch)}
               style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fdba74', padding: '0.32rem 0.7rem', borderRadius: '7px', fontSize: '0.75rem', fontWeight: '800', cursor: 'pointer' }}
             >
               Ir para Salão →
@@ -723,7 +793,7 @@ export default function Home() {
                     </span>
                     <button
                       type="button"
-                      onClick={() => navigate(ROTAS_SISTEMA.lunch)}
+                      onClick={() => navigate(isFinanceiro ? ROTAS_SISTEMA.companies : ROTAS_SISTEMA.lunch)}
                       style={{ background: '#0f172a', color: '#fff', border: 'none', padding: '0.32rem 0.65rem', borderRadius: '6px', fontSize: '0.74rem', fontWeight: '700', cursor: 'pointer' }}
                     >
                       Alocar
@@ -792,47 +862,75 @@ export default function Home() {
             </div>
           )}
 
-          {resumoSalao.ultimasMovimentacoes.length === 0 ? (
+          {feedAoVivo.length === 0 ? (
             <p style={{ fontSize: '0.84rem', color: '#64748b', margin: 0 }}>
               Nenhuma movimentação registrada nesta turma ainda.
             </p>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {resumoSalao.ultimasMovimentacoes.map((mov) => (
-                <div
-                  key={mov.chave}
-                  style={{
-                    border: '1px solid #f1f5f9',
-                    borderRadius: '8px',
-                    padding: '0.62rem 0.85rem',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: '0.5rem'
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: '800', fontSize: '0.85rem', color: '#0f172a' }}>{mov.empresa}</div>
-                    <div style={{ fontSize: '0.73rem', color: '#64748b' }}>{mov.titular}</div>
-                  </div>
-                  <span
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', maxHeight: '380px', overflowY: 'auto' }}>
+              {feedAoVivo.slice(0, 12).map((ev) => {
+                const info = formatarEventoAoVivo(ev);
+                return (
+                  <div
+                    key={ev.id}
+                    onClick={() => navigate(isFinanceiro && (info.rota === '/lunch' || info.rota.startsWith('/interviews')) ? '/companies' : info.rota)}
                     style={{
-                      fontSize: '0.7rem',
-                      fontWeight: '800',
-                      padding: '0.2rem 0.55rem',
-                      borderRadius: '6px',
-                      background: mov.fechada ? '#dcfce7' : mov.mesaAlocada !== null ? '#e0f2fe' : '#fff7ed',
-                      color: mov.fechada ? '#166534' : mov.mesaAlocada !== null ? '#0369a1' : '#c2410c'
+                      border: '1px solid #f1f5f9',
+                      borderRadius: '9px',
+                      padding: '0.65rem 0.85rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      gap: '0.65rem',
+                      cursor: 'pointer',
+                      background: '#fafafa'
                     }}
                   >
-                    {mov.fechada
-                      ? 'Ficha Finalizada'
-                      : mov.mesaAlocada !== null
-                      ? `Na Mesa ${mov.mesaAlocada}`
-                      : 'Almoço Liberado'}
-                  </span>
-                </div>
-              ))}
+                    <div style={{ display: 'flex', gap: '0.6rem', minWidth: 0, flex: 1 }}>
+                      <div
+                        style={{
+                          width: '30px',
+                          height: '30px',
+                          minWidth: '30px',
+                          borderRadius: '8px',
+                          background: info.fundo,
+                          color: info.cor,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          marginTop: '1px'
+                        }}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: '1.05rem' }}>{info.icone}</span>
+                      </div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontWeight: '800', fontSize: '0.82rem', color: '#0f172a', lineHeight: 1.3 }}>
+                          {info.titulo}
+                        </div>
+                        <div style={{ fontSize: '0.73rem', color: '#475569', marginTop: '0.15rem', lineHeight: 1.3 }}>
+                          {info.descricao}
+                        </div>
+                        <div style={{ fontSize: '0.67rem', color: '#94a3b8', marginTop: '0.2rem', fontWeight: '600' }}>
+                          {ev.usuario_nome ? `${ev.usuario_nome} • ` : ''}{tempoRelativo(ev.created_at)}
+                        </div>
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        fontWeight: '800',
+                        padding: '0.2rem 0.5rem',
+                        borderRadius: '6px',
+                        background: info.fundo,
+                        color: info.cor,
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {info.badge}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

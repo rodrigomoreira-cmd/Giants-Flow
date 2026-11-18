@@ -1,8 +1,20 @@
-﻿import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import apiDefault, { api as apiNamed } from '../services/api';
 const api = apiNamed || apiDefault;
 
 const TurmaContext = createContext();
+
+const obterTokenSessao = () => {
+  try {
+    const raw = localStorage.getItem('sessao_operador') || sessionStorage.getItem('sessao_operador');
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    return s?.token || null;
+  } catch (_) {
+    return null;
+  }
+};
 
 const verificarPerfilAdmin = () => {
   const papeisAdmin = ['admin', 'administrador', 'superadmin', 'master', 'system', 'diretor'];
@@ -20,12 +32,13 @@ const verificarPerfilAdmin = () => {
 };
 
 export function TurmaProvider({ children }) {
+  const location = useLocation();
   const [turmas, setTurmas] = useState([]);
   const [turmaSelecionada, setTurmaSelecionada] = useState(() => {
     return localStorage.getItem('turma_ativa_id') || '';
   });
-  const [carregandoTurmas, setCarregandoTurmas] = useState(true);
-  const isAdmin = verificarPerfilAdmin();
+  const [carregandoTurmas, setCarregandoTurmas] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(() => verificarPerfilAdmin());
 
   const sincronizarStorageTurma = (t) => {
     if (!t) return;
@@ -37,6 +50,17 @@ export function TurmaProvider({ children }) {
   };
 
   const carregarTurmas = useCallback(async () => {
+    const token = obterTokenSessao();
+    const naTelaLogin = location.pathname === '/login';
+    const adminAtual = verificarPerfilAdmin();
+    setIsAdmin(adminAtual);
+
+    if (!token || naTelaLogin) {
+      setTurmas([]);
+      setCarregandoTurmas(false);
+      return;
+    }
+
     try {
       setCarregandoTurmas(true);
       const res = await api.get('/turmas');
@@ -44,13 +68,12 @@ export function TurmaProvider({ children }) {
       setTurmas(lista);
 
       const ativas = lista.filter((t) => Boolean(t.ativa));
-      const poolPermitido = isAdmin ? lista : (ativas.length > 0 ? ativas : lista);
+      const poolPermitido = adminAtual ? lista : (ativas.length > 0 ? ativas : lista);
 
       const salva = localStorage.getItem('turma_ativa_id');
       const turmaSalvaObj = poolPermitido.find((t) => String(t.id) === String(salva));
 
-      // Se a turma salva ainda é permitida (e ativa para não-admin), mantém; senão troca para a primeira ativa
-      if (turmaSalvaObj && (isAdmin || Boolean(turmaSalvaObj.ativa))) {
+      if (turmaSalvaObj) {
         setTurmaSelecionada(String(turmaSalvaObj.id));
         sincronizarStorageTurma(turmaSalvaObj);
       } else {
@@ -66,33 +89,37 @@ export function TurmaProvider({ children }) {
     } finally {
       setCarregandoTurmas(false);
     }
-  }, [isAdmin]);
+  }, [location.pathname]);
 
   useEffect(() => {
     carregarTurmas();
+
+    const aoAtualizarSessao = () => {
+      carregarTurmas();
+    };
+    window.addEventListener('sessao_atualizada', aoAtualizarSessao);
+    return () => window.removeEventListener('sessao_atualizada', aoAtualizarSessao);
   }, [carregarTurmas]);
+
+  const ativasLista = turmas.filter((t) => Boolean(t.ativa));
+  const turmasVisiveis = isAdmin
+    ? turmas
+    : (ativasLista.length > 0 ? ativasLista : turmas);
 
   const mudarTurma = (novoId) => {
     const idStr = String(novoId);
-    const encontrada = turmas.find((t) => String(t.id) === idStr);
-    if (encontrada && !encontrada.ativa && !isAdmin) {
-      const primeiraAtiva = turmas.find((t) => Boolean(t.ativa));
-      if (primeiraAtiva) {
-        setTurmaSelecionada(String(primeiraAtiva.id));
-        sincronizarStorageTurma(primeiraAtiva);
-      }
-      return;
-    }
-    setTurmaSelecionada(idStr);
-    if (encontrada) sincronizarStorageTurma(encontrada);
-    else localStorage.setItem('turma_ativa_id', idStr);
+    const encontrada = turmasVisiveis.find((t) => String(t.id) === idStr) || turmas.find((t) => String(t.id) === idStr);
+    if (!encontrada) return;
+    setTurmaSelecionada(String(encontrada.id));
+    sincronizarStorageTurma(encontrada);
   };
 
-  const turmasVisiveis = isAdmin
-    ? turmas
-    : turmas.filter((t) => Boolean(t.ativa));
+  const turmaAtual =
+    turmasVisiveis.find((t) => String(t.id) === String(turmaSelecionada)) ||
+    turmas.find((t) => String(t.id) === String(turmaSelecionada)) ||
+    turmasVisiveis[0] ||
+    null;
 
-  const turmaAtual = turmas.find((t) => String(t.id) === String(turmaSelecionada)) || null;
   const turmaEncerrada = Boolean(turmaAtual && !turmaAtual.ativa);
 
   return (
@@ -100,7 +127,7 @@ export function TurmaProvider({ children }) {
       value={{
         turmas,
         turmasVisiveis,
-        turmaSelecionada,
+        turmaSelecionada: turmaAtual ? String(turmaAtual.id) : turmaSelecionada,
         turmaAtual,
         turmaEncerrada,
         isAdmin,

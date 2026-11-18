@@ -62,6 +62,9 @@ export default function InterviewEdit() {
     data_entrada_complementar: '',
     valor_permuta: '',
     identificador_pagamento: '',
+    parecer_financeiro: '',
+    pagamentosEntrada: [{ forma: 'Pix', valor: 10000, identificador: '' }],
+    comprovanteEntrada: null,
     cashback: 0,
     almoco_pago: false,
     cashback_almoco_cnpj: 0,
@@ -174,7 +177,36 @@ export default function InterviewEdit() {
             cashback_upgrade_cnpj: cashbackUpgradeCnpj,
             historico_produtos_elegiveis: historicoElegivel,
             cashback: cashbackAlmocoCnpj + cashbackUpgradeCnpj,
-            socios: qtdEntrando
+            socios: qtdEntrando,
+            parecer_financeiro: clienteEncontrado.parecer_financeiro || '',
+            ...(clienteEncontrado.dados_proposta && typeof clienteEncontrado.dados_proposta === 'object'
+              ? {
+                  categoria_produto: clienteEncontrado.dados_proposta.categoriaProduto || 'GIANTS',
+                  produto_nome: clienteEncontrado.dados_proposta.produtoNome || 'GIANTS - Titular (Empresa)',
+                  valor_entrada: Number(clienteEncontrado.dados_proposta.valorEntrada ?? 10000),
+                  forma_entrada: clienteEncontrado.dados_proposta.formaEntrada || 'Pix',
+                  valor_entrada_complementar: clienteEncontrado.dados_proposta.entradaComplementar || '',
+                  data_entrada_complementar: clienteEncontrado.dados_proposta.dataEntradaComplementar || '',
+                  valor_permuta: clienteEncontrado.dados_proposta.permuta || '',
+                  identificador_pagamento: clienteEncontrado.dados_proposta.identificadorPagamento || '',
+                  cashback: Number(clienteEncontrado.dados_proposta.cashback ?? (cashbackAlmocoCnpj + cashbackUpgradeCnpj)),
+                  parcelas: Number(clienteEncontrado.dados_proposta.quantidadeParcelas ?? 12),
+                  forma_restante: clienteEncontrado.dados_proposta.formaRestante || 'Pix',
+                  desconto: Number(clienteEncontrado.dados_proposta.desconto ?? 0),
+                  resultado_obs: clienteEncontrado.dados_proposta.observacoes || '',
+                  pagamentosEntrada:
+                    Array.isArray(clienteEncontrado.dados_proposta.pagamentosEntrada) &&
+                    clienteEncontrado.dados_proposta.pagamentosEntrada.length > 0
+                      ? clienteEncontrado.dados_proposta.pagamentosEntrada
+                      : [
+                          {
+                            forma: clienteEncontrado.dados_proposta.formaEntrada || 'Pix',
+                            valor: Number(clienteEncontrado.dados_proposta.valorEntrada ?? 10000),
+                            identificador: clienteEncontrado.dados_proposta.identificadorPagamento || ''
+                          }
+                        ]
+                }
+              : {})
           }));
         } else {
           setSociosLista([
@@ -254,6 +286,85 @@ export default function InterviewEdit() {
   };
 
   // Cálculos comerciais dinâmicos conforme Linha + Subproduto + Sócios Marcados
+
+  const sincronizarPagamentosEntrada = (novasLinhas) => {
+    const listaSegura = novasLinhas.length > 0 ? novasLinhas : [{ forma: 'Pix', valor: 0, identificador: '' }];
+    const soma = listaSegura.reduce((acc, item) => acc + Math.max(0, Number(item.valor) || 0), 0);
+    const idsConcat = listaSegura
+      .map((item) => (item.identificador ? `${item.forma}: ${item.identificador}` : ''))
+      .filter(Boolean)
+      .join(' | ');
+    setFicha((prev) => ({
+      ...prev,
+      pagamentosEntrada: listaSegura,
+      valor_entrada: soma,
+      forma_entrada: listaSegura[0]?.forma || prev.forma_entrada,
+      identificador_pagamento: idsConcat || prev.identificador_pagamento
+    }));
+  };
+
+  const anexarComprovanteNaLinha = (indiceLinha, objComp) => {
+    setFicha((prev) => {
+      const atuais = Array.isArray(prev.pagamentosEntrada) && prev.pagamentosEntrada.length > 0
+        ? [...prev.pagamentosEntrada]
+        : [{ forma: prev.forma_entrada || 'Pix', valor: prev.valor_entrada || 0, identificador: prev.identificador_pagamento || '', comprovante: null }];
+
+      const alvoIdx =
+        indiceLinha !== null && indiceLinha !== undefined
+          ? indiceLinha
+          : Math.max(0, atuais.findIndex((item) => !item.comprovante));
+
+      if (atuais[alvoIdx]) {
+        atuais[alvoIdx] = { ...atuais[alvoIdx], comprovante: objComp };
+      }
+
+      const primeiroComp = atuais.map((x) => x.comprovante).find(Boolean) || null;
+      return {
+        ...prev,
+        pagamentosEntrada: atuais,
+        comprovanteEntrada: primeiroComp
+      };
+    });
+  };
+
+  const processarArquivoComprovante = (file, indiceLinha = null) => {
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      setErro('O comprovante deve ter no máximo 8 MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '');
+      if (file.type.startsWith('image/')) {
+        const img = new Image();
+        img.onload = () => {
+          const maxW = 1280;
+          const scale = img.width > maxW ? maxW / img.width : 1;
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const comprimido = canvas.toDataURL('image/jpeg', 0.78);
+          anexarComprovanteNaLinha(indiceLinha, {
+            nome: file.name || 'comprovante.jpg',
+            tipo: 'image/jpeg',
+            dataUrl: comprimido
+          });
+        };
+        img.src = dataUrl;
+      } else {
+        anexarComprovanteNaLinha(indiceLinha, {
+          nome: file.name || 'comprovante.pdf',
+          tipo: file.type || 'application/pdf',
+          dataUrl
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const calcularValores = () => {
     const catUpper = String(ficha.categoria_produto || 'GIANTS').toUpperCase();
     const prodSelecionado =
@@ -417,6 +528,8 @@ export default function InterviewEdit() {
           data_entrada_complementar: ficha.data_entrada_complementar || '',
           valor_permuta: calc.permuta,
           identificador_pagamento: ficha.identificador_pagamento || '',
+          pagamentosEntrada: ficha.pagamentosEntrada || [],
+          comprovanteEntrada: ficha.comprovanteEntrada || null,
           saldo_restante: calc.saldo,
           parcelas: calc.parcelas,
           valor_parcela: calc.valorParcela,
@@ -583,7 +696,7 @@ export default function InterviewEdit() {
           categoria_produto: op.cat,
           produto_nome: nomeSub,
           parcelas: totalPlano,
-          valor_entrada: calcularParcelaEntradaPAC(obterValorBaseProduto(novaCat, nomeSub), totalPlano),
+          valor_entrada: calcularParcelaEntradaPAC(Math.max(0, obterValorBaseProduto(op.cat, nomeSub) - novoCashback - Math.max(0, Number(prev.desconto) || 0)), totalPlano > 1 ? totalPlano + 1 : 1),
           cashback: novoCashback
         };
       });
@@ -952,6 +1065,17 @@ export default function InterviewEdit() {
             {/* ==================== ETAPA 2: DESFECHO & NEGOCIAÇÃO ==================== */}
             {etapaAtual === 2 && (
               <>
+                {String(ficha.status_aprovacao || '').toLowerCase() === 'ajuste_solicitado' && (
+                  <div style={{ background: '#fffbeb', border: '2px solid #f59e0b', borderRadius: '12px', padding: '1rem 1.2rem', color: '#92400e' }}>
+                    <div style={{ fontWeight: '900', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                      <span className="material-symbols-outlined" style={{ color: '#d97706' }}>reply</span>
+                      Proposta Devolvida para Ajuste na Mesa
+                    </div>
+                    <div style={{ fontSize: '0.83rem', marginTop: '0.3rem', fontWeight: '600' }}>
+                      Motivo informado: <strong>{ficha.parecer_financeiro || 'Ajustar condições comerciais/pagamento e reenviar.'}</strong>
+                    </div>
+                  </div>
+                )}
                 <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '1.35rem' }}>
                   <h3 style={{ margin: '0 0 0.25rem 0', fontSize: '1.05rem', fontWeight: '800', color: '#0f172a' }}>
                     1. Qual foi o desfecho na mesa? *
@@ -1178,9 +1302,9 @@ export default function InterviewEdit() {
                               return {
                                 ...prev,
                                 categoria_produto: novaCat,
-                                produto_nome: nomeSub,
-                                parcelas: totalPlano,
-                                valor_entrada: calcularParcelaEntradaPAC(obterValorBaseProduto(novaCat, nomeSub), totalPlano),
+                                  produto_nome: nomeSub,
+                                  parcelas: totalPlano,
+                                  valor_entrada: calcularParcelaEntradaPAC(Math.max(0, obterValorBaseProduto(novaCat, nomeSub) - novoCashback - Math.max(0, Number(prev.desconto) || 0)), totalPlano > 1 ? totalPlano + 1 : 1),
                                 cashback: novoCashback,
                                 resultado_comercial: mapaResultado[novaCat] || prev.resultado_comercial
                               };
@@ -1237,29 +1361,145 @@ export default function InterviewEdit() {
                         </select>
                       </div>
 
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>Valor da Entrada (R$) *</label>
-                        <input
-                          type="number"
-                          value={ficha.valor_entrada}
-                          onChange={(e) => atualizarCampo('valor_entrada', Number(e.target.value))}
-                          style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontWeight: '700' }}
-                        />
-                      </div>
+                      <div
+                        onPaste={(e) => {
+                          const item = Array.from(e.clipboardData?.items || []).find((it) => it.type.startsWith('image/'));
+                          if (item) {
+                            e.preventDefault();
+                            processarArquivoComprovante(item.getAsFile());
+                          }
+                        }}
+                        style={{ gridColumn: '1 / -1', background: '#f8fafc', border: '1.5px solid #cbd5e1', borderRadius: '10px', padding: '0.9rem' }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <div>
+                            <span style={{ fontSize: '0.82rem', fontWeight: '800', color: '#0f172a' }}>
+                              Composição da Entrada 1 (Multi-Meio) — Total: {fmtBRL(ficha.valor_entrada)}
+                            </span>
+                            <span style={{ display: 'block', fontSize: '0.72rem', color: '#64748b' }}>
+                              Divida entre Pix, Cartões ou Link se necessário e anexe (ou cole com Ctrl+V) o comprovante
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              sincronizarPagamentosEntrada([
+                                ...(ficha.pagamentosEntrada || [{ forma: ficha.forma_entrada, valor: ficha.valor_entrada, identificador: '' }]),
+                                { forma: 'Cartão de Crédito', valor: 0, identificador: '' }
+                              ])
+                            }
+                            style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', borderRadius: '7px', padding: '0.35rem 0.7rem', fontSize: '0.75rem', fontWeight: '800', cursor: 'pointer' }}
+                          >
+                            + Adicionar Meio de Pagamento
+                          </button>
+                        </div>
 
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>Forma da Entrada *</label>
-                        <select
-                          value={ficha.forma_entrada}
-                          onChange={(e) => atualizarCampo('forma_entrada', e.target.value)}
-                          style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', boxSizing: 'border-box' }}
-                        >
-                          <option value="Pix">Pix</option>
-                          <option value="Cartão de Crédito">Cartão de Crédito</option>
-                          <option value="Cartão de Débito">Cartão de Débito</option>
-                          <option value="Link de Pagamento">Link de Pagamento</option>
-                          <option value="Cheque">Cheque</option>
-                        </select>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                          {(ficha.pagamentosEntrada || [{ forma: ficha.forma_entrada, valor: ficha.valor_entrada, identificador: '', comprovante: null }]).map((pg, idxPg) => (
+                            <div
+                              key={idxPg}
+                              onPaste={(e) => {
+                                const item = Array.from(e.clipboardData?.items || []).find((it) => it.type.startsWith('image/'));
+                                if (item) {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  processarArquivoComprovante(item.getAsFile(), idxPg);
+                                }
+                              }}
+                              style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '9px', padding: '0.65rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
+                            >
+                              <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr 1.2fr auto', gap: '0.5rem', alignItems: 'center' }}>
+                                <select
+                                  value={pg.forma}
+                                  onChange={(e) => {
+                                    const copia = [...(ficha.pagamentosEntrada || [])];
+                                    copia[idxPg] = { ...copia[idxPg], forma: e.target.value };
+                                    sincronizarPagamentosEntrada(copia);
+                                  }}
+                                  style={{ width: '100%', padding: '0.52rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '0.82rem', fontWeight: '600' }}
+                                >
+                                  <option value="Pix">Pix</option>
+                                  <option value="Cartão de Crédito">Cartão de Crédito</option>
+                                  <option value="Cartão de Débito">Cartão de Débito</option>
+                                  <option value="Link de Pagamento">Link de Pagamento</option>
+                                  <option value="Cheque">Cheque</option>
+                                </select>
+
+                                <input
+                                  type="number"
+                                  min="0"
+                                  placeholder="Valor (R$)"
+                                  value={pg.valor}
+                                  onChange={(e) => {
+                                    const copia = [...(ficha.pagamentosEntrada || [])];
+                                    copia[idxPg] = { ...copia[idxPg], valor: Number(e.target.value) };
+                                    sincronizarPagamentosEntrada(copia);
+                                  }}
+                                  style={{ width: '100%', padding: '0.52rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontWeight: '700', fontSize: '0.82rem' }}
+                                />
+
+                                <input
+                                  type="text"
+                                  placeholder="CV / NSU / ID Pix..."
+                                  value={pg.identificador || ''}
+                                  onChange={(e) => {
+                                    const copia = [...(ficha.pagamentosEntrada || [])];
+                                    copia[idxPg] = { ...copia[idxPg], identificador: e.target.value };
+                                    sincronizarPagamentosEntrada(copia);
+                                  }}
+                                  style={{ width: '100%', padding: '0.52rem', borderRadius: '8px', border: '1px solid #bae6fd', background: '#f0f9ff', boxSizing: 'border-box', fontSize: '0.8rem' }}
+                                />
+
+                                {(ficha.pagamentosEntrada || []).length > 1 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const copia = (ficha.pagamentosEntrada || []).filter((_, i) => i !== idxPg);
+                                      sincronizarPagamentosEntrada(copia);
+                                    }}
+                                    title="Remover esta forma de pagamento"
+                                    style={{ background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', padding: '0.45rem 0.6rem', fontWeight: '800', cursor: 'pointer' }}
+                                  >
+                                    ✕
+                                  </button>
+                                ) : <span />}
+                              </div>
+
+                              {/* Comprovante individual desta forma de pagamento */}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', paddingTop: '0.4rem', borderTop: '1px dashed #e2e8f0' }}>
+                                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0.3rem 0.65rem', fontSize: '0.74rem', fontWeight: '700', color: '#334155', cursor: 'pointer' }}>
+                                  <span className="material-symbols-outlined" style={{ fontSize: '0.95rem', color: '#0284c7' }}>attach_file</span>
+                                  {pg.comprovante ? `Trocar Comprovante (${pg.forma})` : `Anexar Comprovante — ${pg.forma} (Foto/PDF ou Ctrl+V aqui)`}
+                                  <input
+                                    type="file"
+                                    accept="image/*,application/pdf"
+                                    onChange={(e) => {
+                                      processarArquivoComprovante(e.target.files?.[0], idxPg);
+                                      e.target.value = '';
+                                    }}
+                                    style={{ display: 'none' }}
+                                  />
+                                </label>
+
+                                {pg.comprovante ? (
+                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', background: '#dcfce7', color: '#166534', border: '1px solid #86efac', borderRadius: '6px', padding: '0.25rem 0.6rem', fontSize: '0.73rem', fontWeight: '800' }}>
+                                    <span>✔ {pg.comprovante.nome}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => anexarComprovanteNaLinha(idxPg, null)}
+                                      title="Remover comprovante desta linha"
+                                      style={{ background: 'transparent', border: 'none', color: '#b91c1c', fontWeight: '900', cursor: 'pointer' }}
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span style={{ fontSize: '0.71rem', color: '#94a3b8' }}>Clique nesta linha e use Ctrl+V ou anexe o arquivo</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
 
                       <div>
@@ -1823,4 +2063,6 @@ export default function InterviewEdit() {
     </div>
   );
 }
+
+
 

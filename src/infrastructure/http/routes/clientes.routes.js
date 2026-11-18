@@ -168,6 +168,18 @@ router.patch('/clientes/:id/mesa', async (req, res) => {
 
     const { rows } = await client.query(sqlUpdate, [mesaNum, assentoNum, fichaId]);
 
+    if (rows[0] && mesaNum !== null) {
+      await registrarAuditoria(client, {
+        turmaId,
+        fichaId,
+        empresa: rows[0].empresa,
+        cnpj: null,
+        acao: 'ALOCACAO_MESA',
+        detalhes: `${rows[0].nome_participante || 'Participante'} alocado na Mesa ${mesaNum}${assentoNum ? ' (Assento ' + assentoNum + ')' : ''}`,
+        req
+      });
+    }
+
     await client.query('COMMIT');
     emTransacao = false;
     res.json(rows[0]);
@@ -200,9 +212,14 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
     await exigirTurmaAtiva({ fichaId });
     const { tipo, cv_cartao, participantes_ids, todos_empresa_ids } = req.body;
     const papelReqAlmoco = obterPapelUsuario(req);
-    if (String(tipo || '').trim().toLowerCase() === 'cortesia' && !['ADMIN', 'FINANCEIRO'].includes(papelReqAlmoco)) {
+    if (papelReqAlmoco === 'FINANCEIRO') {
       return res.status(403).json({
-        error: 'Acesso negado (RBAC): somente perfis Administrador ou Financeiro podem conceder cortesia de almoço.'
+        error: 'Acesso negado (RBAC): o perfil Financeiro não tem permissão para validar ou alterar status de almoço.'
+      });
+    }
+    if (String(tipo || '').trim().toLowerCase() === 'cortesia' && !['ADMIN', 'APROVADOR'].includes(papelReqAlmoco)) {
+      return res.status(403).json({
+        error: 'Acesso negado (RBAC): somente perfis Administrador ou Aprovador podem conceder cortesia de almoço.'
       });
     }
 
@@ -330,7 +347,17 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
       );
     }
 
-    if (tipo === 'cortesia') {
+    if (tipo === 'pago') {
+      await registrarAuditoria(client, {
+        turmaId: base.turma_id,
+        fichaId,
+        empresa: base.empresa,
+        cnpj: base.cnpj || base.cpf_cnpj,
+        acao: 'ALMOCO_PAGO',
+        detalhes: `Almoço Pago (R$ 1.000,00) validado para ${idsParticipantes.length} participante(s)${cv ? ' | CV: ' + cv : ''}`,
+        req
+      });
+    } else if (tipo === 'cortesia') {
       await registrarAuditoria(client, {
         turmaId: base.turma_id,
         fichaId,
@@ -338,6 +365,26 @@ router.patch('/clientes/:id/almoco', async (req, res) => {
         cnpj: base.cnpj || base.cpf_cnpj,
         acao: 'CORTESIA_ALMOCO',
         detalhes: `Cortesia de almoço autorizada (R$ 1.000,00 debitado) para ${idsParticipantes.length} participante(s)`,
+        req
+      });
+    } else if (tipo === 'sem_almoco') {
+      await registrarAuditoria(client, {
+        turmaId: base.turma_id,
+        fichaId,
+        empresa: base.empresa,
+        cnpj: base.cnpj || base.cpf_cnpj,
+        acao: 'ATENDIMENTO_SEM_ALMOCO',
+        detalhes: `Liberado para atendimento sem almoço (${idsParticipantes.length} participante(s))`,
+        req
+      });
+    } else if (tipo === 'giants') {
+      await registrarAuditoria(client, {
+        turmaId: base.turma_id,
+        fichaId,
+        empresa: base.empresa,
+        cnpj: base.cnpj || base.cpf_cnpj,
+        acao: 'CHECKIN_GIANTS',
+        detalhes: 'Check-in Membro GIANTS confirmado na recepção',
         req
       });
     }
@@ -375,11 +422,19 @@ router.patch('/clientes/:id', async (req, res) => {
     const cvFinal = cv_cartao !== undefined ? (String(cv_cartao).trim() || null) : undefined;
     const cortesiaFinal = cortesia_almoco !== undefined ? cortesia_almoco : cortesia;
 
+    const papelReqCliente = obterPapelUsuario(req);
+    if (
+      papelReqCliente === 'FINANCEIRO' &&
+      (almoco_pago !== undefined || cortesiaFinal !== undefined || valor_almoco !== undefined || cv_cartao !== undefined)
+    ) {
+      return res.status(403).json({
+        error: 'Acesso negado (RBAC): o perfil Financeiro não tem permissão para validar ou alterar status de almoço.'
+      });
+    }
     if (cortesiaFinal === true) {
-      const papelReq = obterPapelUsuario(req);
-      if (!['ADMIN', 'FINANCEIRO'].includes(papelReq)) {
+      if (!['ADMIN', 'APROVADOR'].includes(papelReqCliente)) {
         return res.status(403).json({
-          error: 'Acesso negado (RBAC): somente perfis Administrador ou Financeiro podem conceder cortesia de almoço.'
+          error: 'Acesso negado (RBAC): somente perfis Administrador ou Aprovador podem conceder cortesia de almoço.'
         });
       }
     }
@@ -476,7 +531,7 @@ router.put('/clientes/:id', async (req, res) => {
       const cashbackAnterior = Number(clienteAtual[0].cashback || 0);
       if (Math.abs(cashback - cashbackAnterior) > 0.009) {
         const papelReqCashback = obterPapelUsuario(req);
-        if (!['ADMIN', 'FINANCEIRO'].includes(papelReqCashback)) {
+        if (!['ADMIN', 'APROVADOR', 'FINANCEIRO'].includes(papelReqCashback)) {
           await client.query('ROLLBACK');
           return res.status(403).json({
             error: 'Acesso negado (RBAC): somente perfis Administrador ou Financeiro podem alterar o valor de cashback.'

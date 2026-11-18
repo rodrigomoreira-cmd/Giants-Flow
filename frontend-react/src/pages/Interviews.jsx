@@ -150,7 +150,9 @@ export default function Interviews() {
         if (c.membro_giants) return;
         if (isAprovadaOuConcluida(c)) return;
         const etapaNorm = String(c.etapa_funil || '').trim().toLowerCase();
+        const isAjuste = String(c.status_aprovacao || '').toLowerCase() === 'ajuste_solicitado';
         const fechada =
+          isAjuste ||
           Boolean(c.ficha_fechada) ||
           ['aguardando_aprovacao', 'decisao_futura', 'nao_fechou', 'reprovado', 'reprovada'].includes(etapaNorm);
         if (!fechada) return;
@@ -183,7 +185,7 @@ export default function Interviews() {
             titularNome: titularRef.nome,
             titularCracha: c.nome_cracha || '',
             etapa: c.etapa_funil || 'aguardando_aprovacao',
-            fichaFechada: true,
+            fichaFechada: String(c.status_aprovacao || '').toLowerCase() !== 'ajuste_solicitado' && Boolean(c.ficha_fechada),
             statusAprovacao: c.status_aprovacao || 'pendente',
             statusAlmoco: Boolean(c.almoco_pago || c.cortesia_almoco) ? 'Pago / Liberado' : 'Pendente',
             sociosMesa: [],
@@ -485,6 +487,10 @@ export default function Interviews() {
                       ) : isNaoFechouItem(s) ? (
                         <span style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '0.24rem 0.6rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                           ✕ Não Fechou
+                        </span>
+                      ) : String(s.statusAprovacao || '').toLowerCase() === 'ajuste_solicitado' ? (
+                        <span style={{ background: '#ffedd5', color: '#9a3412', border: '1.5px solid #fdba74', padding: '0.24rem 0.6rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                          ↩ Ajuste Solicitado
                         </span>
                       ) : s.fichaFechada ? (
                         <span style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '0.24rem 0.6rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>

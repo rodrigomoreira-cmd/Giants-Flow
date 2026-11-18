@@ -12,6 +12,10 @@ export default function AdminCompanies() {
   const [cvTemp, setCvTemp] = useState('');
   const [salvandoId, setSalvandoId] = useState(null);
   const [feedback, setFeedback] = useState(null);
+  const [abaAtiva, setAbaAtiva] = useState('conciliacao'); // 'conciliacao' | 'duplicidades'
+  const [auditoriaDup, setAuditoriaDup] = useState(null);
+  const [carregandoDup, setCarregandoDup] = useState(false);
+  const [corrigindoDup, setCorrigindoDup] = useState(false);
 
   const turmaId = turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491';
 
@@ -27,6 +31,63 @@ export default function AdminCompanies() {
   useEffect(() => {
     carregarDados();
   }, [turmaId]);
+
+
+  const carregarAuditoriaDuplicidades = () => {
+    setCarregandoDup(true);
+    api
+      .get(`/admin/auditoria-duplicidades?turmaId=${turmaId}`)
+      .then((res) => setAuditoriaDup(res))
+      .catch(() => setAuditoriaDup(null))
+      .finally(() => setCarregandoDup(false));
+  };
+
+  useEffect(() => {
+    carregarAuditoriaDuplicidades();
+  }, [turmaId]);
+
+  const unificarCnpjGrupo = async (grupo) => {
+    if (!grupo?.cnpjSugerido) {
+      setFeedback({ tipo: 'erro', texto: 'Nenhum CNPJ válido encontrado neste grupo para unificação automática.' });
+      return;
+    }
+    try {
+      setCorrigindoDup(true);
+      await api.post('/admin/corrigir-duplicidade', {
+        acao: 'unificar_cnpj',
+        turmaId,
+        ids: grupo.registros.map((r) => r.id),
+        cnpjUnificado: grupo.cnpjSugerido,
+        empresaUnificada: grupo.empresa
+      });
+      setFeedback({ tipo: 'ok', texto: `CNPJ ${grupo.cnpjSugerido} unificado entre os sócios de ${grupo.empresa}.` });
+      carregarDados();
+      carregarAuditoriaDuplicidades();
+    } catch (err) {
+      setFeedback({ tipo: 'erro', texto: err.message });
+    } finally {
+      setCorrigindoDup(false);
+    }
+  };
+
+  const mesclarDuplicado = async (idPrincipal, idDuplicado) => {
+    try {
+      setCorrigindoDup(true);
+      const resp = await api.post('/admin/corrigir-duplicidade', {
+        acao: 'mesclar_ficha_duplicada',
+        turmaId,
+        idPrincipal,
+        idDuplicado
+      });
+      setFeedback({ tipo: 'ok', texto: resp?.mensagem || 'Registro duplicado mesclado com sucesso.' });
+      carregarDados();
+      carregarAuditoriaDuplicidades();
+    } catch (err) {
+      setFeedback({ tipo: 'erro', texto: err.message });
+    } finally {
+      setCorrigindoDup(false);
+    }
+  };
 
   const classificarStatus = (e) => {
     if (e.membro_giants || String(e.origem || '').toUpperCase() === 'GIANTS') return 'GIANTS';
@@ -157,22 +218,170 @@ export default function AdminCompanies() {
           </p>
         </div>
 
-        <button
-          onClick={carregarDados}
-          style={{
-            padding: '0.6rem 1rem',
-            borderRadius: '8px',
-            border: '1px solid #cbd5e1',
-            background: '#fff',
-            color: '#0f172a',
-            fontWeight: '600',
-            cursor: 'pointer'
-          }}
-        >
-          Atualizar Lista
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => setAbaAtiva('conciliacao')}
+            style={{
+              padding: '0.6rem 1rem',
+              borderRadius: '8px',
+              border: 'none',
+              background: abaAtiva === 'conciliacao' ? '#0f172a' : '#e2e8f0',
+              color: abaAtiva === 'conciliacao' ? '#fff' : '#334155',
+              fontWeight: '700',
+              cursor: 'pointer'
+            }}
+          >
+            Conciliação de Almoço & CVs
+          </button>
+          <button
+            type="button"
+            onClick={() => { setAbaAtiva('duplicidades'); carregarAuditoriaDuplicidades(); }}
+            style={{
+              padding: '0.6rem 1rem',
+              borderRadius: '8px',
+              border: 'none',
+              background: abaAtiva === 'duplicidades' ? '#d97706' : '#fef3c7',
+              color: abaAtiva === 'duplicidades' ? '#fff' : '#92400e',
+              fontWeight: '800',
+              cursor: 'pointer'
+            }}
+          >
+            Auditoria Duplicidades DB ({auditoriaDup?.resumo?.totalPendencias ?? 0})
+          </button>
+          <button
+            type="button"
+            onClick={() => { carregarDados(); carregarAuditoriaDuplicidades(); }}
+            style={{
+              padding: '0.6rem 1rem',
+              borderRadius: '8px',
+              border: '1px solid #cbd5e1',
+              background: '#fff',
+              color: '#0f172a',
+              fontWeight: '600',
+              cursor: 'pointer'
+            }}
+          >
+            Revalidar Base
+          </button>
+        </div>
       </div>
 
+      {abaAtiva === 'duplicidades' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {carregandoDup ? (
+            <div style={{ background: '#fff', padding: '2rem', borderRadius: '12px', textAlign: 'center', color: '#64748b' }}>
+              Auditando registros importados do banco de dados...
+            </div>
+          ) : !auditoriaDup || auditoriaDup.resumo?.totalPendencias === 0 ? (
+            <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', padding: '1.5rem', borderRadius: '12px', color: '#166534', fontWeight: '700' }}>
+              ✔ Nenhuma duplicidade de sócio, CNPJ inválido ou empresa fragmentada encontrada na turma ativa!
+            </div>
+          ) : (
+            <>
+              {/* 1. Participantes Duplicados */}
+              {auditoriaDup.participantesDuplicados?.length > 0 && (
+                <div style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: '12px', padding: '1.25rem' }}>
+                  <h3 style={{ margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: '800', color: '#b91c1c' }}>
+                    1. Participantes Duplicados na Mesma Turma ({auditoriaDup.participantesDuplicados.length})
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {auditoriaDup.participantesDuplicados.map((grp) => {
+                      const principal = grp.registros[0];
+                      return (
+                        <div key={grp.chave} style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '9px', padding: '0.85rem' }}>
+                          <div style={{ fontWeight: '800', color: '#0f172a', marginBottom: '0.45rem' }}>{grp.nome}</div>
+                          {grp.registros.map((reg, idxReg) => (
+                            <div key={reg.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', padding: '0.35rem 0', borderTop: idxReg > 0 ? '1px dashed #fca5a5' : 'none', fontSize: '0.8rem' }}>
+                              <span>
+                                <strong>#{reg.id}</strong> • {reg.empresa || 'Sem empresa'} • CNPJ: <code>{reg.cnpj || reg.cpf_cnpj || '-'}</code> • {reg.almoco_pago ? 'Almoço Pago' : 'Pendente'}
+                              </span>
+                              {idxReg === 0 ? (
+                                <span style={{ background: '#dcfce7', color: '#166534', padding: '0.18rem 0.55rem', borderRadius: '6px', fontWeight: '800', fontSize: '0.72rem' }}>
+                                  Registro Principal
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={corrigindoDup}
+                                  onClick={() => mesclarDuplicado(principal.id, reg.id)}
+                                  style={{ background: '#dc2626', color: '#fff', border: 'none', padding: '0.35rem 0.75rem', borderRadius: '6px', fontWeight: '700', fontSize: '0.75rem', cursor: 'pointer' }}
+                                >
+                                  Mesclar #{reg.id} no #{principal.id}
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* 2. Sócios Fragmentados / Sem CNPJ */}
+              {auditoriaDup.empresasFragmentadas?.length > 0 && (
+                <div style={{ background: '#fff', border: '1px solid #fde68a', borderRadius: '12px', padding: '1.25rem' }}>
+                  <h3 style={{ margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: '800', color: '#92400e' }}>
+                    2. Sócios da Mesma Empresa Fragmentados / Sem CNPJ ({auditoriaDup.empresasFragmentadas.length})
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {auditoriaDup.empresasFragmentadas.map((grp) => (
+                      <div key={grp.chave} style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '9px', padding: '0.85rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.45rem' }}>
+                          <div>
+                            <strong style={{ color: '#0f172a' }}>{grp.empresa}</strong>
+                            <div style={{ fontSize: '0.76rem', color: '#92400e' }}>{grp.motivo}</div>
+                          </div>
+                          {grp.cnpjSugerido && (
+                            <button
+                              type="button"
+                              disabled={corrigindoDup}
+                              onClick={() => unificarCnpjGrupo(grp)}
+                              style={{ background: '#d97706', color: '#fff', border: 'none', padding: '0.42rem 0.85rem', borderRadius: '7px', fontWeight: '800', fontSize: '0.76rem', cursor: 'pointer' }}
+                            >
+                              Unificar CNPJ ({grp.cnpjSugerido})
+                            </button>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: '#334155', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                          {grp.registros.map((r) => (
+                            <div key={r.id}>
+                              • <strong>#{r.id}</strong> {r.nome_participante} — CNPJ: <code>{r.cnpj || r.cpf_cnpj || 'AUSENTE'}</code>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 3. CNPJs Inválidos ou Divergentes */}
+              {(auditoriaDup.cnpjsInvalidos?.length > 0 || auditoriaDup.cnpjsNomesDivergentes?.length > 0) && (
+                <div style={{ background: '#fff', border: '1px solid #cbd5e1', borderRadius: '12px', padding: '1.25rem' }}>
+                  <h3 style={{ margin: '0 0 0.75rem', fontSize: '1rem', fontWeight: '800', color: '#0f172a' }}>
+                    3. CNPJs Inválidos ou Razões Sociais Divergentes ({(auditoriaDup.cnpjsInvalidos?.length || 0) + (auditoriaDup.cnpjsNomesDivergentes?.length || 0)})
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.8rem' }}>
+                    {auditoriaDup.cnpjsInvalidos?.map((item) => (
+                      <div key={item.id} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.6rem 0.8rem' }}>
+                        <strong>#{item.id}</strong> {item.empresa} ({item.participante}) — CNPJ <code>{item.cnpj}</code>: <span style={{ color: '#dc2626', fontWeight: '700' }}>{item.motivo}</span>
+                      </div>
+                    ))}
+                    {auditoriaDup.cnpjsNomesDivergentes?.map((item) => (
+                      <div key={item.cnpj} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.6rem 0.8rem' }}>
+                        CNPJ <code>{item.cnpj}</code> compartilhado por nomes distintos: <strong>{item.nomesEncontrados.join(' / ')}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ) : (
+        <>
       {/* KPIs de Conciliação */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
         <div style={{ background: '#fff', padding: '1rem 1.25rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
@@ -385,6 +594,8 @@ export default function AdminCompanies() {
           </tbody>
         </table>
       </div>
+        </>
+      )}
     </div>
   );
 }

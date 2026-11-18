@@ -111,7 +111,7 @@ router.patch('/usuarios/:id/papel', exigirPapeis('ADMIN'), async (req, res) => {
     const { id } = req.params;
     const { papel } = req.body;
 
-    const papeisValidos = ['admin', 'entrevistador', 'operador', 'recepcao', 'vendedor', 'financeiro'];
+    const papeisValidos = ['admin', 'entrevistador', 'operador', 'recepcao', 'vendedor', 'financeiro', 'aprovador'];
     if (!papel || !papeisValidos.includes(String(papel).toLowerCase())) {
       return res.status(400).json({ error: `Papel inválido. Opções válidas: ${papeisValidos.join(', ')}` });
     }

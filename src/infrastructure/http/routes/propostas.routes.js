@@ -55,6 +55,38 @@ function extrairUsuarioRequisicao(req) {
   return { id: null, papel: '' };
 }
 
+
+let colunasAlcadaGarantidas = false;
+async function garantirColunasAlcadaComercial(executor = pool) {
+  if (colunasAlcadaGarantidas) return;
+  try {
+    await executor.query(`
+      ALTER TABLE fichas
+        ADD COLUMN IF NOT EXISTS aprovacao_comercial_status VARCHAR(30) DEFAULT 'NAO_EXIGIDA',
+        ADD COLUMN IF NOT EXISTS aprovacao_comercial_por INTEGER,
+        ADD COLUMN IF NOT EXISTS aprovacao_comercial_por_nome VARCHAR(150),
+        ADD COLUMN IF NOT EXISTS aprovacao_comercial_em TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS aprovacao_comercial_parecer TEXT,
+        ADD COLUMN IF NOT EXISTS motivos_alcada_json JSONB DEFAULT '[]'::jsonb
+    `);
+    colunasAlcadaGarantidas = true;
+  } catch (e) {
+    // Em transação com SET LOCAL, ignora se já existir ou tenta fora
+    try {
+      await pool.query(`
+        ALTER TABLE fichas
+          ADD COLUMN IF NOT EXISTS aprovacao_comercial_status VARCHAR(30) DEFAULT 'NAO_EXIGIDA',
+          ADD COLUMN IF NOT EXISTS aprovacao_comercial_por INTEGER,
+          ADD COLUMN IF NOT EXISTS aprovacao_comercial_por_nome VARCHAR(150),
+          ADD COLUMN IF NOT EXISTS aprovacao_comercial_em TIMESTAMP,
+          ADD COLUMN IF NOT EXISTS aprovacao_comercial_parecer TEXT,
+          ADD COLUMN IF NOT EXISTS motivos_alcada_json JSONB DEFAULT '[]'::jsonb
+      `);
+      colunasAlcadaGarantidas = true;
+    } catch (_) {}
+  }
+}
+
 // REGISTRO DE PROPOSTA COMERCIAL DA ENTREVISTA (COM SUPORTE A IDEMPOTENCY-KEY E TRANSAÇÃO ÚNICA)
 router.post('/propostas', async (req, res) => {
   const client = await pool.connect();
@@ -70,6 +102,7 @@ router.post('/propostas', async (req, res) => {
     }
     await exigirTurmaAtiva({ fichaId: aplicacaoId, turmaId: dados.turmaId || dados.turma_id || null });
 
+    await garantirColunasAlcadaComercial();
     await client.query('BEGIN');
     emTransacao = true;
     await client.query("SET LOCAL app.user_role = 'SYSTEM'");
@@ -181,8 +214,46 @@ router.post('/propostas', async (req, res) => {
       }
     }
 
+    const sanitizarComp = (comp) =>
+      comp && typeof comp === 'object' && comp.dataUrl
+        ? {
+            nome: String(comp.nome || 'comprovante').slice(0, 180),
+            tipo: String(comp.tipo || 'image/jpeg').slice(0, 80),
+            dataUrl: String(comp.dataUrl)
+          }
+        : null;
+
+    const pagamentosEntrada = Array.isArray(dados.pagamentosEntrada)
+      ? dados.pagamentosEntrada
+          .filter((item) => item && (Number(item.valor || 0) > 0 || String(item.identificador || '').trim() || item.comprovante))
+          .map((item) => ({
+            forma: String(item.forma || 'Pix').trim(),
+            valor: Number(item.valor || 0),
+            identificador: String(item.identificador || '').trim(),
+            comprovante: sanitizarComp(item.comprovante)
+          }))
+      : [];
+
+    const primeiroCompLista = pagamentosEntrada.map((p) => p.comprovante).find(Boolean) || null;
+    const comprovanteEntrada = sanitizarComp(dados.comprovanteEntrada) || primeiroCompLista;
+
+    const idsMulti = pagamentosEntrada
+      .map((p) => (p.identificador ? `${p.forma}: ${p.identificador}` : ''))
+      .filter(Boolean)
+      .join(' | ');
+
     const identificadorFinal =
-      dados.identificadorPagamento || dados.identificador_pagamento || dados.cvPagamento || null;
+      dados.identificadorPagamento || dados.identificador_pagamento || dados.cvPagamento || idsMulti || null;
+
+    const motivosAlcada = Array.isArray(propostaSalva?.avaliacaoRegras?.motivosAlcada)
+      ? [...propostaSalva.avaliacaoRegras.motivosAlcada]
+      : [];
+    const obsComercial = String(dados.observacoes || dados.desc_dif || dados.condicoesEspeciais || '').trim();
+    if (obsComercial) {
+      motivosAlcada.push(`Condição especial declarada: ${obsComercial}`);
+    }
+    const exigeAlcadaComercial = motivosAlcada.length > 0;
+    const statusAlcadaComercial = exigeAlcadaComercial ? 'PENDENTE' : 'NAO_EXIGIDA';
 
     const dadosPropostaJson = JSON.stringify({
       ...propostaSalva,
@@ -200,6 +271,11 @@ router.post('/propostas', async (req, res) => {
       entradaComplementar: Number(dados.entradaComplementar ?? dados.valor_entrada_complementar ?? 0),
       dataEntradaComplementar: dados.dataEntradaComplementar || dados.data_entrada_complementar || null,
       identificadorPagamento: identificadorFinal,
+      pagamentosEntrada,
+      comprovanteEntrada,
+      observacoes: obsComercial || null,
+      exigeAlcadaComercial,
+      motivosAlcada,
       socios: dados.socios || dados.socios_quantidade || 1,
       sociosDetalhes,
       cnpj: cnpjFinal
@@ -214,8 +290,14 @@ router.post('/propostas', async (req, res) => {
            desconto_concedido = $6,
            cashback = $7,
            etapa_funil = 'aguardando_aprovacao',
-           status_aprovacao = 'pendente',
-           ficha_fechada = true,
+            status_aprovacao = 'pendente',
+            aprovacao_comercial_status = $10::varchar,
+            aprovacao_comercial_por = NULL,
+            aprovacao_comercial_por_nome = NULL,
+            aprovacao_comercial_em = NULL,
+            aprovacao_comercial_parecer = NULL,
+            motivos_alcada_json = $11::jsonb,
+            ficha_fechada = true,
            fechada_em = CURRENT_TIMESTAMP,
            fechada_por = COALESCE($8, fechada_por),
            mesa_alocada = NULL,
@@ -233,7 +315,9 @@ router.post('/propostas', async (req, res) => {
         Number(dados.desconto ?? 0) || 0,
         Number(dados.cashback ?? 0) || 0,
         userInfo.id,
-        identificadorFinal
+        identificadorFinal,
+        statusAlcadaComercial,
+        JSON.stringify(motivosAlcada)
       ]
     );
 
@@ -265,7 +349,7 @@ router.post('/propostas', async (req, res) => {
         empresa: empresaFinal,
         cnpj: cnpjFinal,
         acao: 'EMISSAO_PROPOSTA',
-        detalhes: `Produto: ${dados.produtoNome || dados.produto_nome || dados.categoriaProduto || 'Plano'} | Negociado: R$ ${Number(propostaSalva.valorTotal || 0).toFixed(2)}`,
+        detalhes: `Produto: ${dados.produtoNome || dados.produto_nome || dados.categoriaProduto || 'Plano'} | Negociado: R$ ${Number(propostaSalva.valorTotal || 0).toFixed(2)}${exigeAlcadaComercial ? ' | [AGUARDA GESTOR COMERCIAL: ' + motivosAlcada.join('; ') + ']' : ' | [LIBERADA P/ FINANCEIRO]'}`,
         req
       });
     }
@@ -552,6 +636,7 @@ router.patch('/propostas/:id/vender', exigirPapeis('ADMIN', 'FINANCEIRO'), async
 
 // LISTAGEM UNIFICADA POR EMPRESA (CNPJ) PARA FILA DE APROVAÇÕES & ANÁLISE DE CRÉDITO
 router.get('/financeiro/propostas', async (req, res) => {
+  await garantirColunasAlcadaComercial();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -562,7 +647,39 @@ router.get('/financeiro/propostas', async (req, res) => {
     const { rows } = await client.query(
       `WITH base_fichas AS (
         SELECT
-          f.*,
+          f.id, f.turma_id, f.nome_participante, f.nome_cracha, f.empresa, f.cnpj, f.cpf_cnpj,
+          f.telefone, f.email, f.cargo, f.origem, f.membro_giants, f.almoco_pago, f.valor_almoco,
+          f.cv_cartao, f.cashback, f.desconto_concedido, f.valor_negociado, f.etapa_funil,
+          f.status_aprovacao, f.analise_credito_status, f.status_serasa_codigo, f.status_serasa_texto,
+          f.parecer_financeiro, f.ficha_fechada, f.updated_at,
+          aprovacao_comercial_status, aprovacao_comercial_por, aprovacao_comercial_por_nome,
+          aprovacao_comercial_em, aprovacao_comercial_parecer, motivos_alcada_json,
+          CASE
+            WHEN jsonb_typeof(f.dados_proposta->'pagamentosEntrada') = 'array' THEN
+              jsonb_set(
+                (f.dados_proposta - 'comprovanteEntrada'),
+                '{pagamentosEntrada}',
+                COALESCE(
+                  (
+                    SELECT jsonb_agg(
+                      CASE
+                        WHEN (elem ? 'comprovante') AND jsonb_typeof(elem->'comprovante') = 'object' THEN
+                          (elem - 'comprovante') || jsonb_build_object(
+                            'temComprovante', true,
+                            'comprovanteNome', COALESCE(elem->'comprovante'->>'nome', 'comprovante')
+                          )
+                        ELSE elem
+                      END
+                    )
+                    FROM jsonb_array_elements(f.dados_proposta->'pagamentosEntrada') AS elem
+                  ),
+                  '[]'::jsonb
+                )
+              )
+            ELSE (f.dados_proposta - 'comprovanteEntrada')
+          END AS dados_proposta,
+          (f.dados_proposta ? 'comprovanteEntrada') AS tem_comprovante,
+          (f.dados_proposta->'comprovanteEntrada'->>'nome') AS comprovante_nome,
           p.id AS proposta_real_id,
           p.valor_total AS proposta_valor_total,
           p.valor_entrada AS proposta_valor_entrada,
@@ -643,8 +760,124 @@ router.get('/financeiro/propostas', async (req, res) => {
   }
 });
 
-// DELIBERAÇÃO FINANCEIRA + ANÁLISE DE CRÉDITO / STATUS SERASA (PROPAGADA PARA TODOS OS SÓCIOS DO CNPJ)
+// ETAPA 1: DELIBERAÇÃO DE ALÇADA COMERCIAL (GESTOR / APROVADOR / ADMIN)
+router.post('/comercial/analisar', exigirPapeis('ADMIN', 'APROVADOR'), async (req, res) => {
+  await garantirColunasAlcadaComercial();
+  const client = await pool.connect();
+  try {
+    const { proposta_id, fichaId, decisao, parecer } = req.body;
+    const targetId = Number(proposta_id || fichaId);
+    const userInfo = extrairUsuarioRequisicao(req);
+
+    if (!targetId || !decisao) {
+      return res.status(400).json({ error: 'Parâmetros obrigatórios ausentes (ficha/proposta e decisão comercial).' });
+    }
+    await exigirTurmaAtiva({ fichaId: targetId });
+
+    const decNorm = String(decisao).trim().toLowerCase();
+    const aprovouComercial = decNorm === 'aprovado' || decNorm === 'aprovada' || decNorm === 'aprovar';
+    const recusouComercial = decNorm === 'recusado' || decNorm === 'recusada' || decNorm === 'recusar' || decNorm === 'negado';
+
+    if (!aprovouComercial && !recusouComercial) {
+      return res.status(400).json({ error: 'Decisão comercial inválida. Informe "aprovado" ou "recusado".' });
+    }
+
+    const parecerTexto = String(parecer || '').trim();
+    if (recusouComercial && !parecerTexto) {
+      return res.status(400).json({ error: 'Informe a justificativa comercial antes de recusar a condição negociada.' });
+    }
+
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+
+    const { rows: userRows } = await client.query('SELECT nome FROM usuarios WHERE id = $1', [userInfo.id]);
+    const nomeAprovador = userRows[0]?.nome || req.usuario?.nome || 'Gestor Comercial';
+
+    const { rows: atual } = await client.query(
+      `SELECT id, turma_id, empresa,
+              COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), '')) AS doc_cnpj,
+              status_aprovacao, aprovacao_comercial_status
+       FROM fichas WHERE id = $1 FOR UPDATE`,
+      [targetId]
+    );
+
+    if (atual.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Ficha não encontrada.' });
+    }
+
+    const base = atual[0];
+    const cnpjLimpo = String(base.doc_cnpj || '').replace(/\D/g, '');
+    const empNorm = String(base.empresa || '').trim().toLowerCase();
+
+    const novoComercialStatus = aprovouComercial ? 'APROVADA' : 'RECUSADA';
+    const novoStatusGeral = aprovouComercial ? 'pendente' : 'recusada';
+    const novaEtapa = aprovouComercial ? 'aguardando_aprovacao' : 'negociacao';
+
+    const { rows } = await client.query(
+      `UPDATE fichas
+       SET aprovacao_comercial_status = $1::varchar,
+           aprovacao_comercial_por = $2::int,
+           aprovacao_comercial_por_nome = $3::varchar,
+           aprovacao_comercial_em = CURRENT_TIMESTAMP,
+           aprovacao_comercial_parecer = NULLIF($4::text, ''),
+           status_aprovacao = $5::varchar,
+           etapa_funil = $6::varchar,
+           ficha_fechada = CASE WHEN $1::text = 'RECUSADA' THEN false ELSE ficha_fechada END,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $7::int
+          OR (
+            turma_id = $8::int
+            AND (
+              ($9::text <> '' AND LENGTH($9::text) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $9::text)
+              OR ($9::text = '' AND $10::text <> '' AND $10::text <> 'empresa sga' AND LOWER(TRIM(COALESCE(empresa, ''))) = $10::text)
+            )
+          )
+       RETURNING *`,
+      [
+        novoComercialStatus,
+        userInfo.id,
+        nomeAprovador,
+        parecerTexto,
+        novoStatusGeral,
+        novaEtapa,
+        targetId,
+        base.turma_id,
+        cnpjLimpo,
+        empNorm
+      ]
+    );
+
+    if (recusouComercial) {
+      await client.query(
+        `UPDATE propostas SET status = 'recusado'::status_prop WHERE aplicacao_id = $1`,
+        [targetId]
+      );
+    }
+
+    await registrarAuditoria(client, {
+      turmaId: base.turma_id,
+      fichaId: targetId,
+      empresa: base.empresa,
+      cnpj: base.doc_cnpj,
+      acao: aprovouComercial ? 'APROVACAO_ALCADA_COMERCIAL' : 'RECUSA_ALCADA_COMERCIAL',
+      detalhes: `Gestor: ${nomeAprovador} | Decisão: ${novoComercialStatus}${parecerTexto ? ' | Obs: ' + parecerTexto : ''}`,
+      req
+    });
+
+    await client.query('COMMIT');
+    res.json(rows.find((r) => Number(r.id) === targetId) || rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ETAPA 2: DELIBERAÇÃO FINANCEIRA + ANÁLISE DE CRÉDITO / STATUS SERASA (FINANCEIRO / ADMIN)
 router.post('/financeiro/analisar', exigirPapeis('ADMIN', 'FINANCEIRO'), async (req, res) => {
+  await garantirColunasAlcadaComercial();
   const client = await pool.connect();
   try {
     const {
@@ -712,7 +945,7 @@ router.post('/financeiro/analisar', exigirPapeis('ADMIN', 'FINANCEIRO'), async (
     const { rows: atual } = await client.query(
       `SELECT id, turma_id, empresa,
               COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), '')) AS doc_cnpj,
-              status_aprovacao, etapa_funil
+              status_aprovacao, etapa_funil, aprovacao_comercial_status
        FROM fichas WHERE id = $1 FOR UPDATE`,
       [targetId]
     );
@@ -722,6 +955,12 @@ router.post('/financeiro/analisar', exigirPapeis('ADMIN', 'FINANCEIRO'), async (
     }
 
     const base = atual[0];
+    if (String(base.aprovacao_comercial_status || '').toUpperCase() === 'PENDENTE' && novoStatus !== 'recusada') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        error: 'Alçada Comercial Pendente: esta proposta possui exceção comercial (desconto, entrada abaixo de 1 parcela ou condição especial) e aguarda aprovação prévia do Gestor Comercial antes da liberação financeira.'
+      });
+    }
     const cnpjLimpo = String(base.doc_cnpj || '').replace(/\D/g, '');
     const empNorm = String(base.empresa || '').trim().toLowerCase();
 
@@ -801,6 +1040,130 @@ router.post('/financeiro/analisar', exigirPapeis('ADMIN', 'FINANCEIRO'), async (
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+
+// CONSULTA DE COMPROVANTE ANEXADO NA PROPOSTA
+router.get('/financeiro/propostas/:id/comprovante', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: 'ID inválido.' });
+
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+    const indice = req.query.indice !== undefined ? parseInt(req.query.indice, 10) : null;
+    const { rows } = await client.query(
+      `SELECT id, empresa,
+              dados_proposta->'comprovanteEntrada' AS comprovante_geral,
+              dados_proposta->'pagamentosEntrada' AS pagamentos_entrada
+       FROM fichas WHERE id = $1::int`,
+      [id]
+    );
+    await client.query('COMMIT');
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Proposta não encontrada.' });
+    }
+
+    const pags = Array.isArray(rows[0].pagamentos_entrada) ? rows[0].pagamentos_entrada : [];
+    let compEscolhido = null;
+
+    if (indice !== null && !isNaN(indice) && pags[indice]?.comprovante) {
+      compEscolhido = pags[indice].comprovante;
+    } else {
+      compEscolhido =
+        rows[0].comprovante_geral ||
+        pags.map((p) => p?.comprovante).find(Boolean) ||
+        null;
+    }
+
+    if (!compEscolhido) {
+      return res.status(404).json({ error: 'Nenhum comprovante anexado para esta forma de pagamento.' });
+    }
+    return res.json(compEscolhido);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    return res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// DEVOLUÇÃO DE PROPOSTA PARA AJUSTE NA MESA (FINANCEIRO / APROVADOR / ADMIN)
+router.post('/financeiro/devolver', exigirPapeis('FINANCEIRO', 'APROVADOR', 'ADMIN'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { fichaId, proposta_id, motivo } = req.body;
+    const targetId = Number(fichaId || proposta_id);
+    const motivoLimpo = String(motivo || '').trim();
+
+    if (!targetId || !motivoLimpo) {
+      return res.status(400).json({ error: 'Informe a proposta e o motivo da devolução para ajuste.' });
+    }
+
+    await exigirTurmaAtiva({ fichaId: targetId });
+    const userInfo = extrairUsuarioRequisicao(req);
+
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+
+    const { rows: atual } = await client.query(
+      `SELECT id, turma_id, empresa,
+              COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), '')) AS doc_cnpj
+       FROM fichas WHERE id = $1::int FOR UPDATE`,
+      [targetId]
+    );
+    if (atual.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Ficha/proposta não encontrada.' });
+    }
+
+    const base = atual[0];
+    const cnpjLimpo = String(base.doc_cnpj || '').replace(/\D/g, '');
+    const empNorm = String(base.empresa || '').trim().toLowerCase();
+
+    const { rows } = await client.query(
+      `UPDATE fichas
+       SET status_aprovacao = 'ajuste_solicitado',
+           etapa_funil = 'em_entrevista',
+           ficha_fechada = false,
+           parecer_financeiro = $1::text,
+           dados_proposta = COALESCE(dados_proposta, '{}'::jsonb) || jsonb_build_object(
+             'motivoDevolucao', $1::text,
+             'devolvidoEm', CURRENT_TIMESTAMP
+           ),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2::int
+          OR (
+            turma_id = $3::int
+            AND (
+              ($4::text <> '' AND LENGTH($4::text) >= 11 AND regexp_replace(COALESCE(cnpj, cpf_cnpj, ''), '\D', '', 'g') = $4::text)
+              OR ($4::text = '' AND $5::text <> '' AND $5::text <> 'empresa sga' AND LOWER(TRIM(COALESCE(empresa, ''))) = $5::text)
+            )
+          )
+       RETURNING *`,
+      [motivoLimpo, targetId, base.turma_id, cnpjLimpo, empNorm]
+    );
+
+    await registrarAuditoria(client, {
+      turmaId: base.turma_id,
+      fichaId: targetId,
+      empresa: base.empresa,
+      cnpj: base.doc_cnpj,
+      acao: 'DEVOLUCAO_AJUSTE',
+      detalhes: `Proposta devolvida para ajuste na mesa (${userInfo.papel || 'FINANCEIRO'}): ${motivoLimpo}`,
+      req
+    });
+
+    await client.query('COMMIT');
+    return res.json({ sucesso: true, ficha: rows.find((r) => Number(r.id) === targetId) || rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    return res.status(500).json({ error: err.message });
   } finally {
     client.release();
   }

@@ -123,6 +123,18 @@ router.post('/entrevistas/agendar', async (req, res) => {
       [numeroMesaReal, entrevistadorId, id]
     );
 
+    if (rows[0]) {
+      await registrarAuditoria(client, {
+        turmaId: rows[0].turma_id,
+        fichaId: Number(id),
+        empresa: rows[0].empresa,
+        cnpj: rows[0].cnpj || rows[0].cpf_cnpj || null,
+        acao: 'ALOCACAO_MESA',
+        detalhes: `${rows[0].nome_participante || 'Empresário'} entrou em atendimento na Mesa ${numeroMesaReal}`,
+        req
+      });
+    }
+
     await client.query('COMMIT');
     res.json(rows[0]);
   } catch (err) {
@@ -209,6 +221,18 @@ router.post('/entrevistas/resultado', async (req, res) => {
        RETURNING *`,
       [novaEtapa, userInfo.id, Number(id), base.turma_id, cnpjLimpo, empNorm, sociosIdsExtra]
     );
+
+    if (novaEtapa === 'decisao_futura' || novaEtapa === 'reprovado') {
+      await registrarAuditoria(client, {
+        turmaId: base.turma_id,
+        fichaId: Number(id),
+        empresa: base.empresa,
+        cnpj: base.doc_cnpj,
+        acao: novaEtapa === 'decisao_futura' ? 'DECISAO_FUTURA' : 'NAO_FECHOU',
+        detalhes: `Desfecho na mesa: ${req.body.resultado || novaEtapa} (mesa liberada)`,
+        req
+      });
+    }
 
     await client.query('COMMIT');
     const titularAtualizado = atualizadas.find((r) => Number(r.id) === Number(id)) || atualizadas[0];
@@ -382,6 +406,18 @@ router.post('/entrevistas/reabrir', exigirPapeis('ADMIN'), async (req, res) => {
            AND status IN ('aprovado', 'vendido', 'aprovada', 'aprovada_com_ressalva', 'pendente')`,
         [idsReabertos]
       ).catch(() => {});
+    }
+
+    if (reabertas[0]) {
+      await registrarAuditoria(client, {
+        turmaId: turmaAlvo,
+        fichaId,
+        empresa: reabertas[0].empresa,
+        cnpj: cnpjAlvo || null,
+        acao: 'REABERTURA_FICHA',
+        detalhes: 'Ficha reaberta para novo atendimento na mesa',
+        req
+      });
     }
 
     await client.query('COMMIT');

@@ -76,6 +76,56 @@ async function registrarAuditoria(runner, { turmaId, fichaId, empresa, cnpj, aca
 
 router.registrarAuditoria = registrarAuditoria;
 
+// FEED DE NOTIFICAÇÕES EM TEMPO REAL POR TURMA
+router.get('/notificacoes', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+
+    const rawTurma = req.query.turmaId || req.query.turma_id || '';
+    const digits = String(rawTurma).replace(/\D/g, '');
+    const turmaId = digits ? parseInt(digits, 10) : null;
+
+    const { rows: eventos } = await client.query(
+      `SELECT id, turma_id, ficha_id, empresa, cnpj, acao, detalhes, usuario_nome, usuario_papel, created_at
+       FROM auditoria_eventos
+       WHERE ($1::int IS NULL OR turma_id = $1::int)
+       ORDER BY id DESC
+       LIMIT 35`,
+      [turmaId]
+    );
+
+    const { rows: pendRows } = await client.query(
+      `SELECT
+         COUNT(*) FILTER (
+           WHERE COALESCE(NULLIF(status_aprovacao, ''), 'pendente') = 'pendente'
+             AND COALESCE(aprovacao_comercial_status, 'NAO_EXIGIDA') = 'PENDENTE'
+             AND etapa_funil NOT IN ('decisao_futura', 'nao_fechou', 'reprovado')
+         )::int AS pendentes_comercial,
+         COUNT(*) FILTER (
+           WHERE COALESCE(NULLIF(status_aprovacao, ''), 'pendente') = 'pendente'
+             AND COALESCE(aprovacao_comercial_status, 'NAO_EXIGIDA') <> 'PENDENTE'
+             AND etapa_funil = 'aguardando_aprovacao'
+         )::int AS pendentes_financeiro
+       FROM fichas
+       WHERE ($1::int IS NULL OR turma_id = $1::int)`,
+      [turmaId]
+    );
+
+    await client.query('COMMIT');
+    res.json({
+      eventos,
+      resumo: pendRows[0] || { pendentes_comercial: 0, pendentes_financeiro: 0 }
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // 1. ENDPOINT EXECUTIVO DO WAR ROOM (TEMPO REAL)
 router.get('/war-room/resumo', async (req, res) => {
   const client = await pool.connect();

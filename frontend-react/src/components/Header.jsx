@@ -1,7 +1,8 @@
-﻿import React from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTurma } from '../context/TurmaContext';
 import { useMenu } from '../context/MenuContext';
+import NotificationBell from './NotificationBell';
 
 export default function Header() {
   const navigate = useNavigate();
@@ -105,6 +106,7 @@ export default function Header() {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <NotificationBell />
         {turmaAtual?.codigo && (
           <span
             style={{

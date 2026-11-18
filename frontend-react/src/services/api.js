@@ -1,4 +1,4 @@
-function gerarChaveIdempotencia(endpoint, payload) {
+﻿function gerarChaveIdempotencia(endpoint, payload) {
   const base = JSON.stringify({ endpoint, payload: payload || {} });
   let hash = 0;
   for (let i = 0; i < base.length; i++) {
@@ -12,12 +12,17 @@ const API_BASE = '/api';
 
 export async function request(endpoint, options = {}) {
   const sessaoRaw = localStorage.getItem('sessao_operador');
-  const sessao = sessaoRaw ? JSON.parse(sessaoRaw) : null;
+  let sessao = null;
+  try {
+    sessao = sessaoRaw ? JSON.parse(sessaoRaw) : null;
+  } catch (_) {
+    localStorage.removeItem('sessao_operador');
+  }
   const token = sessao?.token;
 
   const headers = {
     'Content-Type': 'application/json; charset=utf-8',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...options.headers
   };
 
@@ -28,9 +33,16 @@ export async function request(endpoint, options = {}) {
   });
 
   if (response.status === 401) {
-    localStorage.removeItem('sessao_operador');
-    window.location.href = '/login';
-    throw new Error('SessÃ£o expirada. FaÃ§a login novamente.');
+    const isRotaLogin = endpoint.includes('/auth/login');
+    const jaEstaNoLogin = typeof window !== 'undefined' && window.location.pathname === '/login';
+
+    if (!isRotaLogin) {
+      localStorage.removeItem('sessao_operador');
+      if (!jaEstaNoLogin && typeof window !== 'undefined') {
+        window.location.replace('/login');
+      }
+      throw new Error('Sessão expirada. Faça login novamente.');
+    }
   }
 
   const text = await response.text();
@@ -38,8 +50,8 @@ export async function request(endpoint, options = {}) {
   try {
     dados = text ? JSON.parse(text) : {};
   } catch (e) {
-    console.error('Resposta nÃ£o-JSON recebida da API:', text);
-    throw new Error(`Erro na API (${response.status}): Servidor retornou resposta invÃ¡lida.`);
+    console.error('Resposta não-JSON recebida da API:', text);
+    throw new Error(`Erro na API (${response.status}): Servidor retornou resposta inválida.`);
   }
 
   if (!response.ok) {
