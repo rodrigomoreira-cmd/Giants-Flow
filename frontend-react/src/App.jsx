@@ -72,8 +72,18 @@ function RotaProtegida({ children }) {
 }
 
 function LayoutComSidebar({ children }) {
+  const [isModoTv, setIsModoTv] = React.useState(
+    () => new URLSearchParams(window.location.search).get('tv') === '1'
+  );
+
+  React.useEffect(() => {
+    const onTvMode = (e) => setIsModoTv(Boolean(e.detail));
+    window.addEventListener('warroom-tv-mode', onTvMode);
+    return () => window.removeEventListener('warroom-tv-mode', onTvMode);
+  }, []);
+
   return (
-    <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden', background: '#f8fafc', margin: 0, padding: 0 }}>
+    <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden', background: isModoTv ? '#060911' : '#f8fafc', margin: 0, padding: 0 }}>
       <Sidebar />
       <main style={{ flex: 1, height: '100vh', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', minWidth: 0, overflow: 'hidden' }}>
         <Header />

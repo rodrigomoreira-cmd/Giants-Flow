@@ -114,7 +114,7 @@ export default function AuditLogs() {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <span className="material-symbols-outlined" style={{ color: '#ff5722', fontSize: '1.6rem' }}>history_edu</span>
-            <h1 style={{ margin: 0, fontSize: '1.45rem', fontWeight: '800', color: '#0f172a' }}>
+            <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: '800', color: '#0f172a' }}>
               Trilha de Auditoria & Segurança
             </h1>
           </div>

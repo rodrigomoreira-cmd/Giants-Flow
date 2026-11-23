@@ -1,9 +1,61 @@
-﻿import { useState, useEffect, useCallback } from 'react';
+﻿import { useState, useEffect, useCallback, useRef } from 'react';
+
+const tocarSomNovaVenda = () => {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const notas = [523.25, 659.25, 783.99, 1046.5];
+    notas.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.11);
+      gain.gain.setValueAtTime(0.14, ctx.currentTime + idx * 0.11);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + idx * 0.11 + 0.45);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + idx * 0.11);
+      osc.stop(ctx.currentTime + idx * 0.11 + 0.46);
+    });
+  } catch (_) {}
+};
 import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
 import { alertaSistema, confirmarSistema } from '../context/ModalContext';
 
 const fmtBRL = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+function NumeroAnimado({ valor, formatador = fmtBRL, duracao = 550 }) {
+  const alvo = Number(valor || 0);
+  const [exibido, setExibido] = useState(alvo);
+  const anteriorRef = useRef(alvo);
+
+  useEffect(() => {
+    const inicio = anteriorRef.current;
+    if (inicio === alvo) {
+      setExibido(alvo);
+      return;
+    }
+    let frameId;
+    const t0 = performance.now();
+    const animar = (agora) => {
+      const progresso = Math.min(1, (agora - t0) / duracao);
+      const easeOut = 1 - Math.pow(1 - progresso, 3);
+      setExibido(inicio + (alvo - inicio) * easeOut);
+      if (progresso < 1) {
+        frameId = requestAnimationFrame(animar);
+      } else {
+        anteriorRef.current = alvo;
+        setExibido(alvo);
+      }
+    };
+    frameId = requestAnimationFrame(animar);
+    return () => cancelAnimationFrame(frameId);
+  }, [alvo, duracao]);
+
+  return <>{formatador(exibido)}</>;
+}
 const fmtNum = (v) => Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
 const fmtPct = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
 
@@ -36,11 +88,103 @@ export default function WarRoom() {
   const [tituloPanoramaCustom, setTituloPanoramaCustom] = useState('');
   const [dataPanoramaCustom, setDataPanoramaCustom] = useState('');
 
+  // Estados do Modo TV (Telão)
+  const [modoTv, setModoTv] = useState(() => new URLSearchParams(window.location.search).get('tv') === '1');
+  const [slideTv, setSlideTv] = useState(0); // 0 = Placar Executivo & Produtos | 1 = Últimos Fechamentos & Linhas
+  const [rotacaoTvAtiva, setRotacaoTvAtiva] = useState(true);
+  const [somTvAtivo, setSomTvAtivo] = useState(true);
+  const [horaAtualTv, setHoraAtualTv] = useState(() => new Date());
+  const [novaVendaDestaque, setNovaVendaDestaque] = useState(null);
+  const idsFechamentosConhecidosRef = useRef(null);
+
+  const sairModoTv = useCallback(() => {
+    setModoTv(false);
+    window.dispatchEvent(new CustomEvent('warroom-tv-mode', { detail: false }));
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+  }, []);
+
+  const toggleModoTv = () => {
+    const proximo = !modoTv;
+    setModoTv(proximo);
+    window.dispatchEvent(new CustomEvent('warroom-tv-mode', { detail: proximo }));
+
+    if (proximo) {
+      setAutoRefresh(true);
+      setSlideTv(0);
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+  };
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('warroom-tv-mode', { detail: modoTv }));
+    return () => {
+      window.dispatchEvent(new CustomEvent('warroom-tv-mode', { detail: false }));
+    };
+  }, []);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      if (!document.fullscreenElement && modoTv) {
+        setModoTv(false);
+        window.dispatchEvent(new CustomEvent('warroom-tv-mode', { detail: false }));
+      }
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && modoTv) {
+        sairModoTv();
+      } else if (modoTv && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+        setSlideTv((s) => (s === 0 ? 1 : 0));
+      }
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [modoTv, sairModoTv]);
+
+  // Relógio ao vivo no Modo TV
+  useEffect(() => {
+    if (!modoTv) return;
+    const t = setInterval(() => setHoraAtualTv(new Date()), 1000);
+    return () => clearInterval(t);
+  }, [modoTv]);
+
+  // Rotação automática entre visões do telão a cada 20s
+  useEffect(() => {
+    if (!modoTv || !rotacaoTvAtiva) return;
+    const rot = setInterval(() => {
+      setSlideTv((prev) => (prev === 0 ? 1 : 0));
+    }, 20000);
+    return () => clearInterval(rot);
+  }, [modoTv, rotacaoTvAtiva]);
+
   const carregarResumo = useCallback(async (silencioso = false) => {
     try {
       if (!silencioso) setCarregando(true);
       setErro('');
       const resp = await api.get(`/war-room/resumo?turmaId=${turmaId}`);
+      const listaFech = Array.isArray(resp?.ultimosFechamentos) ? resp.ultimosFechamentos : [];
+      const idsAtuais = new Set(listaFech.map((f) => String(f.id)));
+
+      if (idsFechamentosConhecidosRef.current !== null && listaFech.length > 0) {
+        const recemChegado = listaFech.find((f) => !idsFechamentosConhecidosRef.current.has(String(f.id)));
+        if (recemChegado) {
+          setNovaVendaDestaque(recemChegado);
+          if (modoTv && somTvAtivo) {
+            tocarSomNovaVenda();
+          }
+          setTimeout(() => {
+            setNovaVendaDestaque((atual) => (atual?.id === recemChegado.id ? null : atual));
+          }, 11000);
+        }
+      }
+      idsFechamentosConhecidosRef.current = idsAtuais;
       setDados(resp);
     } catch (err) {
       setErro(err.message || 'Não foi possível carregar os indicadores do War Room.');
@@ -120,6 +264,415 @@ export default function WarRoom() {
   const kpis = dados?.kpis || {};
   const statusFin = dados?.statusFinanceiro || {};
 
+  const ticketMedio = Number(kpis.contratosFechados || 0) > 0
+    ? Number(kpis.competencia || 0) / Number(kpis.contratosFechados || 1)
+    : 0;
+
+  if (modoTv) {
+    const ultimosTv = (dados?.ultimosFechamentos || []).slice(0, 6);
+    const linhasTv = dados?.porLinha || [];
+
+    return (
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'radial-gradient(circle at 20% 12%, #172033 0%, #0b1120 48%, #060911 100%)',
+          color: '#f8fafc',
+          zIndex: 99999,
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          padding: '1.5rem 2.25rem',
+          boxSizing: 'border-box',
+          overflow: 'hidden',
+          fontFamily: 'Inter, system-ui, -apple-system, sans-serif'
+        }}
+      >
+        <style>{`
+          @keyframes tvPulseLive {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.45; transform: scale(1.25); }
+            100% { opacity: 1; transform: scale(1); }
+          }
+          @keyframes tvSlideBanner {
+            0% { transform: translateY(-20px); opacity: 0; }
+            100% { transform: translateY(0); opacity: 1; }
+          }
+        `}</style>
+
+        {/* TOPO DO TELÃO */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', borderBottom: '1px solid rgba(148, 163, 184, 0.16)', paddingBottom: '0.95rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#ff5722', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 16px rgba(255, 87, 34, 0.4)' }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '1.6rem', color: '#fff' }}>rocket_launch</span>
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span style={{ fontSize: '0.78rem', fontWeight: '900', color: '#fb923c', letterSpacing: '0.16em', textTransform: 'uppercase' }}>
+                  GIANTS Flow • War Room
+                </span>
+                <span style={{ background: 'rgba(255,255,255,0.08)', color: '#cbd5e1', padding: '0.15rem 0.55rem', borderRadius: '6px', fontSize: '0.75rem', fontWeight: '700' }}>
+                  {turmaAtual?.codigo ? `[${turmaAtual.codigo}] ` : ''}{turmaAtual?.nome || `Turma #${turmaId}`}
+                </span>
+              </div>
+              <div style={{ fontSize: '1.35rem', fontWeight: '900', color: '#ffffff', marginTop: '0.12rem' }}>
+                {slideTv === 0 ? 'Placar Executivo & Fechamento ao Vivo' : 'Desempenho por Produto & Últimos Contratos'}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            {/* Seletor de Visão / Rotação */}
+            <div style={{ display: 'flex', background: 'rgba(15, 23, 42, 0.85)', border: '1px solid #334155', borderRadius: '10px', padding: '0.22rem' }}>
+              <button
+                type="button"
+                onClick={() => setSlideTv(0)}
+                style={{
+                  background: slideTv === 0 ? '#ff5722' : 'transparent',
+                  color: slideTv === 0 ? '#fff' : '#94a3b8',
+                  border: 'none',
+                  borderRadius: '7px',
+                  padding: '0.35rem 0.75rem',
+                  fontSize: '0.76rem',
+                  fontWeight: '800',
+                  cursor: 'pointer'
+                }}
+              >
+                1. Placar Geral
+              </button>
+              <button
+                type="button"
+                onClick={() => setSlideTv(1)}
+                style={{
+                  background: slideTv === 1 ? '#ff5722' : 'transparent',
+                  color: slideTv === 1 ? '#fff' : '#94a3b8',
+                  border: 'none',
+                  borderRadius: '7px',
+                  padding: '0.35rem 0.75rem',
+                  fontSize: '0.76rem',
+                  fontWeight: '800',
+                  cursor: 'pointer'
+                }}
+              >
+                2. Fechamentos
+              </button>
+              <button
+                type="button"
+                onClick={() => setRotacaoTvAtiva((r) => !r)}
+                title={rotacaoTvAtiva ? 'Pausar rotação automática (20s)' : 'Ativar rotação automática (20s)'}
+                style={{
+                  background: 'transparent',
+                  color: rotacaoTvAtiva ? '#38bdf8' : '#64748b',
+                  border: 'none',
+                  padding: '0.35rem 0.55rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '1.05rem' }}>
+                  {rotacaoTvAtiva ? 'autorenew' : 'pause_circle'}
+                </span>
+              </button>
+            </div>
+
+            {/* Botão Som */}
+            <button
+              type="button"
+              onClick={() => {
+                const proximo = !somTvAtivo;
+                setSomTvAtivo(proximo);
+                if (proximo) tocarSomNovaVenda();
+              }}
+              title={somTvAtivo ? 'Alerta sonoro de venda ativado' : 'Alerta sonoro silenciado'}
+              style={{
+                background: 'rgba(15, 23, 42, 0.85)',
+                border: '1px solid #334155',
+                color: somTvAtivo ? '#fb923c' : '#64748b',
+                padding: '0.45rem 0.65rem',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center'
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '1.15rem' }}>
+                {somTvAtivo ? 'volume_up' : 'volume_off'}
+              </span>
+            </button>
+
+            {/* Indicador AO VIVO + Relógio */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', background: 'rgba(22, 163, 74, 0.14)', border: '1px solid rgba(74, 222, 128, 0.35)', padding: '0.42rem 0.85rem', borderRadius: '10px' }}>
+              <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 10px #22c55e', animation: 'tvPulseLive 1.8s infinite' }} />
+              <span style={{ fontSize: '0.76rem', fontWeight: '900', color: '#4ade80', letterSpacing: '0.08em' }}>AO VIVO</span>
+              <span style={{ color: '#334155' }}>|</span>
+              <span style={{ fontSize: '0.95rem', fontWeight: '900', color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>
+                {horaAtualTv.toLocaleTimeString('pt-BR')}
+              </span>
+            </div>
+
+            {/* Sair */}
+            <button
+              type="button"
+              onClick={sairModoTv}
+              title="Sair do Modo TV (ESC)"
+              style={{
+                background: 'rgba(30, 41, 59, 0.9)',
+                border: '1px solid #475569',
+                color: '#e2e8f0',
+                padding: '0.45rem 0.8rem',
+                borderRadius: '10px',
+                fontSize: '0.76rem',
+                fontWeight: '800',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.3rem'
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '1.05rem' }}>close_fullscreen</span>
+              Sair
+            </button>
+          </div>
+        </div>
+
+        {/* ALERTA CELEBRATIVO DE NOVA VENDA */}
+        {novaVendaDestaque && (
+          <div
+            style={{
+              background: 'linear-gradient(90deg, #ea580c 0%, #ff5722 50%, #16a34a 100%)',
+              borderRadius: '14px',
+              padding: '0.85rem 1.5rem',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              boxShadow: '0 12px 35px rgba(255, 87, 34, 0.45)',
+              animation: 'tvSlideBanner 0.4s ease'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '2rem', color: '#fff' }}>celebration</span>
+              <div>
+                <div style={{ fontSize: '0.75rem', fontWeight: '900', letterSpacing: '0.16em', textTransform: 'uppercase', color: '#fef3c7' }}>
+                  NOVO CONTRATO FECHADO NA TURMA!
+                </div>
+                <div style={{ fontSize: '1.35rem', fontWeight: '900', color: '#ffffff' }}>
+                  {novaVendaDestaque.empresa} • {novaVendaDestaque.produto}
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: '1.85rem', fontWeight: '900', color: '#ffffff' }}>
+              {fmtBRL(novaVendaDestaque.valorLiquido)}
+            </div>
+          </div>
+        )}
+
+        {/* CORPO PRINCIPAL DO TELÃO */}
+        {slideTv === 0 ? (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-evenly', gap: '1.15rem', padding: '0.5rem 0' }}>
+            {/* HERO: COMPETÊNCIA & CAIXA */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1.25fr 1fr', gap: '1.35rem' }}>
+              <div style={{ background: 'linear-gradient(135deg, rgba(255,87,34,0.18) 0%, rgba(15,23,42,0.92) 65%)', border: '1.5px solid rgba(255, 87, 34, 0.55)', borderRadius: '20px', padding: '1.65rem 2rem', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <div style={{ fontSize: '0.92rem', fontWeight: '800', color: '#fb923c', letterSpacing: '0.16em', textTransform: 'uppercase' }}>
+                  Competência Total (Líquido)
+                </div>
+                <div style={{ fontSize: '4.1rem', fontWeight: '900', color: '#ffffff', lineHeight: 1.05, marginTop: '0.35rem', letterSpacing: '-0.02em' }}>
+                  <NumeroAnimado valor={kpis.competencia} />
+                </div>
+                <div style={{ fontSize: '1.05rem', color: '#cbd5e1', marginTop: '0.55rem', fontWeight: '600' }}>
+                  Faturamento Bruto: <strong style={{ color: '#fff' }}>{fmtBRL(kpis.faturamentoBruto)}</strong> • Ticket Médio: <strong style={{ color: '#fb923c' }}>{fmtBRL(ticketMedio)}</strong>
+                </div>
+              </div>
+
+              <div style={{ background: 'linear-gradient(135deg, rgba(16,185,129,0.18) 0%, rgba(15,23,42,0.92) 65%)', border: '1.5px solid rgba(52, 211, 153, 0.5)', borderRadius: '20px', padding: '1.65rem 2rem', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <div style={{ fontSize: '0.92rem', fontWeight: '800', color: '#4ade80', letterSpacing: '0.16em', textTransform: 'uppercase' }}>
+                  Caixa Total no Evento
+                </div>
+                <div style={{ fontSize: '3.8rem', fontWeight: '900', color: '#4ade80', lineHeight: 1.05, marginTop: '0.35rem', letterSpacing: '-0.02em' }}>
+                  <NumeroAnimado valor={kpis.caixa} />
+                </div>
+                <div style={{ fontSize: '1.05rem', color: '#cbd5e1', marginTop: '0.55rem', fontWeight: '600' }}>
+                  Entradas: <strong style={{ color: '#fff' }}>{fmtBRL(kpis.entradasImediatas)}</strong> + Almoço: <strong style={{ color: '#4ade80' }}>{fmtBRL(kpis.almocoArrecadado)}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* 4 KPIs CENTRAIS */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.15rem' }}>
+              <div style={{ background: 'rgba(15, 23, 42, 0.85)', border: '1px solid #334155', borderRadius: '16px', padding: '1.25rem 1.4rem' }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Contratos Fechados</div>
+                <div style={{ fontSize: '2.7rem', fontWeight: '900', color: '#ffffff', marginTop: '0.25rem' }}>{kpis.contratosFechados || 0}</div>
+                <div style={{ fontSize: '0.82rem', color: '#4ade80', fontWeight: '700' }}>{statusFin.aprovadas || 0} aprovados • {statusFin.pendentes || 0} em análise</div>
+              </div>
+
+              <div style={{ background: 'rgba(15, 23, 42, 0.85)', border: '1px solid #334155', borderRadius: '16px', padding: '1.25rem 1.4rem' }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Empresas (CNPJ)</div>
+                <div style={{ fontSize: '2.7rem', fontWeight: '900', color: '#38bdf8', marginTop: '0.25rem' }}>{fmtNum(baseTurma.totalEmpresasCnpj)}</div>
+                <div style={{ fontSize: '0.82rem', color: '#cbd5e1', fontWeight: '600' }}>{fmtNum(baseTurma.totalAlunos)} participantes na turma</div>
+              </div>
+
+              <div style={{ background: 'rgba(15, 23, 42, 0.85)', border: '1px solid #334155', borderRadius: '16px', padding: '1.25rem 1.4rem' }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Fichas Almoço</div>
+                <div style={{ fontSize: '2.7rem', fontWeight: '900', color: '#fb923c', marginTop: '0.25rem' }}>{fmtNum(baseTurma.fichasPreenchidas)}</div>
+                <div style={{ fontSize: '0.82rem', color: '#cbd5e1', fontWeight: '600' }}>{kpis.qtdAlmocoPago || 0} pagas • {kpis.qtdCortesias || 0} cortesias</div>
+              </div>
+
+              <div style={{ background: 'rgba(15, 23, 42, 0.85)', border: '1px solid #334155', borderRadius: '16px', padding: '1.25rem 1.4rem' }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Membros GIANTS</div>
+                <div style={{ fontSize: '2.7rem', fontWeight: '900', color: '#c084fc', marginTop: '0.25rem' }}>{fmtNum(giants.membrosPresentesTurma)}</div>
+                <div style={{ fontSize: '0.82rem', color: '#cbd5e1', fontWeight: '600' }}>{fmtNum(giants.empresasPresentesTurma)} empresas presentes</div>
+              </div>
+            </div>
+
+            {/* BLOCOS GIANTS & PAC */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.35rem' }}>
+              <div style={{ background: 'rgba(15, 23, 42, 0.88)', border: '1.5px solid rgba(255, 87, 34, 0.45)', borderRadius: '18px', padding: '1.3rem 1.6rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
+                  <span style={{ fontSize: '1.15rem', fontWeight: '900', color: '#fb923c', letterSpacing: '0.06em' }}>GIANTS • PRODUTO PRINCIPAL</span>
+                  <span style={{ fontSize: '1.45rem', fontWeight: '900', color: '#ff5722' }}>{fmtBRL(giants.competencia)}</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.85rem', textAlign: 'center' }}>
+                  <div style={{ background: 'rgba(9,13,22,0.75)', borderRadius: '12px', padding: '0.8rem' }}>
+                    <div style={{ fontSize: '2.1rem', fontWeight: '900', color: '#fff' }}>{fmtNum(giants.totalEmpresasCompraram)}</div>
+                    <div style={{ fontSize: '0.78rem', fontWeight: '700', color: '#94a3b8' }}>Empresas</div>
+                  </div>
+                  <div style={{ background: 'rgba(9,13,22,0.75)', borderRadius: '12px', padding: '0.8rem' }}>
+                    <div style={{ fontSize: '2.1rem', fontWeight: '900', color: '#4ade80' }}>{fmtNum(giants.totalPessoasFecharam)}</div>
+                    <div style={{ fontSize: '0.78rem', fontWeight: '700', color: '#94a3b8' }}>Pessoas</div>
+                  </div>
+                  <div style={{ background: 'rgba(9,13,22,0.75)', borderRadius: '12px', padding: '0.8rem' }}>
+                    <div style={{ fontSize: '2.1rem', fontWeight: '900', color: '#38bdf8' }}>{fmtNum(giants.empresasComSocio)}</div>
+                    <div style={{ fontSize: '0.78rem', fontWeight: '700', color: '#94a3b8' }}>Com Sócio</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ background: 'rgba(15, 23, 42, 0.88)', border: '1.5px solid rgba(56, 189, 248, 0.45)', borderRadius: '18px', padding: '1.3rem 1.6rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
+                  <span style={{ fontSize: '1.15rem', fontWeight: '900', color: '#38bdf8', letterSpacing: '0.06em' }}>PAC • ACELERAÇÃO PRÉ-GIANTS</span>
+                  <span style={{ fontSize: '1.45rem', fontWeight: '900', color: '#38bdf8' }}>{fmtBRL(pac.competencia)}</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.85rem', textAlign: 'center' }}>
+                  <div style={{ background: 'rgba(9,13,22,0.75)', borderRadius: '12px', padding: '0.8rem' }}>
+                    <div style={{ fontSize: '2.1rem', fontWeight: '900', color: '#fff' }}>{fmtNum(pac.totalEmpresasCompraram)}</div>
+                    <div style={{ fontSize: '0.78rem', fontWeight: '700', color: '#94a3b8' }}>Empresas</div>
+                  </div>
+                  <div style={{ background: 'rgba(9,13,22,0.75)', borderRadius: '12px', padding: '0.8rem' }}>
+                    <div style={{ fontSize: '2.1rem', fontWeight: '900', color: '#4ade80' }}>{fmtNum(pac.totalPessoasFecharam)}</div>
+                    <div style={{ fontSize: '0.78rem', fontWeight: '700', color: '#94a3b8' }}>Pessoas</div>
+                  </div>
+                  <div style={{ background: 'rgba(9,13,22,0.75)', borderRadius: '12px', padding: '0.8rem' }}>
+                    <div style={{ fontSize: '2.1rem', fontWeight: '900', color: '#fb923c' }}>{fmtNum(pac.empresasComSocio)}</div>
+                    <div style={{ fontSize: '0.78rem', fontWeight: '700', color: '#94a3b8' }}>Com Sócio</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* SLIDE 2: DESEMPENHO POR LINHA + ÚLTIMOS FECHAMENTOS */
+          <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1.05fr 0.95fr', gap: '1.5rem', padding: '0.75rem 0', minHeight: 0 }}>
+            <div style={{ background: 'rgba(15, 23, 42, 0.88)', border: '1px solid #334155', borderRadius: '18px', padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontSize: '0.85rem', fontWeight: '800', color: '#fb923c', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '0.9rem' }}>
+                  Desempenho por Linha de Produto
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '1rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid #334155', color: '#94a3b8', textAlign: 'left', fontSize: '0.82rem', textTransform: 'uppercase' }}>
+                      <th style={{ padding: '0.75rem 0.5rem' }}>Linha</th>
+                      <th style={{ padding: '0.75rem 0.5rem' }}>Empresas</th>
+                      <th style={{ padding: '0.75rem 0.5rem' }}>Pessoas</th>
+                      <th style={{ padding: '0.75rem 0.5rem', textAlign: 'right' }}>Competência</th>
+                      <th style={{ padding: '0.75rem 0.5rem', textAlign: 'right' }}>Caixa</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {linhasTv.map((item) => (
+                      <tr key={item.linha} style={{ borderBottom: '1px solid rgba(51,65,85,0.5)' }}>
+                        <td style={{ padding: '0.95rem 0.5rem', fontWeight: '900', color: '#ffffff', fontSize: '1.1rem' }}>{item.linha}</td>
+                        <td style={{ padding: '0.95rem 0.5rem', fontWeight: '800', color: '#38bdf8', fontSize: '1.15rem' }}>{item.empresas ?? item.contratos}</td>
+                        <td style={{ padding: '0.95rem 0.5rem', fontWeight: '800', color: '#e2e8f0', fontSize: '1.15rem' }}>{item.pessoas ?? item.contratos}</td>
+                        <td style={{ padding: '0.95rem 0.5rem', fontWeight: '900', color: '#fb923c', textAlign: 'right', fontSize: '1.15rem' }}>{fmtBRL(item.liquido)}</td>
+                        <td style={{ padding: '0.95rem 0.5rem', fontWeight: '900', color: '#4ade80', textAlign: 'right', fontSize: '1.15rem' }}>{fmtBRL(item.entradas)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ background: 'rgba(9,13,22,0.75)', borderRadius: '14px', padding: '1rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #1e293b' }}>
+                <div>
+                  <div style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: '700' }}>COMPETÊNCIA TOTAL</div>
+                  <div style={{ fontSize: '1.85rem', fontWeight: '900', color: '#ff5722' }}><NumeroAnimado valor={kpis.competencia} /></div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: '700' }}>CAIXA TOTAL</div>
+                  <div style={{ fontSize: '1.85rem', fontWeight: '900', color: '#4ade80' }}><NumeroAnimado valor={kpis.caixa} /></div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ background: 'rgba(15, 23, 42, 0.88)', border: '1px solid #334155', borderRadius: '18px', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', overflow: 'hidden' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: '800', color: '#4ade80', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+                Últimos Fechamentos da Turma
+              </div>
+              {ultimosTv.length === 0 ? (
+                <div style={{ margin: 'auto', color: '#64748b', fontSize: '1.1rem', fontWeight: '700' }}>
+                  Aguardando primeiros fechamentos da turma...
+                </div>
+              ) : (
+                ultimosTv.map((item) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      background: 'rgba(9, 13, 22, 0.78)',
+                      border: '1px solid #334155',
+                      borderRadius: '12px',
+                      padding: '0.85rem 1.1rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '0.75rem'
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '1.08rem', fontWeight: '900', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.empresa}
+                      </div>
+                      <div style={{ fontSize: '0.84rem', color: '#94a3b8', marginTop: '0.15rem' }}>
+                        {item.produto} {item.pessoasNoContrato > 1 ? `• ${item.pessoasNoContrato} pessoas` : ''}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontSize: '1.25rem', fontWeight: '900', color: '#4ade80' }}>{fmtBRL(item.valorLiquido)}</div>
+                      <span style={{ fontSize: '0.72rem', fontWeight: '800', color: '#fb923c', textTransform: 'uppercase' }}>
+                        {item.statusAprovacao}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* RODAPÉ DISCRETO */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(148, 163, 184, 0.14)', paddingTop: '0.65rem', fontSize: '0.78rem', color: '#64748b' }}>
+          <span>
+            {dados?.atualizadoEm
+              ? `Última sincronização às ${new Date(dados.atualizadoEm).toLocaleTimeString('pt-BR')} (atualização automática a cada 12s)`
+              : 'Sincronizando indicadores...'}
+          </span>
+          <span>Use ← → para alternar visões • ESC para sair do Modo TV</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ padding: '1.75rem 2rem', width: '100%', boxSizing: 'border-box' }}>
       {/* CABEÇALHO EXECUTIVO */}
@@ -135,7 +688,7 @@ export default function WarRoom() {
               </span>
             )}
           </div>
-          <h1 style={{ margin: '0.3rem 0 0', fontSize: '1.65rem', fontWeight: '800', color: '#0f172a' }}>
+          <h1 style={{ margin: '0.25rem 0 0', fontSize: '1.75rem', fontWeight: '800', color: '#0f172a' }}>
             Painel Executivo & Fechamento do Evento
           </h1>
         </div>
@@ -178,6 +731,29 @@ export default function WarRoom() {
             style={{ background: '#fff', color: '#0f172a', border: '1px solid #cbd5e1', padding: '0.55rem 0.95rem', borderRadius: '8px', fontWeight: '700', fontSize: '0.8rem', cursor: 'pointer' }}
           >
             Atualizar
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleModoTv}
+            title="Abrir painel em tela cheia para TV / Projetor"
+            style={{
+              background: '#0f172a',
+              color: '#ffffff',
+              border: '1px solid #334155',
+              padding: '0.58rem 1.05rem',
+              borderRadius: '8px',
+              fontWeight: '800',
+              fontSize: '0.82rem',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.42rem',
+              boxShadow: '0 2px 8px rgba(15, 23, 42, 0.22)'
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: '1.05rem', color: '#fb923c' }}>tv</span>
+            Modo TV
           </button>
 
           <button
@@ -246,7 +822,7 @@ export default function WarRoom() {
                 Competência Total (Líquido)
               </div>
               <div style={{ fontSize: '1.7rem', fontWeight: '900', color: '#ff5722', marginTop: '0.3rem' }}>
-                {fmtBRL(kpis.competencia)}
+                <NumeroAnimado valor={kpis.competencia} />
               </div>
               <div style={{ fontSize: '0.76rem', color: '#cbd5e1', marginTop: '0.25rem' }}>
                 Bruto: {fmtBRL(kpis.faturamentoBruto)} • <strong>{kpis.contratosFechados || 0} contratos</strong>
@@ -259,7 +835,7 @@ export default function WarRoom() {
                 Caixa Total no Evento
               </div>
               <div style={{ fontSize: '1.7rem', fontWeight: '900', color: '#059669', marginTop: '0.3rem' }}>
-                {fmtBRL(kpis.caixa)}
+                <NumeroAnimado valor={kpis.caixa} />
               </div>
               <div style={{ fontSize: '0.76rem', color: '#475569', marginTop: '0.25rem' }}>
                 Entradas: <strong>{fmtBRL(kpis.entradasImediatas)}</strong> + Almoço: <strong>{fmtBRL(kpis.almocoArrecadado)}</strong>

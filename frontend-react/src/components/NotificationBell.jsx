@@ -14,14 +14,15 @@ const obterSessao = () => {
 
 export const formatarEventoAoVivo = (ev) => {
   const acao = String(ev.acao || '').toUpperCase();
-  const emp = ev.empresa || `Ficha #${ev.ficha_id || ''}`;
+  const temAlvo = Boolean(ev.empresa || ev.ficha_id);
+  const emp = ev.empresa || (ev.ficha_id ? `Ficha #${ev.ficha_id}` : 'Operação em Lote');
   const det = String(ev.detalhes || '');
 
   if (acao === 'EMISSAO_PROPOSTA') {
     const aguardaGestor = det.includes('AGUARDA GESTOR COMERCIAL');
     return {
       titulo: aguardaGestor
-        ? `Alçada Comercial Pendente: ${emp}`
+        ? `Liberação Comercial Pendente: ${emp}`
         : `Proposta Emitida: ${emp}`,
       descricao: det || 'Proposta comercial registrada na mesa.',
       icone: aguardaGestor ? 'gavel' : 'description',
@@ -36,7 +37,7 @@ export const formatarEventoAoVivo = (ev) => {
 
   if (acao === 'APROVACAO_ALCADA_COMERCIAL') {
     return {
-      titulo: `Alçada Comercial Aprovada: ${emp}`,
+      titulo: `Liberação Comercial Aprovada: ${emp}`,
       descricao: det || 'Gestor autorizou a condição e encaminhou ao Financeiro.',
       icone: 'verified',
       cor: '#059669',
@@ -50,7 +51,7 @@ export const formatarEventoAoVivo = (ev) => {
 
   if (acao === 'RECUSA_ALCADA_COMERCIAL') {
     return {
-      titulo: `Alçada Comercial Recusada: ${emp}`,
+      titulo: `Liberação Comercial Recusada: ${emp}`,
       descricao: det || 'Condição comercial recusada pelo gestor.',
       icone: 'cancel',
       cor: '#dc2626',
@@ -204,21 +205,53 @@ export const formatarEventoAoVivo = (ev) => {
     };
   }
 
-  if (acao === 'REABERTURA_FICHA') {
+  if (acao === 'REABERTURA_FICHA' || acao === 'REABERTURA_FICHA_ADMIN') {
+    const isAdminReab = acao === 'REABERTURA_FICHA_ADMIN';
     return {
-      titulo: `Ficha Reaberta: ${emp}`,
+      titulo: `${isAdminReab ? 'Reabertura Administrativa' : 'Ficha Reaberta'}: ${emp}`,
       descricao: det || 'Ficha reaberta para novo atendimento.',
       icone: 'lock_open',
-      cor: '#ea580c',
-      fundo: '#fff7ed',
-      badge: 'Reaberta',
-      rota: '/interviews',
+      cor: isAdminReab ? '#dc2626' : '#ea580c',
+      fundo: isAdminReab ? '#fef2f2' : '#fff7ed',
+      badge: isAdminReab ? 'Reabertura Admin' : 'Reaberta',
+      rota: ev.ficha_id ? `/interviews/${ev.ficha_id}/edit` : '/interviews',
       prioridadeAlta: false
     };
   }
 
+  if (acao === 'LIBERACAO_MESAS_GIANTS') {
+    return {
+      titulo: ev.empresa ? `Liberação Mesas GIANTS: ${ev.empresa}` : 'Liberação em Lote: Mesas GIANTS',
+      descricao: det || 'Assentos liberados para entrevistas comerciais.',
+      icone: 'logout',
+      cor: '#d97706',
+      fundo: '#fef3c7',
+      badge: 'Pós-Almoço',
+      rota: '/lunch',
+      prioridadeAlta: false
+    };
+  }
+
+  if (acao === 'EDICAO_CASHBACK') {
+    return {
+      titulo: `Cashback Atualizado: ${emp}`,
+      descricao: det || 'Saldo de cashback ajustado para a empresa.',
+      icone: 'savings',
+      cor: '#0369a1',
+      fundo: '#e0f2fe',
+      badge: 'Cashback',
+      rota: '/cashback',
+      prioridadeAlta: false
+    };
+  }
+
+  const acaoFormatada = acao
+    .toLowerCase()
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (l) => l.toUpperCase());
+
   return {
-    titulo: `${acao.replace(/_/g, ' ')}: ${emp}`,
+    titulo: temAlvo ? `${acaoFormatada}: ${emp}` : acaoFormatada,
     descricao: det || `Registrado por ${ev.usuario_nome || 'Operador'}`,
     icone: 'notifications',
     cor: '#475569',

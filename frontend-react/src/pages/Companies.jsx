@@ -1,3 +1,4 @@
+import { toastSistema } from '../context/ModalContext';
 import { useState, useEffect, useMemo } from 'react';
 import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
@@ -84,6 +85,13 @@ export default function Companies() {
   const [salvandoAlmoco, setSalvandoAlmoco] = useState(false);
   const [grupoReabrir, setGrupoReabrir] = useState(null);
   const [reabrindoFicha, setReabrindoFicha] = useState(false);
+  const [retomandoId, setRetomandoId] = useState(null);
+  const [, setTickSla] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => setTickSla((t) => t + 1), 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   const carregarDados = async () => {
     try {
@@ -165,36 +173,132 @@ export default function Companies() {
         const alocadosMesa = participantesAlmoco.filter((m) => Boolean(m.mesa_alocada));
         const paganteComCv = sociosNaoGiants.find((m) => m.cv_cartao);
 
-        const isFechadoAprovado = sociosNaoGiants.some((m) => {
-          const st = String(m.status_aprovacao || '').trim().toLowerCase();
-          const et = String(m.etapa_funil || '').trim().toLowerCase();
-          return (
-            ['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(st) ||
-            ['fechamento', 'concluido', 'concluida', 'vendido'].includes(et)
-          );
+        const idsGrupo = new Set(g.todosMembros.map((m) => Number(m.id)));
+        const cnpjGrupoLimpo = String(g.cnpj || '').replace(/\D/g, '');
+        const propFin = (Array.isArray(propostasFinanceiro) ? propostasFinanceiro : []).find((pf) => {
+          if (idsGrupo.has(Number(pf.aplicacao_id || pf.ficha_id || pf.cliente_id))) return true;
+          const cnpjPf = String(pf.cnpj || pf.cpf_cnpj || pf.dados_proposta?.cnpj || '').replace(/\D/g, '');
+          return cnpjGrupoLimpo.length === 14 && cnpjPf === cnpjGrupoLimpo;
         });
 
-        const isDecisaoFutura = !isFechadoAprovado && sociosNaoGiants.some((m) => {
-          const et = String(m.etapa_funil || '').trim().toLowerCase();
-          return ['decisao_futura', 'follow_up'].includes(et);
-        });
+        const statusAprovacaoFin = String(
+          propFin?.status_aprovacao ||
+            sociosNaoGiants.find((m) => m.status_aprovacao)?.status_aprovacao ||
+            ''
+        )
+          .trim()
+          .toUpperCase();
 
-        const isNaoFechou = !isFechadoAprovado && !isDecisaoFutura && sociosNaoGiants.some((m) => {
-          const et = String(m.etapa_funil || '').trim().toLowerCase();
-          return ['reprovado', 'nao_fechou', 'sem_interesse'].includes(et);
-        });
+        const isDevolvidoAjuste =
+          statusAprovacaoFin === 'AJUSTE_SOLICITADO' ||
+          sociosNaoGiants.some((m) => String(m.etapa_funil || '').trim().toLowerCase() === 'ajuste_solicitado');
 
-        const isAguardandoFinanceiro = !isFechadoAprovado && !isDecisaoFutura && !isNaoFechou && sociosNaoGiants.some((m) => {
-          const et = String(m.etapa_funil || '').trim().toLowerCase();
-          const st = String(m.status_aprovacao || '').trim().toLowerCase();
-          return et === 'aguardando_aprovacao' || st === 'pendente' || (Boolean(m.ficha_fechada) && Boolean(m.dados_proposta));
-        });
+        const isRecusadoFin =
+          !isDevolvidoAjuste && ['RECUSADA', 'RECUSADO'].includes(statusAprovacaoFin);
+
+        const isFechadoAprovado =
+          !isDevolvidoAjuste &&
+          !isRecusadoFin &&
+          (['APROVADA', 'APROVADO', 'APROVADA_COM_RESSALVA'].includes(statusAprovacaoFin) ||
+            sociosNaoGiants.some((m) => {
+              const st = String(m.status_aprovacao || '').trim().toLowerCase();
+              const et = String(m.etapa_funil || '').trim().toLowerCase();
+              return (
+                ['aprovada', 'aprovado', 'aprovada_com_ressalva'].includes(st) ||
+                ['fechamento', 'concluido', 'concluida', 'vendido'].includes(et)
+              );
+            }));
+
+        const isDecisaoFutura =
+          !isDevolvidoAjuste &&
+          !isFechadoAprovado &&
+          sociosNaoGiants.some((m) => {
+            const et = String(m.etapa_funil || '').trim().toLowerCase();
+            return ['decisao_futura', 'follow_up'].includes(et);
+          });
+
+        const isNaoFechou =
+          !isDevolvidoAjuste &&
+          !isFechadoAprovado &&
+          !isDecisaoFutura &&
+          (isRecusadoFin ||
+            sociosNaoGiants.some((m) => {
+              const et = String(m.etapa_funil || '').trim().toLowerCase();
+              return ['reprovado', 'nao_fechou', 'sem_interesse'].includes(et);
+            }));
+
+        const isAguardandoFinanceiro =
+          !isDevolvidoAjuste &&
+          !isFechadoAprovado &&
+          !isDecisaoFutura &&
+          !isNaoFechou &&
+          sociosNaoGiants.some((m) => {
+            const et = String(m.etapa_funil || '').trim().toLowerCase();
+            const st = String(m.status_aprovacao || '').trim().toLowerCase();
+            return et === 'aguardando_aprovacao' || st === 'pendente' || (Boolean(m.ficha_fechada) && Boolean(m.dados_proposta));
+          });
 
         const fichaComProposta = sociosNaoGiants.find((m) => m.dados_proposta || Number(m.valor_negociado || 0) > 0);
         const produtoFechado =
+          propFin?.dados_proposta?.categoriaProduto ||
+          propFin?.produto_nome ||
           fichaComProposta?.dados_proposta?.categoriaProduto ||
           fichaComProposta?.dados_proposta?.produtoNome ||
           '';
+
+        const motivoDevolucaoFin =
+          propFin?.motivo_devolucao ||
+          propFin?.af_observacoes_auditoria ||
+          propFin?.parecer_financeiro ||
+          sociosNaoGiants.find((m) => m.motivo_reabertura)?.motivo_reabertura ||
+          '';
+
+        const obsComercialFicha =
+          sociosNaoGiants.find((m) => String(m.resultado_obs || '').trim())?.resultado_obs ||
+          propFin?.dados_proposta?.observacoes ||
+          '';
+
+        const entrevistadorMesa =
+          alocadosMesa.find((m) => m.entrevistador_nome || m.vendedor_nome)?.entrevistador_nome ||
+          alocadosMesa.find((m) => m.vendedor_nome)?.vendedor_nome ||
+          '';
+
+        const refEsperaMesa =
+          participantesAlmoco
+            .map((m) => m.almoco_validado_em || m.updated_at || m.created_at)
+            .filter(Boolean)
+            .sort()[0] || null;
+
+        const isPendente =
+          !apenasGiants &&
+          !algumPago &&
+          !algumCortesia &&
+          !algumSemAlmoco &&
+          !isFechadoAprovado &&
+          !isAguardandoFinanceiro &&
+          !isDecisaoFutura &&
+          !isNaoFechou &&
+          !isDevolvidoAjuste;
+
+        const isAguardandoMesa =
+          !isPendente &&
+          !apenasGiants &&
+          !isFechadoAprovado &&
+          !isAguardandoFinanceiro &&
+          !isDecisaoFutura &&
+          !isNaoFechou &&
+          !isDevolvidoAjuste &&
+          alocadosMesa.length === 0;
+
+        const isEmMesa =
+          !isPendente &&
+          !apenasGiants &&
+          !isFechadoAprovado &&
+          !isAguardandoFinanceiro &&
+          !isDecisaoFutura &&
+          !isNaoFechou &&
+          !isDevolvidoAjuste &&
+          alocadosMesa.length > 0;
 
         return {
           ...g,
@@ -206,12 +310,21 @@ export default function Companies() {
           algumCortesia,
           algumSemAlmoco,
           apenasGiants,
+          statusAprovacaoFin,
+          isDevolvidoAjuste,
+          isRecusadoFin,
           isFechadoAprovado,
           isDecisaoFutura,
           isNaoFechou,
           isAguardandoFinanceiro,
+          isAguardandoMesa,
+          isEmMesa,
           produtoFechado,
-          isPendente: !apenasGiants && !algumPago && !algumCortesia && !algumSemAlmoco && !isFechadoAprovado && !isAguardandoFinanceiro,
+          motivoDevolucaoFin,
+          obsComercialFicha,
+          entrevistadorMesa,
+          refEsperaMesa,
+          isPendente,
           participantesAlmoco,
           alocadosMesa,
           cvCartao: paganteComCv?.cv_cartao || ''
@@ -231,21 +344,31 @@ export default function Companies() {
 
     if (!matchTermo) return false;
 
-    if (filtroAlmoco === 'fechados') return g.isFechadoAprovado;
+    if (filtroAlmoco === 'pendentes') return g.isPendente;
+    if (filtroAlmoco === 'aguardando_mesa') return g.isAguardandoMesa;
+    if (filtroAlmoco === 'em_mesa') return g.isEmMesa;
+    if (filtroAlmoco === 'aguardando_fin') return g.isAguardandoFinanceiro;
+    if (filtroAlmoco === 'devolvidos') return g.isDevolvidoAjuste;
+    if (filtroAlmoco === 'decisao_futura') return g.isDecisaoFutura;
+    if (filtroAlmoco === 'fechados') return g.isFechadoAprovado || g.isAguardandoFinanceiro;
     if (filtroAlmoco === 'pagos') return g.algumPago;
     if (filtroAlmoco === 'giants') return g.apenasGiants || g.sociosGiants.length > 0;
     if (filtroAlmoco === 'cortesia') return g.algumCortesia;
     if (filtroAlmoco === 'sem_almoco') return g.algumSemAlmoco;
-    if (filtroAlmoco === 'pendentes') return g.isPendente;
     return true;
   });
 
-  const totalFechados = gruposEmpresas.filter((g) => g.isFechadoAprovado).length;
+  const totalPendentes = gruposEmpresas.filter((g) => g.isPendente).length;
+  const totalAguardandoMesa = gruposEmpresas.filter((g) => g.isAguardandoMesa).length;
+  const totalEmMesa = gruposEmpresas.filter((g) => g.isEmMesa).length;
+  const totalAguardandoFin = gruposEmpresas.filter((g) => g.isAguardandoFinanceiro).length;
+  const totalDevolvidos = gruposEmpresas.filter((g) => g.isDevolvidoAjuste).length;
+  const totalDecisaoFutura = gruposEmpresas.filter((g) => g.isDecisaoFutura).length;
+  const totalFechados = gruposEmpresas.filter((g) => g.isFechadoAprovado || g.isAguardandoFinanceiro).length;
   const totalPagos = gruposEmpresas.filter((g) => g.algumPago).length;
   const totalGiants = gruposEmpresas.filter((g) => g.apenasGiants || g.sociosGiants.length > 0).length;
   const totalCortesia = gruposEmpresas.filter((g) => g.algumCortesia).length;
   const totalSemAlmoco = gruposEmpresas.filter((g) => g.algumSemAlmoco).length;
-  const totalPendentes = gruposEmpresas.filter((g) => g.isPendente).length;
 
   const totalPaginas = Math.ceil(empresasFiltradas.length / itensPorPagina) || 1;
   const indiceInicial = (pagina - 1) * itensPorPagina;
@@ -343,91 +466,125 @@ export default function Companies() {
     }
   };
 
+  const retomarFichaParaAtendimento = async (grupo, motivoTexto) => {
+    if (usuarioEhFinanceiro || retomandoId) return;
+    try {
+      setRetomandoId(grupo.idPrincipal);
+      await api.post(`/entrevistas/${grupo.idPrincipal}/reabrir`, {
+        motivo: motivoTexto
+      });
+      navigate(`/interviews/${grupo.idPrincipal}/edit`);
+    } catch (err) {
+      setErro('Não foi possível reabrir a ficha: ' + err.message);
+    } finally {
+      setRetomandoId(null);
+    }
+  };
+
+  const calcularMinutosEspera = (isoDate) => {
+    if (!isoDate) return null;
+    const ts = new Date(isoDate).getTime();
+    if (Number.isNaN(ts)) return null;
+    return Math.max(0, Math.floor((Date.now() - ts) / 60000));
+  };
+
+  const formatarRotuloAlmoco = (g, qtdNoAlmoco) => {
+    const sufixoSocios =
+      g.sociosNaoGiants.length > 1 && qtdNoAlmoco < g.sociosNaoGiants.length
+        ? ` (${qtdNoAlmoco}/${g.sociosNaoGiants.length} sócios)`
+        : '';
+    if (g.algumPago) {
+      return g.cvCartao ? `● Pago ${g.cvCartao}${sufixoSocios}` : `● Pago R$ 1.000${sufixoSocios}`;
+    }
+    if (g.algumCortesia) return `● Cortesia${sufixoSocios}`;
+    if (g.algumSemAlmoco) return `● Sem Almoço${sufixoSocios}`;
+    return '● Validado';
+  };
+
   const obterEstagioGrupo = (g) => {
+    const qtdNoAlmoco = g.participantesAlmoco.length || g.sociosNaoGiants.length;
+    const rotuloAlmocoBase = formatarRotuloAlmoco(g, qtdNoAlmoco);
+    const bgAlmocoBase = g.algumPago ? '#dcfce7' : '#e0f2fe';
+    const corAlmocoBase = g.algumPago ? '#15803d' : '#0369a1';
+
+    if (g.isDevolvidoAjuste) {
+      return {
+        passo: 3.2,
+        devolvidoAjuste: true,
+        rotuloAlmoco: rotuloAlmocoBase,
+        bgAlmoco: bgAlmocoBase,
+        corAlmoco: corAlmocoBase,
+        rotuloMesa: 'Devolvido p/ Ajuste',
+        iconeMesa: 'reply',
+        bgMesa: '#fef2f2',
+        corMesa: '#b91c1c',
+        bordaMesa: '#fecaca',
+        podeEntrevista: false
+      };
+    }
+
     if (g.isFechadoAprovado) {
-      const qtdNoAlmoco = g.participantesAlmoco.length || g.sociosNaoGiants.length;
-      const rotuloAlmocoFechado = g.algumPago
-        ? `● Pago R$ 1.000 (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-        : g.algumCortesia
-        ? `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-        : g.algumSemAlmoco
-        ? `● Atendimento Sem Almoço (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-        : '● Validado';
       return {
         passo: 4,
         fechado: true,
-        rotuloAlmoco: rotuloAlmocoFechado,
-        bgAlmoco: g.algumPago ? '#dcfce7' : '#e0f2fe',
-        corAlmoco: g.algumPago ? '#15803d' : '#0369a1',
+        rotuloAlmoco: rotuloAlmocoBase,
+        bgAlmoco: bgAlmocoBase,
+        corAlmoco: corAlmocoBase,
         rotuloMesa: 'Concluído (Mesa Liberada)',
+        iconeMesa: 'task_alt',
         bgMesa: '#f0fdf4',
         corMesa: '#15803d',
+        bordaMesa: '#bbf7d0',
         podeEntrevista: false
       };
     }
 
     if (g.isDecisaoFutura) {
-      const qtdNoAlmoco = g.participantesAlmoco.length || g.sociosNaoGiants.length;
-      const rotuloAlmocoDf = g.algumPago
-        ? `● Pago R$ 1.000 (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-        : g.algumCortesia
-        ? `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-        : g.algumSemAlmoco
-        ? `● Atendimento Sem Almoço (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-        : '● Validado';
       return {
         passo: 4,
         fechado: true,
-        rotuloAlmoco: rotuloAlmocoDf,
-        bgAlmoco: g.algumPago ? '#dcfce7' : '#e0f2fe',
-        corAlmoco: g.algumPago ? '#15803d' : '#0369a1',
-        rotuloMesa: 'Decisão Futura (Sem Venda)',
-        bgMesa: '#fffbeb',
-        corMesa: '#b45309',
+        decisaoFutura: true,
+        rotuloAlmoco: rotuloAlmocoBase,
+        bgAlmoco: bgAlmocoBase,
+        corAlmoco: corAlmocoBase,
+        rotuloMesa: 'Decisão Futura (Follow-up)',
+        iconeMesa: 'schedule',
+        bgMesa: '#f3e8ff',
+        corMesa: '#7e22ce',
+        bordaMesa: '#d8b4fe',
         podeEntrevista: false
       };
     }
 
     if (g.isNaoFechou) {
-      const qtdNoAlmoco = g.participantesAlmoco.length || g.sociosNaoGiants.length;
-      const rotuloAlmocoNf = g.algumPago
-        ? `● Pago R$ 1.000 (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-        : g.algumCortesia
-        ? `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-        : g.algumSemAlmoco
-        ? `● Atendimento Sem Almoço (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-        : '● Validado';
       return {
         passo: 4,
         fechado: true,
-        rotuloAlmoco: rotuloAlmocoNf,
-        bgAlmoco: g.algumPago ? '#dcfce7' : '#e0f2fe',
-        corAlmoco: g.algumPago ? '#15803d' : '#0369a1',
-        rotuloMesa: 'Não Fechou (Encerrada)',
+        naoFechou: true,
+        rotuloAlmoco: rotuloAlmocoBase,
+        bgAlmoco: bgAlmocoBase,
+        corAlmoco: corAlmocoBase,
+        rotuloMesa: g.isRecusadoFin ? 'Recusada pelo Financeiro' : 'Não Fechou (Encerrada)',
+        iconeMesa: 'cancel',
         bgMesa: '#f1f5f9',
         corMesa: '#475569',
+        bordaMesa: '#cbd5e1',
         podeEntrevista: false
       };
     }
 
     if (g.isAguardandoFinanceiro) {
-      const qtdNoAlmoco = g.participantesAlmoco.length || g.sociosNaoGiants.length;
-      const rotuloAlmocoFin = g.algumPago
-        ? `● Pago R$ 1.000 (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-        : g.algumCortesia
-        ? `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-        : g.algumSemAlmoco
-        ? `● Atendimento Sem Almoço (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-        : '● Validado';
       return {
         passo: 3.5,
         aguardandoFinanceiro: true,
-        rotuloAlmoco: rotuloAlmocoFin,
-        bgAlmoco: g.algumPago ? '#dcfce7' : '#e0f2fe',
-        corAlmoco: g.algumPago ? '#15803d' : '#0369a1',
+        rotuloAlmoco: rotuloAlmocoBase,
+        bgAlmoco: bgAlmocoBase,
+        corAlmoco: corAlmocoBase,
         rotuloMesa: 'Em Análise Financeira',
+        iconeMesa: 'hourglass_top',
         bgMesa: '#fffbeb',
         corMesa: '#b45309',
+        bordaMesa: '#fde68a',
         podeEntrevista: false
       };
     }
@@ -458,27 +615,15 @@ export default function Companies() {
       };
     }
 
-    const qtdNoAlmoco = g.participantesAlmoco.length;
-    let rotuloAlmoco = g.algumPago
-      ? `● Pago R$ 1.000 (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-      : g.algumCortesia
-      ? `● Cortesia (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`
-      : `● Atendimento Sem Almoço (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`;
-
-    if (g.algumPago && g.cvCartao) {
-      rotuloAlmoco = `● Pago ${g.cvCartao} (${qtdNoAlmoco} ${qtdNoAlmoco === 1 ? 'sócio' : 'sócios'})`;
-    }
-
-    const bgAlmoco = g.algumPago ? '#dcfce7' : '#e0f2fe';
-    const corAlmoco = g.algumPago ? '#15803d' : '#0369a1';
-
     if (g.alocadosMesa.length === 0) {
+      const minsEspera = calcularMinutosEspera(g.refEsperaMesa);
       return {
         passo: 2,
-        rotuloAlmoco,
-        bgAlmoco,
-        corAlmoco,
-        rotuloMesa: `⚠️ Alocar Lunch (${qtdNoAlmoco})`,
+        rotuloAlmoco: rotuloAlmocoBase,
+        bgAlmoco: bgAlmocoBase,
+        corAlmoco: corAlmocoBase,
+        rotuloMesa: `Alocar Mesa (${qtdNoAlmoco})`,
+        minsEspera,
         bgMesa: '#fff7ed',
         corMesa: '#c2410c',
         podeEntrevista: false
@@ -488,10 +633,11 @@ export default function Companies() {
     const mesasUnicas = [...new Set(g.alocadosMesa.map((m) => `Mesa ${m.mesa_alocada}`))].join(', ');
     return {
       passo: 3,
-      rotuloAlmoco,
-      bgAlmoco,
-      corAlmoco,
+      rotuloAlmoco: rotuloAlmocoBase,
+      bgAlmoco: bgAlmocoBase,
+      corAlmoco: corAlmocoBase,
       rotuloMesa: `${mesasUnicas} (${g.alocadosMesa.length}/${qtdNoAlmoco})`,
+      entrevistadorMesa: g.entrevistadorMesa,
       bgMesa: '#eff6ff',
       corMesa: '#1d4ed8',
       podeEntrevista: true
@@ -500,55 +646,50 @@ export default function Companies() {
 
   return (
     <div style={{ padding: '2rem', width: '100%', boxSizing: 'border-box' }}>
-      {/* Cabeçalho */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+      {/* Cabeçalho Alinhado */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.15rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <h1 style={{ fontSize: '1.75rem', fontWeight: '800', color: '#0f172a', margin: 0 }}>
             Base de Empresas — Fluxo Pré-Entrevista
           </h1>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.85rem' }}>
-        <a
-          href={`${import.meta.env.VITE_API_URL || '/api'}/financeiro/exportar-csv?turmaId=${turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491'}`}
-          target="_blank"
-          rel="noreferrer"
-          style={{
-            background: '#059669',
-            color: '#ffffff',
-            padding: '0.55rem 1rem',
-            borderRadius: '8px',
-            fontWeight: '800',
-            fontSize: '0.82rem',
-            textDecoration: 'none',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.4rem'
-          }}
-        >
-          <span className="material-symbols-outlined" style={{ fontSize: '1.05rem' }}>download</span>
-          Exportar Planilha (Excel/CSV)
-        </a>
-      </div>
-          <p style={{ color: '#64748b', margin: '0.25rem 0 0', fontSize: '0.9rem' }}>
-            1. Clicar na Empresa e Validar Almoço (Checklist de Sócios) → 2. Alocar na Mesa → 3. Entrevista por CNPJ
+          <p style={{ color: '#64748b', margin: '0.25rem 0 0', fontSize: '0.88rem' }}>
+            1. Validar Almoço (Checklist de Sócios) → 2. Alocar na Mesa → 3. Entrevista e Fechamento por CNPJ
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          <span style={{ background: '#e0f2fe', color: '#0284c7', padding: '0.45rem 0.85rem', borderRadius: '20px', fontSize: '0.85rem', fontWeight: '700' }}>
-            {empresasFiltradas.length} Empresas (CNPJs)
-          </span>
+        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <a
+            href={`${import.meta.env.VITE_API_URL || '/api'}/financeiro/exportar-csv?turmaId=${turmaSelecionada || localStorage.getItem('turma_ativa_id') || '1491'}`}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              background: '#059669',
+              color: '#ffffff',
+              padding: '0.52rem 0.95rem',
+              borderRadius: '8px',
+              fontWeight: '800',
+              fontSize: '0.8rem',
+              textDecoration: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.38rem'
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: '1.05rem' }}>download</span>
+            Exportar Planilha (Excel/CSV)
+          </a>
           <button
             onClick={() => navigate('/lunch')}
-            style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: '600', cursor: usuarioEhFinanceiro ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#0284c7' }}
+            style={{ background: '#f0f9ff', border: '1px solid #bae6fd', padding: '0.52rem 0.95rem', borderRadius: '8px', fontWeight: '700', fontSize: '0.8rem', cursor: usuarioEhFinanceiro ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.38rem', color: '#0369a1' }}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>restaurant</span>
-            Ver Salão de Lunch
+            <span className="material-symbols-outlined" style={{ fontSize: '1.1rem' }}>restaurant</span>
+            Ver Salão & Mesas
           </button>
           <button
             onClick={carregarDados}
-            style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#334155' }}
+            style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '0.52rem 0.95rem', borderRadius: '8px', fontWeight: '700', fontSize: '0.8rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: '#334155' }}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>refresh</span>
+            <span className="material-symbols-outlined" style={{ fontSize: '1.1rem' }}>refresh</span>
             Atualizar
           </button>
         </div>
@@ -570,51 +711,105 @@ export default function Companies() {
       )}
 
       {erro && (
-        <div style={{ background: '#fef2f2', color: '#ef4444', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem', border: '1px solid #fecaca' }}>
+        <div style={{ background: '#fef2f2', color: '#ef4444', padding: '1rem', borderRadius: '8px', marginBottom: '1.25rem', border: '1px solid #fecaca' }}>
           {erro}
         </div>
       )}
 
-      {/* Barra de Pesquisa e Filtro */}
-      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: '300px', background: '#fff', padding: '0.85rem 1.25rem', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '0.75rem', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+      {/* Painel de Funil Clicável por Etapa */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+        {[
+          { id: 'todos', label: 'Todas as Empresas', count: gruposEmpresas.length, bg: '#f1f5f9', cor: '#0f172a', borda: '#cbd5e1' },
+          { id: 'pendentes', label: '1. Almoço Pendente', count: totalPendentes, bg: '#fef3c7', cor: '#92400e', borda: '#fcd34d' },
+          { id: 'aguardando_mesa', label: '2. Aguardando Mesa', count: totalAguardandoMesa, bg: '#fff7ed', cor: '#c2410c', borda: '#fdba74' },
+          { id: 'em_mesa', label: '3. Em Mesa', count: totalEmMesa, bg: '#eff6ff', cor: '#1d4ed8', borda: '#bfdbfe' },
+          { id: 'aguardando_fin', label: 'Em Análise Fin.', count: totalAguardandoFin, bg: '#fefce8', cor: '#a16207', borda: '#fde047' },
+          ...(totalDevolvidos > 0
+            ? [{ id: 'devolvidos', label: '↩ Devolvidos p/ Ajuste', count: totalDevolvidos, bg: '#fef2f2', cor: '#b91c1c', borda: '#fca5a5' }]
+            : []),
+          { id: 'decisao_futura', label: 'Decisão Futura', count: totalDecisaoFutura, bg: '#f3e8ff', cor: '#7e22ce', borda: '#d8b4fe' },
+          { id: 'fechados', label: '🏆 Fechados', count: totalFechados, bg: '#dcfce7', cor: '#166534', borda: '#86efac' }
+        ].map((tab) => {
+          const ativo = filtroAlmoco === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => { setFiltroAlmoco(tab.id); setPagina(1); }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                padding: '0.45rem 0.85rem',
+                borderRadius: '999px',
+                border: ativo ? `2px solid ${tab.cor}` : `1px solid ${tab.borda}`,
+                background: ativo ? tab.bg : '#ffffff',
+                color: ativo ? tab.cor : '#475569',
+                fontSize: '0.78rem',
+                fontWeight: ativo ? '800' : '700',
+                cursor: 'pointer',
+                boxShadow: ativo ? '0 2px 6px rgba(15,23,42,0.08)' : 'none'
+              }}
+            >
+              <span>{tab.label}</span>
+              <span style={{ background: ativo ? tab.cor : '#e2e8f0', color: ativo ? '#ffffff' : '#334155', padding: '0.08rem 0.45rem', borderRadius: '999px', fontSize: '0.72rem', fontWeight: '800' }}>
+                {tab.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Barra de Pesquisa + Subfiltros de Modalidade */}
+      <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: '280px', background: '#fff', padding: '0.72rem 1.1rem', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '0.65rem', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
           <span className="material-symbols-outlined" style={{ color: '#94a3b8' }}>search</span>
           <input
             type="text"
             value={busca}
             onChange={(e) => { setBusca(e.target.value); setPagina(1); }}
             placeholder="Pesquisar por Razão Social, Nome do Sócio, CNPJ ou ID..."
-            style={{ width: '100%', border: 'none', outline: 'none', fontSize: '0.95rem', color: '#1e293b' }}
+            style={{ width: '100%', border: 'none', outline: 'none', fontSize: '0.9rem', color: '#1e293b' }}
           />
+          {busca && (
+            <button
+              type="button"
+              onClick={() => { setBusca(''); setPagina(1); }}
+              style={{ background: '#f1f5f9', border: 'none', borderRadius: '6px', padding: '0.15rem 0.45rem', fontWeight: '800', color: '#475569', cursor: 'pointer', fontSize: '0.78rem' }}
+            >
+              ✕
+            </button>
+          )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <select
-            id="selectFiltroAlmoco"
-            value={filtroAlmoco}
-            onChange={(e) => { setFiltroAlmoco(e.target.value); setPagina(1); }}
-            style={{
-              padding: '0.85rem 1.25rem',
-              borderRadius: '12px',
-              border: '1px solid #cbd5e1',
-              background: '#fff',
-              fontSize: '0.9rem',
-              fontWeight: '700',
-              color: '#0f172a',
-              cursor: 'pointer',
-              outline: 'none',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-              minWidth: '250px'
-            }}
-          >
-            <option value="todos">📋 Todas as Empresas ({gruposEmpresas.length})</option>
-            <option value="fechados">🏆 Fechados / Aprovados ({totalFechados})</option>
-            <option value="pagos">💰 Almoço Pago ({totalPagos})</option>
-            <option value="giants">⚡ Com Membro GIANTS ({totalGiants})</option>
-            <option value="cortesia">🎁 Cortesia ({totalCortesia})</option>
-            <option value="sem_almoco">🤝 Atendimento Sem Almoço ({totalSemAlmoco})</option>
-            <option value="pendentes">⏳ Pendente ({totalPendentes})</option>
-          </select>
+        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+          {[
+            { id: 'pagos', label: `Almoço Pago (${totalPagos})` },
+            { id: 'cortesia', label: `Cortesia (${totalCortesia})` },
+            { id: 'sem_almoco', label: `Sem Almoço (${totalSemAlmoco})` },
+            { id: 'giants', label: `Com GIANTS (${totalGiants})` }
+          ].map((chip) => {
+            const ativo = filtroAlmoco === chip.id;
+            return (
+              <button
+                key={chip.id}
+                type="button"
+                onClick={() => { setFiltroAlmoco(ativo ? 'todos' : chip.id); setPagina(1); }}
+                style={{
+                  padding: '0.42rem 0.72rem',
+                  borderRadius: '8px',
+                  border: ativo ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                  background: ativo ? '#e0f2fe' : '#ffffff',
+                  color: ativo ? '#0369a1' : '#475569',
+                  fontSize: '0.75rem',
+                  fontWeight: '700',
+                  cursor: 'pointer'
+                }}
+              >
+                {chip.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -651,46 +846,53 @@ export default function Companies() {
                       <div
                         onClick={() => !usuarioEhFinanceiro && abrirModalEmpresa(g)}
                         title={usuarioEhFinanceiro ? "Visualização somente leitura (Financeiro não valida almoço)" : "Clique para abrir os sócios da empresa e configurar o almoço"}
-                        style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', cursor: 'pointer' }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap', cursor: 'pointer' }}
                       >
                         <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '0.92rem' }}>
                           {g.empresa}
-                            {Number(g.cashbackTotalCnpj || 0) > 0 && (
-                              <span
-                                title={g.historicoUpgradeCnpj ? `Inclui upgrade 90%: ${g.historicoUpgradeCnpj}` : 'Crédito de Almoço Pago'}
-                                style={{
-                                  background: '#ecfdf5',
-                                  color: '#047857',
-                                  border: '1px solid #6ee7b7',
-                                  padding: '0.15rem 0.5rem',
-                                  borderRadius: '6px',
-                                  fontSize: '0.72rem',
-                                  fontWeight: '800',
-                                  marginLeft: '0.45rem',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.2rem'
-                                }}
-                              >
-                                Cashback: {Number(g.cashbackTotalCnpj).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                              </span>
-                            )}
                         </span>
-                        {g.isFechadoAprovado && (
+
+                        {g.isDevolvidoAjuste && (
                           <span style={{
                             fontSize: '0.72rem',
                             fontWeight: '800',
-                            background: '#15803d',
-                            color: '#ffffff',
-                            padding: '0.18rem 0.6rem',
-                            borderRadius: '999px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.25rem'
+                            background: '#fef2f2',
+                            color: '#b91c1c',
+                            border: '1px solid #fca5a5',
+                            padding: '0.16rem 0.55rem',
+                            borderRadius: '999px'
                           }}>
-                            🏆 FECHADO {g.produtoFechado ? `(${g.produtoFechado})` : ''}
+                            ↩ Devolvido p/ Ajuste
                           </span>
                         )}
+
+                        {g.isFechadoAprovado && (
+                          <>
+                            <span style={{
+                              fontSize: '0.72rem',
+                              fontWeight: '800',
+                              background: '#15803d',
+                              color: '#ffffff',
+                              padding: '0.18rem 0.6rem',
+                              borderRadius: '999px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem'
+                            }}>
+                              🏆 FECHADO {g.produtoFechado ? `(${g.produtoFechado})` : ''}
+                            </span>
+                            {g.statusAprovacaoFin === 'APROVADA_COM_RESSALVA' ? (
+                              <span style={{ fontSize: '0.7rem', fontWeight: '800', background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '0.15rem 0.5rem', borderRadius: '999px' }}>
+                                ⚠ Aprovado c/ Ressalva
+                              </span>
+                            ) : ['APROVADA', 'APROVADO'].includes(g.statusAprovacaoFin) ? (
+                              <span style={{ fontSize: '0.7rem', fontWeight: '800', background: '#dcfce7', color: '#166534', border: '1px solid #86efac', padding: '0.15rem 0.5rem', borderRadius: '999px' }}>
+                                ✔ Financeiro OK
+                              </span>
+                            ) : null}
+                          </>
+                        )}
+
                         {g.isAguardandoFinanceiro && (
                           <span style={{
                             fontSize: '0.72rem',
@@ -701,41 +903,37 @@ export default function Companies() {
                             padding: '0.16rem 0.55rem',
                             borderRadius: '999px'
                           }}>
-                            ⏳ Aguardando Financeiro
+                            ⏳ {g.produtoFechado ? `${g.produtoFechado} • ` : ''}Em Análise Fin.
                           </span>
                         )}
-                        {g.sociosNaoGiants.length > 1 && (
-                          <span style={{ fontSize: '0.72rem', fontWeight: '700', background: '#e0e7ff', color: '#3730a3', padding: '0.15rem 0.5rem', borderRadius: '999px' }}>
-                            {g.sociosNaoGiants.length} sócios elegíveis
-                          </span>
-                        )}
-                          {(() => {
-                            const membros = g.sociosNaoGiants || g.membros || g.socios || g.participantes || [];
-                            const cbAlmoco = membros.some((m) => Boolean(m.almoco_pago) || Number(m.valor_almoco || 0) >= 1000) ? 1000 : 0;
-                            const cbUpgrade = membros.reduce((mx, m) => Math.max(mx, (Number(m.cashback_upgrade_90_pct) || 0)), 0);
-                            const cbTotal = cbAlmoco + cbUpgrade;
-                            if (cbTotal <= 0) return null;
-                            const hist = (membros.find((m) => m.historico_produtos_elegiveis) || {}).historico_produtos_elegiveis || '';
-                            return (
-                              <span
-                                title={hist ? `Almoço + Upgrade 90%: ${hist}` : 'Crédito de Almoço Pago'}
-                                style={{
-                                  background: '#ecfdf5',
-                                  color: '#047857',
-                                  border: '1px solid #6ee7b7',
-                                  padding: '0.15rem 0.55rem',
-                                  borderRadius: '999px',
-                                  fontSize: '0.72rem',
-                                  fontWeight: '800',
-                                  marginLeft: '0.45rem',
-                                  display: 'inline-flex',
-                                  alignItems: 'center'
-                                }}
-                              >
-                                Cashback Total: {cbTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                              </span>
-                            );
-                          })()}
+
+                        {(() => {
+                          const membros = g.sociosNaoGiants || g.membros || g.socios || g.participantes || [];
+                          const cbAlmoco = membros.some((m) => Boolean(m.almoco_pago) || Number(m.valor_almoco || 0) >= 1000) ? 1000 : 0;
+                          const cbUpgrade = membros.reduce((mx, m) => Math.max(mx, Number(m.cashback_upgrade_90_pct) || 0), 0);
+                          const cbTotal = Math.max(Number(g.cashbackTotalCnpj || 0), cbAlmoco + cbUpgrade);
+                          if (cbTotal <= 0) return null;
+                          const hist = g.historicoUpgradeCnpj || (membros.find((m) => m.historico_produtos_elegiveis) || {}).historico_produtos_elegiveis || '';
+                          return (
+                            <span
+                              title={hist ? `Almoço + Upgrade 90%: ${hist}` : 'Crédito de Almoço Pago'}
+                              style={{
+                                background: '#ecfdf5',
+                                color: '#047857',
+                                border: '1px solid #6ee7b7',
+                                padding: '0.15rem 0.55rem',
+                                borderRadius: '999px',
+                                fontSize: '0.72rem',
+                                fontWeight: '800',
+                                display: 'inline-flex',
+                                alignItems: 'center'
+                              }}
+                            >
+                              Cashback: {cbTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </span>
+                          );
+                        })()}
+
                         {g.sociosGiants.length > 0 && (
                           <span style={{ fontSize: '0.72rem', fontWeight: '700', background: '#f3e8ff', color: '#7e22ce', padding: '0.15rem 0.5rem', borderRadius: '999px' }}>
                             {g.sociosGiants.length} GIANTS
@@ -743,10 +941,10 @@ export default function Companies() {
                         )}
                       </div>
 
-                      <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.2rem' }}>
+                      <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.22rem' }}>
                         {g.sociosNaoGiants.length > 0 ? (
                           <span>
-                            <strong>Sócios:</strong>{' '}
+                            <strong>Sócios ({g.sociosNaoGiants.length}):</strong>{' '}
                             {g.sociosNaoGiants.map((s, i) => {
                               const vaiAlmoco = Boolean(s.almoco_pago || s.cortesia_almoco || s.atendimento_sem_almoco);
                               return (
@@ -766,10 +964,43 @@ export default function Companies() {
                           </span>
                         )}
                       </div>
+
+                      {g.isDevolvidoAjuste && g.motivoDevolucaoFin && (
+                        <div style={{ fontSize: '0.74rem', color: '#b91c1c', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '0.25rem 0.55rem', marginTop: '0.3rem', display: 'inline-block' }}>
+                          <strong>Motivo Financeiro:</strong> {g.motivoDevolucaoFin}
+                        </div>
+                      )}
+
+                      {(g.isDecisaoFutura || g.isNaoFechou) && g.obsComercialFicha && (
+                        <div style={{ fontSize: '0.74rem', color: g.isDecisaoFutura ? '#6b21a8' : '#475569', background: g.isDecisaoFutura ? '#faf5ff' : '#f8fafc', border: `1px solid ${g.isDecisaoFutura ? '#e9d5ff' : '#e2e8f0'}`, borderRadius: '6px', padding: '0.22rem 0.55rem', marginTop: '0.3rem', display: 'inline-block' }}>
+                          <strong>Motivo:</strong> {g.obsComercialFicha}
+                        </div>
+                      )}
                     </td>
 
                     <td style={{ padding: '1rem', color: '#64748b', fontSize: '0.85rem', fontFamily: 'monospace' }}>
-                      {g.apenasGiants ? `Inscrição Individual • Ref #${g.idPrincipal}` : (g.cnpj || '-')}
+                      {g.apenasGiants ? (
+                        `Inscrição Individual • Ref #${g.idPrincipal}`
+                      ) : g.cnpj ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <span>{g.cnpj}</span>
+                          <button
+                            type="button"
+                            className="btn-copy-chip"
+                            title="Copiar CNPJ"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard?.writeText(g.cnpj).then(() => {
+                                toastSistema(`CNPJ copiado: ${g.cnpj}`, 'sucesso', 2200);
+                              }).catch(() => {});
+                            }}
+                          >
+                            <span className="material-symbols-outlined" style={{ fontSize: '0.82rem' }}>content_copy</span>
+                          </button>
+                        </span>
+                      ) : (
+                        '-'
+                      )}
                     </td>
 
                     {/* 1. Almoço */}
@@ -798,11 +1029,11 @@ export default function Companies() {
 
                     {/* 2. Mesa Lunch */}
                     <td style={{ padding: '1rem' }}>
-                      {estagio.fechado ? (
+                      {estagio.devolvidoAjuste || estagio.fechado ? (
                         <span style={{
-                          background: '#f0fdf4',
-                          color: '#15803d',
-                          border: '1px solid #bbf7d0',
+                          background: estagio.bgMesa || '#f0fdf4',
+                          color: estagio.corMesa || '#15803d',
+                          border: `1px solid ${estagio.bordaMesa || '#bbf7d0'}`,
                           padding: '0.35rem 0.75rem',
                           borderRadius: '6px',
                           fontSize: '0.78rem',
@@ -811,7 +1042,7 @@ export default function Companies() {
                           alignItems: 'center',
                           gap: '0.3rem'
                         }}>
-                          <span className="material-symbols-outlined" style={{ fontSize: '0.9rem' }}>task_alt</span>
+                          <span className="material-symbols-outlined" style={{ fontSize: '0.9rem' }}>{estagio.iconeMesa || 'task_alt'}</span>
                           {estagio.rotuloMesa}
                         </span>
                       ) : estagio.aguardandoFinanceiro ? (
@@ -849,32 +1080,91 @@ export default function Companies() {
                       ) : g.apenasGiants ? (
                         <span style={{ fontSize: '0.8rem', color: '#7e22ce', fontWeight: '700' }}>Acesso VIP GIANTS</span>
                       ) : (
-                        <button
-                          onClick={() => navigate(`/lunch?alocarId=${proximoAlocar.id}`)}
-                          style={{
-                            background: estagio.bgMesa,
-                            color: estagio.corMesa,
-                            border: '1px solid #cbd5e1',
-                            padding: '0.35rem 0.75rem',
-                            borderRadius: '6px',
-                            fontSize: '0.8rem',
-                            fontWeight: '700',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.35rem'
-                          }}
-                          title="Abrir Salão de Lunch para alocar cadeiras dos sócios confirmados"
-                        >
-                          <span className="material-symbols-outlined" style={{ fontSize: '0.9rem' }}>table_restaurant</span>
-                          {estagio.rotuloMesa}
-                        </button>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem' }}>
+                          <button
+                            onClick={() => navigate(`/lunch?alocarId=${proximoAlocar.id}`)}
+                            style={{
+                              background: estagio.bgMesa,
+                              color: estagio.corMesa,
+                              border: '1px solid #cbd5e1',
+                              padding: '0.35rem 0.75rem',
+                              borderRadius: '6px',
+                              fontSize: '0.8rem',
+                              fontWeight: '700',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.35rem'
+                            }}
+                            title="Abrir Salão & Mesas para alocar cadeiras dos sócios confirmados"
+                          >
+                            <span className="material-symbols-outlined" style={{ fontSize: '0.9rem' }}>table_restaurant</span>
+                            {estagio.rotuloMesa}
+                          </button>
+                          {estagio.passo === 2 && estagio.minsEspera !== null && (
+                            <span style={{
+                              fontSize: '0.69rem',
+                              fontWeight: '800',
+                              color: estagio.minsEspera >= 15 ? '#dc2626' : '#64748b'
+                            }}>
+                              ⏱️ {estagio.minsEspera < 1 ? 'liberado agora' : `${estagio.minsEspera} min aguardando mesa`}
+                            </span>
+                          )}
+                          {estagio.passo === 3 && estagio.entrevistadorMesa && (
+                            <span style={{ fontSize: '0.7rem', color: '#475569', fontWeight: '600' }}>
+                              Consultor: {estagio.entrevistadorMesa}
+                            </span>
+                          )}
+                        </div>
                       )}
                     </td>
 
                     {/* 3. Entrevista */}
                     <td style={{ padding: '1rem', textAlign: 'right' }}>
-                      {estagio.fechado ? (
+                      {estagio.devolvidoAjuste ? (
+                        <button
+                          disabled={usuarioEhFinanceiro || retomandoId === g.idPrincipal}
+                          onClick={() => retomarFichaParaAtendimento(g, 'Ajuste solicitado pelo Financeiro')}
+                          style={{
+                            background: '#dc2626',
+                            color: '#ffffff',
+                            border: 'none',
+                            padding: '0.45rem 0.95rem',
+                            borderRadius: '6px',
+                            fontSize: '0.8rem',
+                            fontWeight: '800',
+                            cursor: usuarioEhFinanceiro ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem'
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>edit_note</span>
+                          {retomandoId === g.idPrincipal ? 'Abrindo...' : 'Ajustar Ficha'}
+                        </button>
+                      ) : estagio.decisaoFutura ? (
+                        <button
+                          disabled={usuarioEhFinanceiro || retomandoId === g.idPrincipal}
+                          onClick={() => retomarFichaParaAtendimento(g, 'Repescagem / Retomada de Decisão Futura')}
+                          title="Reabrir ficha de Decisão Futura para nova abordagem comercial"
+                          style={{
+                            background: '#7e22ce',
+                            color: '#ffffff',
+                            border: 'none',
+                            padding: '0.45rem 0.95rem',
+                            borderRadius: '6px',
+                            fontSize: '0.8rem',
+                            fontWeight: '800',
+                            cursor: usuarioEhFinanceiro ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem'
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>replay</span>
+                          {retomandoId === g.idPrincipal ? 'Reabrindo...' : 'Repescar Ficha'}
+                        </button>
+                      ) : estagio.fechado ? (
                         usuarioEhAdmin ? (
                           <button
                             onClick={() => setGrupoReabrir(g)}
@@ -1166,7 +1456,7 @@ export default function Companies() {
                     </span>
                   </div>
                   <p style={{ fontSize: '0.76rem', color: '#15803d', margin: '0 0 0.75rem 0' }}>
-                    Apenas os sócios marcados abaixo terão acesso liberado para ocupar cadeiras no Salão de Lunch (exibe apenas sócios da turma que não são GIANTS).
+                    Apenas os sócios marcados abaixo terão acesso liberado para ocupar cadeiras no Salão & Mesas (exibe apenas sócios da turma que não são GIANTS).
                   </p>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>

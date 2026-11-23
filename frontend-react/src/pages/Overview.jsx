@@ -45,7 +45,7 @@ export default function Overview() {
 
   return (
     <div style={{ padding: '2rem' }}>
-      <h1 style={{ fontSize: '1.75rem', fontWeight: '800', color: '#0f172a', marginBottom: '0.25rem' }}>Cockpit Operaçãonal</h1>
+      <h1 style={{ fontSize: '1.75rem', fontWeight: '800', color: '#0f172a', marginBottom: '0.25rem' }}>Cockpit Operacional</h1>
       <p style={{ color: '#64748b', marginBottom: '2rem' }}>Indicadores em tempo real da turma ativa no evento.</p>
 
       {/* Cards de KPIs */}

@@ -1,3 +1,4 @@
+import { toastSistema } from '../context/ModalContext';
 ﻿import { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
@@ -93,8 +94,8 @@ export default function Approvals() {
   const [propostas, setPropostas] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
-  const [filtro, setFiltro] = useState(filtroInicial);
-  const [busca, setBusca] = useState('');
+  const [filtro, setFiltro] = useState(() => (new URLSearchParams(window.location.search).get('busca') ? 'TODOS' : (filtroInicial)));
+  const [busca, setBusca] = useState(() => new URLSearchParams(window.location.search).get('busca') || '');
 
   // Estado do Modal de Análise & Deliberação
   const [propSelecionada, setPropSelecionada] = useState(null);
@@ -114,6 +115,13 @@ export default function Approvals() {
   const [parecerFinanceiro, setParecerFinanceiro] = useState('');
   const [salvandoAnalise, setSalvandoAnalise] = useState(false);
   const [modoDevolucao, setModoDevolucao] = useState(false);
+  const [pagamentosConferidos, setPagamentosConferidos] = useState({});
+  const [, setTickSla] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => setTickSla((t) => t + 1), 30000);
+    return () => clearInterval(timer);
+  }, []);
   const [motivoDevolucao, setMotivoDevolucao] = useState('');
   const [devolvendo, setDevolvendo] = useState(false);
   const [comprovanteModal, setComprovanteModal] = useState(null);
@@ -152,6 +160,7 @@ export default function Approvals() {
 
     setErroModal('');
     setModoDevolucao(false);
+    setPagamentosConferidos({});
     setMotivoDevolucao('');
     setPropSelecionada(prop);
     setParecerComercial(prop.aprovacao_comercial_parecer || '');
@@ -382,31 +391,44 @@ export default function Approvals() {
     return (st === 'PENDENTE' || st === 'ENVIADO_FINANCEIRO') && obterStatusComercial(p) !== 'PENDENTE';
   }).length;
 
+  const obterTempoEsperaFila = (prop) => {
+    const st = String(prop.status_aprovacao || 'PENDENTE').toUpperCase();
+    if (!['PENDENTE', 'ENVIADO_FINANCEIRO'].includes(st)) return null;
+    const rawDate = prop.proposta_criada_em || prop.enviado_financeiro_em || prop.updated_at || prop.created_at;
+    if (!rawDate) return null;
+    const ts = new Date(rawDate).getTime();
+    if (Number.isNaN(ts)) return null;
+    const mins = Math.max(0, Math.floor((Date.now() - ts) / 60000));
+    const texto = mins < 1 ? 'agora mesmo' : mins < 60 ? `${mins} min na fila` : `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')} na fila`;
+    return { mins, texto, atrasado: mins >= 10 };
+  };
+
   const renderBadgeStatus = (prop) => {
     const st = String(prop.status_aprovacao || 'PENDENTE').toUpperCase();
     const stCom = obterStatusComercial(prop);
     const motivos = extrairMotivosAlcada(prop);
     const credito = String(prop.analise_credito_status || prop.af_decisao_financeiro || '').toUpperCase();
     const serasaTxt = prop.status_serasa_texto || prop.af_observacoes_auditoria || '';
+    const sla = obterTempoEsperaFila(prop);
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.28rem' }}>
-        {/* Etapa 1: Alçada Comercial */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+        {/* Etapa 1: Liberação Comercial */}
         {stCom === 'PENDENTE' ? (
           <span style={{ display: 'inline-block', width: 'fit-content', background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '0.18rem 0.55rem', borderRadius: '999px', fontSize: '0.7rem', fontWeight: '800' }}>
             1. Aguardando Gestor Comercial
           </span>
         ) : stCom === 'APROVADA' ? (
           <span style={{ display: 'inline-block', width: 'fit-content', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '0.68rem', fontWeight: '800' }}>
-            ✔ 1. Alçada Comercial Aprovada{prop.aprovacao_comercial_por_nome ? ` (${prop.aprovacao_comercial_por_nome.split(' ')[0]})` : ''}
+            ✔ 1. Liberado pelo Comercial{prop.aprovacao_comercial_por_nome ? ` (${prop.aprovacao_comercial_por_nome.split(' ')[0]})` : ''}
           </span>
         ) : stCom === 'RECUSADA' ? (
           <span style={{ display: 'inline-block', width: 'fit-content', background: '#fee2e2', color: '#991b1b', padding: '0.18rem 0.55rem', borderRadius: '999px', fontSize: '0.7rem', fontWeight: '800' }}>
-            ✖ Recusada na Alçada Comercial
+            ✖ Recusado pelo Comercial
           </span>
         ) : (
           <span style={{ display: 'inline-block', width: 'fit-content', background: '#f1f5f9', color: '#475569', padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '0.68rem', fontWeight: '700' }}>
-            1. Padrão Autônomo (Sem Exceção)
+            1. Condição Padrão (Sem Exceção)
           </span>
         )}
 
@@ -435,10 +457,28 @@ export default function Approvals() {
           </span>
         ) : null}
 
-        {motivos.length > 0 && (
-          <span style={{ fontSize: '0.69rem', color: '#b45309', background: '#fffbeb', padding: '0.15rem 0.45rem', borderRadius: '4px', maxWidth: '250px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={motivos.join(' | ')}>
-            Alçada: {motivos[0]}
+        {sla && (
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.25rem',
+            width: 'fit-content',
+            fontSize: '0.68rem',
+            fontWeight: '800',
+            padding: '0.12rem 0.45rem',
+            borderRadius: '5px',
+            background: sla.atrasado ? '#fef2f2' : '#f8fafc',
+            color: sla.atrasado ? '#dc2626' : '#64748b',
+            border: sla.atrasado ? '1px solid #fecaca' : '1px solid #e2e8f0'
+          }}>
+            ⏱️ {sla.texto}
           </span>
+        )}
+
+        {motivos.length > 0 && (
+          <div style={{ fontSize: '0.7rem', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', padding: '0.25rem 0.5rem', borderRadius: '6px', maxWidth: '280px', lineHeight: 1.35, whiteSpace: 'normal' }}>
+            <strong>Exceção:</strong> {motivos.join(' • ')}
+          </div>
         )}
 
         {credito && (
@@ -451,7 +491,7 @@ export default function Approvals() {
           </span>
         )}
         {serasaTxt && (
-          <span style={{ fontSize: '0.7rem', color: '#7f1d1d', background: '#fef2f2', padding: '0.15rem 0.4rem', borderRadius: '4px', maxWidth: '240px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={serasaTxt}>
+          <span style={{ fontSize: '0.7rem', color: '#7f1d1d', background: '#fef2f2', padding: '0.15rem 0.4rem', borderRadius: '4px', maxWidth: '260px', whiteSpace: 'normal', lineHeight: 1.3 }}>
             {serasaTxt}
           </span>
         )}
@@ -466,7 +506,7 @@ export default function Approvals() {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
             <h1 style={{ fontSize: '1.75rem', fontWeight: '800', color: '#0f172a', margin: 0 }}>
-              Fila de Aprovações (Alçada Comercial & Financeiro)
+              Fila de Aprovações (Comercial & Financeiro)
             </h1>
             <span style={{
               fontSize: '0.72rem',
@@ -482,7 +522,7 @@ export default function Approvals() {
           </div>
           <p style={{ color: '#64748b', margin: '0.25rem 0 0', fontSize: '0.9rem' }}>
             {isGestorComercial
-              ? 'Etapa 1: Aval Comercial do Gestor (descontos, entrada abaixo de 1 parcela e exceções) • Etapa 2: Crédito/Serasa e liberação Financeira'
+              ? 'Etapa 1: Liberação Comercial do Gestor (descontos, permuta e exceções) • Etapa 2: Crédito/Serasa e liberação Financeira'
               : 'Análise de Crédito/Serasa, conferência de entrada/cashback e liberação financeira de contratos'}
           </p>
         </div>
@@ -587,7 +627,7 @@ export default function Approvals() {
               <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Empresa / Proponente</th>
               <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Produto & Sócios</th>
               <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Valores & Cashback</th>
-              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Fluxo de Alçada & Crédito</th>
+              <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem' }}>Liberação Comercial & Crédito</th>
               <th style={{ padding: '1rem', color: '#475569', fontSize: '0.82rem', textAlign: 'right' }}>Ações</th>
             </tr>
           </thead>
@@ -616,15 +656,48 @@ export default function Approvals() {
                 return (
                   <tr key={prop.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                     <td style={{ padding: '1rem', fontWeight: '800', color: '#ff5722', fontSize: '0.88rem' }}>
-                      PROP-{String(prop.id).padStart(3, '0')}
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span>PROP-{String(prop.id).padStart(3, '0')}</span>
+                        <button
+                          type="button"
+                          className="btn-copy-chip"
+                          title="Copiar protocolo"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const proto = `PROP-${String(prop.id).padStart(3, '0')}`;
+                            navigator.clipboard?.writeText(proto).then(() => {
+                              toastSistema(`Protocolo copiado: ${proto}`, 'sucesso', 2200);
+                            }).catch(() => {});
+                          }}
+                        >
+                          <span className="material-symbols-outlined" style={{ fontSize: '0.82rem' }}>content_copy</span>
+                        </button>
+                      </div>
                     </td>
                     <td style={{ padding: '1rem' }}>
                       <div style={{ fontWeight: '700', color: '#0f172a', fontSize: '0.9rem' }}>
                         {prop.empresa || prop.cliente_empresa || 'Empresa SGA'}
                       </div>
-                      <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                        {prop.nome_participante || prop.cliente_nome}
-                        {cnpjExibir && <span style={{ marginLeft: '0.4rem', fontFamily: 'monospace' }}>• {cnpjExibir}</span>}
+                      <div style={{ fontSize: '0.78rem', color: '#64748b', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}>
+                        <span>{prop.nome_participante || prop.cliente_nome}</span>
+                        {cnpjExibir && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontFamily: 'monospace' }}>
+                            • {cnpjExibir}
+                            <button
+                              type="button"
+                              className="btn-copy-chip"
+                              title="Copiar CNPJ"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard?.writeText(cnpjExibir).then(() => {
+                                  toastSistema(`CNPJ copiado: ${cnpjExibir}`, 'sucesso', 2200);
+                                }).catch(() => {});
+                              }}
+                            >
+                              <span className="material-symbols-outlined" style={{ fontSize: '0.8rem' }}>content_copy</span>
+                            </button>
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td style={{ padding: '1rem' }}>
@@ -665,11 +738,28 @@ export default function Approvals() {
                       <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
                         (-) Entr. {fmtBRL(entrada)}{entradaComp > 0 ? ` + ${fmtBRL(entradaComp)}` : ''} • {parcelas}x {fmtBRL(valorParcela)}
                       </div>
-                      {idPagamento && (
-                        <div style={{ fontSize: '0.71rem', color: '#0369a1', fontWeight: '700', marginTop: '0.15rem' }}>
-                          Ref./CV: {idPagamento}
-                        </div>
-                      )}
+                      {(() => {
+                        const qtdComps = Array.isArray(dp.pagamentosEntrada)
+                          ? dp.pagamentosEntrada.filter((p) => p && p.temComprovante).length
+                          : prop.tem_comprovante
+                          ? 1
+                          : 0;
+                        if (!idPagamento && qtdComps === 0) return null;
+                        return (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center', marginTop: '0.2rem' }}>
+                            {idPagamento && (
+                              <span style={{ fontSize: '0.71rem', color: '#0369a1', fontWeight: '700' }}>
+                                Ref./CV: {idPagamento}
+                              </span>
+                            )}
+                            {qtdComps > 0 && (
+                              <span style={{ fontSize: '0.68rem', fontWeight: '800', color: '#047857', background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '0.08rem 0.4rem', borderRadius: '5px' }}>
+                                📎 {qtdComps} comprovante(s)
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td style={{ padding: '1rem' }}>
                       {renderBadgeStatus(prop)}
@@ -717,7 +807,7 @@ export default function Approvals() {
                         <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>
                           {stCom === 'PENDENTE' ? 'gavel' : 'policy'}
                         </span>
-                        {stCom === 'PENDENTE' ? 'Avaliar Alçada / Ver' : 'Analisar Crédito / Deliberar'}
+                        {stCom === 'PENDENTE' ? 'Avaliar Exceção / Ver' : 'Analisar Crédito / Deliberar'}
                       </button>
                       </div>
                     </td>
@@ -762,7 +852,7 @@ export default function Approvals() {
                       PROP-{String(propSelecionada.id).padStart(3, '0')}
                     </span>
                     <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#475569', background: '#f1f5f9', padding: '0.18rem 0.55rem', borderRadius: '6px' }}>
-                      Governança em 2 Etapas • Perfil: {papelUsuario}
+                      Liberação em 2 Etapas • Perfil: {papelUsuario}
                     </span>
                   </div>
                   <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '800', color: '#0f172a' }}>
@@ -779,18 +869,26 @@ export default function Approvals() {
               </div>
 
               {/* Corpo Rolável */}
-              <div style={{ padding: '1.35rem 1.5rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.15rem', background: '#f8fafc' }}>
+              <div style={{ padding: '1.35rem 1.5rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.1rem', background: '#f8fafc' }}>
                 {/* Resumo da Proposta */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.85rem' }}>
-                  <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0.95rem' }}>
-                    <div style={{ fontSize: '0.7rem', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>Empresa / CNPJ</div>
-                    <div style={{ fontSize: '0.86rem', fontWeight: '700', color: '#0f172a', marginTop: '0.2rem' }}>
+                  <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0.95rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>Empresa & Contrato</div>
+                    <div style={{ fontSize: '0.86rem', fontWeight: '700', color: '#0f172a', fontFamily: 'monospace' }}>
                       {[propSelecionada.cnpj, propSelecionada.cpf_cnpj, propSelecionada.dados_proposta?.cnpj].find((d) => String(d || '').replace(/\D/g, '').length === 14) || 'CNPJ não informado'}
                     </div>
-                    <div style={{ fontSize: '0.76rem', color: '#475569', marginTop: '0.25rem' }}>
+                    <div style={{ fontSize: '0.76rem', color: '#475569' }}>
                       {sociosContrato.length > 0
                         ? `Sócios (${sociosContrato.length}): ${sociosContrato.map((s) => s.nome).join(', ')}`
                         : `Titular: ${propSelecionada.nome_participante}`}
+                    </div>
+                    <div style={{ marginTop: '0.2rem', paddingTop: '0.35rem', borderTop: '1px dashed #e2e8f0', fontSize: '0.75rem', color: '#334155' }}>
+                      <div><strong>Produto:</strong> {propSelecionada.produto_nome || dp.produtoNome || 'GIANTS'}</div>
+                      {(propSelecionada.entrevistador_nome || dp.entrevistadorNome || propSelecionada.usuario_nome) && (
+                        <div style={{ marginTop: '0.15rem', color: '#64748b' }}>
+                          <strong>Mesa / Operador:</strong> {propSelecionada.entrevistador_nome || dp.entrevistadorNome || propSelecionada.usuario_nome}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -836,40 +934,74 @@ export default function Approvals() {
                       Entrada Total: {fmtBRL(entrada)}
                     </div>
                     {Array.isArray(dp.pagamentosEntrada) && dp.pagamentosEntrada.length > 0 ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.3rem', paddingLeft: '0.45rem', borderLeft: '2px solid #bae6fd' }}>
-                        {dp.pagamentosEntrada.map((pg, idxPg) => (
-                          <div key={idxPg} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem', fontSize: '0.74rem', color: '#334155' }}>
-                            <span>
-                              • <strong>{pg.forma}</strong>: {fmtBRL(pg.valor)} {pg.identificador ? `(${pg.identificador})` : ''}
-                            </span>
-                            {pg.temComprovante && (
-                              <button
-                                type="button"
-                                disabled={carregandoComprovante}
-                                onClick={() => abrirComprovanteProposta(propSelecionada, idxPg, `${pg.forma} (${fmtBRL(pg.valor)})`)}
-                                style={{
-                                  background: '#ecfdf5',
-                                  color: '#047857',
-                                  border: '1px solid #86efac',
-                                  borderRadius: '5px',
-                                  padding: '0.18rem 0.5rem',
-                                  fontSize: '0.7rem',
-                                  fontWeight: '800',
-                                  cursor: 'pointer',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.2rem'
-                                }}
-                              >
-                                <span className="material-symbols-outlined" style={{ fontSize: '0.85rem' }}>receipt_long</span>
-                                Comprovante
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.35rem' }}>
+                        {dp.pagamentosEntrada.map((pg, idxPg) => {
+                          const conferido = Boolean(pagamentosConferidos[idxPg]);
+                          return (
+                            <div
+                              key={idxPg}
+                              style={{
+                                background: conferido ? '#f0fdf4' : '#f8fafc',
+                                border: conferido ? '1px solid #86efac' : '1px solid #e2e8f0',
+                                borderRadius: '7px',
+                                padding: '0.4rem 0.55rem',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.3rem'
+                              }}
+                            >
+                              <div style={{ fontSize: '0.74rem', color: '#1e293b', lineHeight: 1.3 }}>
+                                <strong>{pg.forma}{pg.forma === 'Cartão de Crédito' && Number(pg.parcelasCartao || 1) > 1 ? ` (${pg.parcelasCartao}x maq.)` : ''}</strong>: {fmtBRL(pg.valor)}
+                                {pg.identificador && <span style={{ display: 'block', color: '#0369a1', fontWeight: '700', fontSize: '0.71rem' }}>Ref/CV: {pg.identificador}</span>}
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                                {pg.temComprovante ? (
+                                  <button
+                                    type="button"
+                                    disabled={carregandoComprovante}
+                                    onClick={() => abrirComprovanteProposta(propSelecionada, idxPg, `${pg.forma} (${fmtBRL(pg.valor)})`)}
+                                    style={{
+                                      background: '#ecfdf5',
+                                      color: '#047857',
+                                      border: '1px solid #86efac',
+                                      borderRadius: '5px',
+                                      padding: '0.18rem 0.5rem',
+                                      fontSize: '0.69rem',
+                                      fontWeight: '800',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.2rem'
+                                    }}
+                                  >
+                                    <span className="material-symbols-outlined" style={{ fontSize: '0.85rem' }}>receipt_long</span>
+                                    Comprovante
+                                  </button>
+                                ) : (
+                                  <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>Sem anexo</span>
+                                )}
+                                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.69rem', fontWeight: '800', color: conferido ? '#15803d' : '#475569', cursor: 'pointer' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={conferido}
+                                    onChange={(e) => setPagamentosConferidos((prev) => ({ ...prev, [idxPg]: e.target.checked }))}
+                                  />
+                                  {conferido ? 'Conferido' : 'Conferir'}
+                                </label>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     ) : (
-                      <div style={{ fontSize: '0.75rem', color: '#475569' }}>Forma: {dp.formaEntrada || 'Pix'}</div>
+                      <>
+                        <div style={{ fontSize: '0.75rem', color: '#475569' }}>Forma: {dp.formaEntrada || 'Pix'}</div>
+                        {(dp.identificadorPagamento || propSelecionada.cv_cartao) && (
+                          <div style={{ fontSize: '0.75rem', color: '#0369a1', background: '#f0f9ff', border: '1px solid #bae6fd', padding: '0.25rem 0.5rem', borderRadius: '6px', marginTop: '0.3rem', fontWeight: '700' }}>
+                            CV / Link / Ref.: {dp.identificadorPagamento || propSelecionada.cv_cartao}
+                          </div>
+                        )}
+                      </>
                     )}
                     {propSelecionada.tem_comprovante && !(Array.isArray(dp.pagamentosEntrada) && dp.pagamentosEntrada.some((p) => p.temComprovante)) && (
                       <button
@@ -895,17 +1027,12 @@ export default function Approvals() {
                         {carregandoComprovante ? 'Abrindo...' : `Ver Comprovante (${propSelecionada.comprovante_nome || 'Anexo'})`}
                       </button>
                     )}
-                    <div style={{ fontSize: '0.82rem', color: '#0f172a', fontWeight: '700', marginTop: '0.15rem' }}>
+                    <div style={{ fontSize: '0.82rem', color: '#0f172a', fontWeight: '700', marginTop: '0.45rem', paddingTop: '0.35rem', borderTop: '1px dashed #e2e8f0' }}>
                       A Parcelar: {fmtBRL(saldoFinal)}
                     </div>
                     <div style={{ fontSize: '0.78rem', color: '#475569', marginTop: '0.15rem' }}>
                       Parcelas: {parcelas}x de {fmtBRL(valorParcela)} ({dp.formaRestante || 'Pix'})
                     </div>
-                    {(dp.identificadorPagamento || propSelecionada.cv_cartao) && (
-                      <div style={{ fontSize: '0.76rem', color: '#0369a1', background: '#f0f9ff', border: '1px solid #bae6fd', padding: '0.25rem 0.5rem', borderRadius: '6px', marginTop: '0.35rem', fontWeight: '700' }}>
-                        CV / Link / Ref.: {dp.identificadorPagamento || propSelecionada.cv_cartao}
-                      </div>
-                    )}
                   </div>
                 </div>
 
@@ -919,7 +1046,7 @@ export default function Approvals() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                     <span style={{ fontSize: '0.88rem', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                       <span className="material-symbols-outlined" style={{ color: '#d97706', fontSize: '1.2rem' }}>gavel</span>
-                      Etapa 1 — Alçada Comercial (Gestor / Aprovador)
+                      Etapa 1 — Liberação Comercial (Gestor)
                     </span>
                     <span style={{
                       fontSize: '0.72rem',
@@ -930,12 +1057,12 @@ export default function Approvals() {
                       color: stCom === 'PENDENTE' ? '#92400e' : stCom === 'APROVADA' ? '#166534' : stCom === 'RECUSADA' ? '#991b1b' : '#475569'
                     }}>
                       {stCom === 'PENDENTE'
-                        ? 'PENDENTE DE AVAL COMERCIAL'
+                        ? 'AGUARDANDO LIBERAÇÃO COMERCIAL'
                         : stCom === 'APROVADA'
                         ? `APROVADA POR ${(propSelecionada.aprovacao_comercial_por_nome || 'GESTOR').toUpperCase()}`
                         : stCom === 'RECUSADA'
                         ? 'RECUSADA PELO GESTOR'
-                        : 'DISPENSADA (DENTRO DO PADRÃO AUTÔNOMO)'}
+                        : 'DISPENSADA (CONDIÇÃO PADRÃO)'}
                     </span>
                   </div>
 
@@ -982,7 +1109,7 @@ export default function Approvals() {
                             onClick={() => submeterAlcadaComercial('aprovado')}
                             style={{ background: '#d97706', color: '#fff', border: 'none', padding: '0.52rem 1.05rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.78rem', cursor: 'pointer' }}
                           >
-                            {salvandoComercial ? 'Registrando...' : '✔ Aprovar Alçada Comercial (Liberar p/ Financeiro)'}
+                            {salvandoComercial ? 'Registrando...' : '✔ Liberar Condição Comercial (Enviar p/ Financeiro)'}
                           </button>
                         </div>
                       </div>
@@ -1048,7 +1175,7 @@ export default function Approvals() {
 
                   {bloqueadoFinanceiroPorComercial ? (
                     <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '8px', padding: '0.85rem', fontSize: '0.8rem', color: '#475569' }}>
-                      🔒 A deliberação financeira será habilitada assim que a <strong>Etapa 1 (Alçada Comercial)</strong> for aprovada pelo Gestor.
+                      🔒 A análise financeira será liberada assim que a <strong>Etapa 1 (Liberação Comercial)</strong> for aprovada pelo Gestor.
                     </div>
                   ) : (
                     <>
@@ -1137,34 +1264,44 @@ export default function Approvals() {
                         />
                       </div>
 
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.85rem' }}>
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
-                            Condição Especial / Garantia (se aprovar com restrição)
-                          </label>
-                          <input
-                            disabled={!isFinanceiro}
-                            type="text"
-                            value={condicaoEspecial}
-                            onChange={(e) => setCondicaoEspecial(e.target.value)}
-                            placeholder="Ex: Aprovado mediante entrada via Pix + Cartão de terceiro / Avalista"
-                            style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                          />
-                        </div>
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
-                            Parecer Geral do Financeiro
-                          </label>
-                          <input
-                            disabled={!isFinanceiro}
-                            type="text"
-                            value={parecerFinanceiro}
-                            onChange={(e) => setParecerFinanceiro(e.target.value)}
-                            placeholder="Observação interna para auditoria e comercial..."
-                            style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                          />
-                        </div>
-                      </div>
+                      {(() => {
+                        const mostrarGarantia =
+                          analiseCreditoStatus === 'NEGADO' ||
+                          !['sem_restricao', 'score_alto_sem_restricao'].includes(statusSerasaCodigo) ||
+                          Boolean(String(condicaoEspecial || '').trim());
+                        return (
+                          <div style={{ display: 'grid', gridTemplateColumns: mostrarGarantia ? 'repeat(auto-fit, minmax(240px, 1fr))' : '1fr', gap: '0.85rem' }}>
+                            {mostrarGarantia && (
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#b45309', marginBottom: '0.3rem' }}>
+                                  Condição Especial / Garantia (para aprovação com ressalva)
+                                </label>
+                                <input
+                                  disabled={!isFinanceiro}
+                                  type="text"
+                                  value={condicaoEspecial}
+                                  onChange={(e) => setCondicaoEspecial(e.target.value)}
+                                  placeholder="Ex: Aprovado mediante entrada via Pix + Cartão de terceiro / Avalista"
+                                  style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #fcd34d', background: '#fffbeb', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                                />
+                              </div>
+                            )}
+                            <div>
+                              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
+                                Parecer Geral do Financeiro
+                              </label>
+                              <input
+                                disabled={!isFinanceiro}
+                                type="text"
+                                value={parecerFinanceiro}
+                                onChange={(e) => setParecerFinanceiro(e.target.value)}
+                                placeholder="Observação interna para auditoria e comercial..."
+                                style={{ width: '100%', padding: '0.58rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {!isFinanceiro && (
                         <div style={{ marginTop: '0.75rem', fontSize: '0.78rem', color: '#1d4ed8', fontWeight: '700' }}>
@@ -1216,13 +1353,13 @@ export default function Approvals() {
                 )}
               </div>
 
-              {/* Rodapé de Deliberação */}
-              <div style={{ padding: '1rem 1.5rem', background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* Rodapé de Deliberação Compacto */}
+              <div style={{ padding: '0.8rem 1.25rem', background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
                   <button
                     type="button"
                     onClick={() => setPropSelecionada(null)}
-                    style={{ background: '#fff', border: '1px solid #cbd5e1', color: '#475569', padding: '0.6rem 1rem', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '0.82rem' }}
+                    style={{ background: '#fff', border: '1px solid #cbd5e1', color: '#475569', padding: '0.5rem 0.8rem', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', fontSize: '0.78rem' }}
                   >
                     Fechar
                   </button>
@@ -1230,42 +1367,42 @@ export default function Approvals() {
                     href={`/proposals/${propSelecionada.id}/contract`}
                     target="_blank"
                     rel="noreferrer"
-                    style={{ background: '#0f172a', color: '#fff', border: 'none', padding: '0.6rem 0.95rem', borderRadius: '8px', fontWeight: '700', fontSize: '0.82rem', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                    style={{ background: '#0f172a', color: '#fff', border: 'none', padding: '0.5rem 0.78rem', borderRadius: '8px', fontWeight: '700', fontSize: '0.78rem', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
                   >
-                    <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>picture_as_pdf</span>
-                    Resumo Contratual PDF
+                    <span className="material-symbols-outlined" style={{ fontSize: '0.95rem' }}>picture_as_pdf</span>
+                    Termo PDF
                   </a>
                   {(isFinanceiro || isGestorComercial) && (
                     <button
                       type="button"
                       onClick={() => setModoDevolucao((v) => !v)}
-                      style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fcd34d', padding: '0.6rem 0.95rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                      style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fcd34d', padding: '0.5rem 0.78rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.78rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
                     >
-                      <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>reply</span>
+                      <span className="material-symbols-outlined" style={{ fontSize: '0.95rem' }}>reply</span>
                       Devolver p/ Ajuste
                     </button>
                   )}
                 </div>
 
                 {!bloqueadoFinanceiroPorComercial && isFinanceiro && (
-                  <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
                     <button
                       type="button"
                       disabled={salvandoAnalise}
                       onClick={() => submeterDeliberacaoFinanceira('recusado')}
-                      style={{ background: '#fff', color: '#dc2626', border: '1.5px solid #fca5a5', padding: '0.6rem 1.05rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                      style={{ background: '#fff', color: '#dc2626', border: '1.5px solid #fca5a5', padding: '0.5rem 0.85rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.78rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.28rem' }}
                     >
-                      <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>close</span>
-                      Recusar Proposta
+                      <span className="material-symbols-outlined" style={{ fontSize: '0.95rem' }}>close</span>
+                      Recusar
                     </button>
 
                     <button
                       type="button"
                       disabled={salvandoAnalise}
                       onClick={() => submeterDeliberacaoFinanceira('aprovado_com_ressalva')}
-                      style={{ background: '#d97706', color: '#fff', border: 'none', padding: '0.6rem 1.05rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                      style={{ background: '#d97706', color: '#fff', border: 'none', padding: '0.5rem 0.85rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.78rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.28rem' }}
                     >
-                      <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>warning</span>
+                      <span className="material-symbols-outlined" style={{ fontSize: '0.95rem' }}>warning</span>
                       Aprovar c/ Ressalva
                     </button>
 
@@ -1273,9 +1410,9 @@ export default function Approvals() {
                       type="button"
                       disabled={salvandoAnalise}
                       onClick={() => submeterDeliberacaoFinanceira('aprovado')}
-                      style={{ background: '#059669', color: '#fff', border: 'none', padding: '0.6rem 1.2rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                      style={{ background: '#059669', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px', fontWeight: '800', fontSize: '0.78rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.28rem' }}
                     >
-                      <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>check_circle</span>
+                      <span className="material-symbols-outlined" style={{ fontSize: '0.95rem' }}>check_circle</span>
                       {salvandoAnalise ? 'Gravando...' : 'Aprovar Proposta'}
                     </button>
                   </div>

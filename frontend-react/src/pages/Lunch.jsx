@@ -1,10 +1,17 @@
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { api } from '../services/api';
 import { useTurma } from '../context/TurmaContext';
 
 const isMembroGiants = (emp) =>
   Boolean(emp?.membro_giants) || String(emp?.origem || '').toUpperCase().includes('GIAN');
+
+const contarEntrevistadoresMesa = (m) =>
+  Array.isArray(m?.entrevistadores_ids) && m.entrevistadores_ids.length > 0
+    ? m.entrevistadores_ids.length
+    : m?.tem_entrevistador
+    ? 1
+    : 0;
 
 const extrairCnpjEmpresa = (emp) => {
   const cnpjCol = String(emp?.cnpj || '').replace(/\D/g, '');
@@ -41,6 +48,7 @@ const normalizarChaveEmpresa = (emp) => {
 
 export default function Lunch() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [turmas, setTurmas] = useState([]);
   const { turmaSelecionada } = useTurma();
   const [mesas, setMesas] = useState([]);
@@ -61,9 +69,15 @@ export default function Lunch() {
   };
   const [erro, setErro] = useState('');
 
-  // Filtros da barra lateral
+  // Filtros e abas da barra lateral
+  const [abaLateral, setAbaLateral] = useState('empresas'); // 'empresas' | 'entrevistadores'
   const [filtroParticipantes, setFiltroParticipantes] = useState('pendentes'); // 'pendentes' | 'sentados' | 'todos'
   const [termoBuscaLateral, setTermoBuscaLateral] = useState('');
+  const [buscaEntrevistadorLateral, setBuscaEntrevistadorLateral] = useState('');
+
+  // Proteção de layout e filtro rápido das mesas no salão
+  const [modoEdicaoLayout, setModoEdicaoLayout] = useState(false);
+  const [filtroMesasSalao, setFiltroMesasSalao] = useState('todas'); // 'todas' | 'com_vagas' | 'ocupadas' | 'com_entrevistador'
 
   // Grupo de empresa (CNPJ) selecionado para alocação em lote
   const [grupoSelecionadoAlocacao, setGrupoSelecionadoAlocacao] = useState(null);
@@ -499,7 +513,7 @@ export default function Lunch() {
 
     if (mesaAlvo) {
       const capTotal = Number(mesaAlvo.capacidade_total || 5);
-      const ocupados = mesaAlvo.ocupantesLista.length + (mesaAlvo.tem_entrevistador ? 1 : 0);
+      const ocupados = mesaAlvo.ocupantesLista.length + contarEntrevistadoresMesa(mesaAlvo);
       const livres = Math.max(0, capTotal - ocupados);
 
       if (livres === 0) {
@@ -523,7 +537,7 @@ export default function Lunch() {
           .filter((m) => Number(m.id) !== Number(mesaAlvo.id))
           .map((m) => {
             const c = Number(m.capacidade_total || 5);
-            const oc = m.ocupantesLista.length + (m.tem_entrevistador ? 1 : 0);
+            const oc = m.ocupantesLista.length + contarEntrevistadoresMesa(m);
             return { ...m, livres: Math.max(0, c - oc), distancia: Math.abs(Number(m.numero) - Number(mesaAlvo.numero)) };
           })
           .filter((m) => m.livres >= sobra)
@@ -709,10 +723,109 @@ export default function Lunch() {
 
   mesas.forEach((m) => {
     totalCapacidade += Number(m.capacidade_total || 5);
-    const entrevistadorOcupa = m.tem_entrevistador ? 1 : 0;
-    totalOcupados += m.ocupantesLista.length + entrevistadorOcupa;
+    totalOcupados += m.ocupantesLista.length + contarEntrevistadoresMesa(m);
   });
   const lugaresLivres = Math.max(0, totalCapacidade - totalOcupados);
+
+  const qtdEmpresasSemMesa = gruposEmpresasSalao.filter((g) => g.temPendentes).length;
+  const qtdEmpresasSentadas = gruposEmpresasSalao.filter((g) => g.sentadosMesa.length > 0).length;
+
+  const resumoEntrevistadores = useMemo(() => {
+    const mapa = new Map();
+
+    (entrevistadores || []).forEach((ent) => {
+      mapa.set(String(ent.id), {
+        id: ent.id,
+        nome: ent.nome || `Consultor #${ent.id}`,
+        mesasAlocadas: []
+      });
+    });
+
+    (mesas || []).forEach((m) => {
+      const escalados = Array.isArray(m.entrevistadores_escalados) ? m.entrevistadores_escalados : [];
+      const ids = Array.isArray(m.entrevistadores_ids) ? m.entrevistadores_ids : [];
+      const empresasMesa = [...new Set((m.ocupantesLista || []).map((o) => o.empresa).filter(Boolean))];
+
+      const infoMesa = {
+        mesaId: m.id,
+        mesaNumero: m.numero,
+        qtdClientes: (m.ocupantesLista || []).length,
+        empresasMesa
+      };
+
+      if (escalados.length > 0) {
+        escalados.forEach((e) => {
+          const k = String(e.id);
+          if (!mapa.has(k)) {
+            mapa.set(k, { id: e.id, nome: e.nome || `Consultor #${e.id}`, mesasAlocadas: [] });
+          }
+          mapa.get(k).mesasAlocadas.push(infoMesa);
+        });
+      } else if (ids.length > 0) {
+        ids.forEach((idVal) => {
+          const k = String(idVal);
+          if (!mapa.has(k)) {
+            mapa.set(k, { id: idVal, nome: `Consultor #${idVal}`, mesasAlocadas: [] });
+          }
+          mapa.get(k).mesasAlocadas.push(infoMesa);
+        });
+      }
+    });
+
+    const lista = Array.from(mapa.values())
+      .map((item) => {
+        const emAtendimento = item.mesasAlocadas.some((ma) => ma.qtdClientes > 0);
+        const alocado = item.mesasAlocadas.length > 0;
+        const status = emAtendimento ? 'em_atendimento' : alocado ? 'alocado_livre' : 'disponivel';
+        return { ...item, alocado, emAtendimento, status };
+      })
+      .sort((a, b) => {
+        const peso = { em_atendimento: 0, alocado_livre: 1, disponivel: 2 };
+        if (peso[a.status] !== peso[b.status]) return peso[a.status] - peso[b.status];
+        return a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' });
+      });
+
+    return {
+      lista,
+      total: lista.length,
+      alocados: lista.filter((x) => x.alocado).length,
+      emAtendimento: lista.filter((x) => x.emAtendimento).length,
+      disponiveis: lista.filter((x) => !x.alocado).length
+    };
+  }, [entrevistadores, mesas]);
+
+  const entrevistadoresFiltrados = useMemo(() => {
+    const q = buscaEntrevistadorLateral.trim().toLowerCase();
+    if (!q) return resumoEntrevistadores.lista;
+    return resumoEntrevistadores.lista.filter(
+      (ent) =>
+        ent.nome.toLowerCase().includes(q) ||
+        ent.mesasAlocadas.some(
+          (ma) =>
+            `mesa ${ma.mesaNumero}`.includes(q) ||
+            ma.empresasMesa.some((emp) => emp.toLowerCase().includes(q))
+        )
+    );
+  }, [resumoEntrevistadores, buscaEntrevistadorLateral]);
+
+  const qtdMesasComVagas = mesas.filter((m) => {
+    const cap = Number(m.capacidade_total || 5);
+    const oc = m.ocupantesLista.length + contarEntrevistadoresMesa(m);
+    return cap - oc > 0;
+  }).length;
+  const qtdMesasOcupadas = mesas.filter((m) => m.ocupantesLista.length > 0).length;
+  const qtdMesasComEntrevistador = mesas.filter((m) => contarEntrevistadoresMesa(m) > 0).length;
+
+  const mesasFiltradasSalao = useMemo(() => {
+    return mesas.filter((m) => {
+      const cap = Number(m.capacidade_total || 5);
+      const oc = m.ocupantesLista.length + contarEntrevistadoresMesa(m);
+      if (filtroMesasSalao === 'com_vagas') return cap - oc > 0;
+      if (filtroMesasSalao === 'ocupadas') return m.ocupantesLista.length > 0;
+      if (filtroMesasSalao === 'com_entrevistador') return contarEntrevistadoresMesa(m) > 0;
+      return true;
+    });
+  }, [mesas, filtroMesasSalao]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100%', background: '#f8fafc', overflow: 'hidden' }}>
@@ -742,44 +855,63 @@ export default function Lunch() {
       `}</style>
 
       {/* Barra de Topo */}
-      <div style={{ background: '#fff', borderBottom: '1px solid #e2e8f0', padding: '0.85rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-          <h1 style={{ fontSize: '1.25rem', fontWeight: '800', color: '#0f172a', margin: 0 }}>
+      <div style={{ background: '#fff', borderBottom: '1px solid #e2e8f0', padding: '0.8rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, gap: '1rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
+          <h1 style={{ fontSize: '1.45rem', fontWeight: '800', color: '#0f172a', margin: 0 }}>
             Salão de Mesas & Entrevistas
           </h1>
-          <button
-            type="button"
-            data-btn-liberar-giants-topo="true"
-            disabled={liberandoGiants}
-            onClick={liberarTodosGiantsDasMesas}
-            title="Remove de uma só vez todos os membros GIANTS das mesas após o almoço"
-            style={{
-              padding: '0.45rem 0.9rem',
-              borderRadius: '8px',
-              border: giantsSentados.length > 0 ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
-              background: giantsSentados.length > 0 ? '#fef3c7' : '#f8fafc',
-              color: giantsSentados.length > 0 ? '#92400e' : '#475569',
-              fontWeight: '800',
-              fontSize: '0.78rem',
-              cursor: liberandoGiants ? 'not-allowed' : 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.35rem',
-              boxShadow: giantsSentados.length > 0 ? '0 2px 6px rgba(245, 158, 11, 0.25)' : 'none'
-            }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>logout</span>
-            {liberandoGiants
-              ? 'Liberando GIANTS...'
-              : `Liberar GIANTS das Mesas (${giantsSentados.length})`}
-          </button>
-          <span style={{ background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', padding: '0.25rem 0.65rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: '700' }}>
+          <span style={{ background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', padding: '0.25rem 0.65rem', borderRadius: '999px', fontSize: '0.74rem', fontWeight: '700' }}>
             Agrupado por Empresa (CNPJ)
           </span>
+          <button
+            type="button"
+            onClick={() => setAbaLateral('entrevistadores')}
+            title="Clique para abrir o rastreamento de entrevistadores por mesa"
+            style={{
+              background: resumoEntrevistadores.alocados > 0 ? '#eff6ff' : '#f8fafc',
+              color: resumoEntrevistadores.alocados > 0 ? '#1d4ed8' : '#475569',
+              border: resumoEntrevistadores.alocados > 0 ? '1px solid #bfdbfe' : '1px solid #cbd5e1',
+              padding: '0.32rem 0.75rem',
+              borderRadius: '999px',
+              fontSize: '0.75rem',
+              fontWeight: '800',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem'
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: '0.95rem' }}>mic</span>
+            Entrevistadores: {resumoEntrevistadores.alocados}/{resumoEntrevistadores.total} alocados
+            {resumoEntrevistadores.emAtendimento > 0 && (
+              <span style={{ background: '#16a34a', color: '#fff', padding: '0.05rem 0.42rem', borderRadius: '999px', fontSize: '0.68rem' }}>
+                {resumoEntrevistadores.emAtendimento} em mesa
+              </span>
+            )}
+          </button>
         </div>
 
-        <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#fff7ed', border: '1px solid #fed7aa', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ea580c' }}>
-          <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>wb_sunny</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <button
+            type="button"
+            onClick={() => navigate('/companies')}
+            style={{
+              background: '#f8fafc',
+              border: '1px solid #cbd5e1',
+              color: '#334155',
+              padding: '0.42rem 0.85rem',
+              borderRadius: '8px',
+              fontSize: '0.78rem',
+              fontWeight: '700',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem'
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: '1rem', color: '#0284c7' }}>apartment</span>
+            Base de Empresas
+          </button>
         </div>
       </div>
 
@@ -808,88 +940,263 @@ export default function Lunch() {
         {/* Painel Esquerdo: Estrutura & Cards Consolidados por Empresa (CNPJ) */}
         <div style={{ width: '350px', minWidth: '350px', background: '#fff', borderRight: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', padding: '1.25rem', boxSizing: 'border-box', gap: '1.25rem', flexShrink: 0, overflowY: 'hidden' }}>
           {/* Estrutura do Salão */}
-          <div style={{ flexShrink: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', color: '#ea580c' }}>
-              <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>table_restaurant</span>
-              <span style={{ fontSize: '0.9rem', fontWeight: '800', color: '#0f172a' }}>Estrutura do Salão</span>
+          <div style={{ flexShrink: 0, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '0.85rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: '#ea580c' }}>
+                <span className="material-symbols-outlined" style={{ fontSize: '1.15rem' }}>table_restaurant</span>
+                <span style={{ fontSize: '0.86rem', fontWeight: '800', color: '#0f172a' }}>Estrutura do Salão</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModoEdicaoLayout((v) => !v)}
+                title="Ative para ajustar lugares (+/-) ou remover mesas sem risco de clique acidental"
+                style={{
+                  background: modoEdicaoLayout ? '#0f172a' : '#ffffff',
+                  color: modoEdicaoLayout ? '#ffffff' : '#475569',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '7px',
+                  padding: '0.26rem 0.58rem',
+                  fontSize: '0.7rem',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.25rem'
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '0.88rem' }}>
+                  {modoEdicaoLayout ? 'check' : 'tune'}
+                </span>
+                {modoEdicaoLayout ? 'Concluir Edição' : 'Editar Layout'}
+              </button>
             </div>
-            <label style={{ display: 'block', fontSize: '0.8rem', color: '#475569', fontWeight: '600', marginBottom: '0.35rem' }}>
-              Orientação do Palco
-            </label>
-            <select style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '0.85rem', marginBottom: '0.85rem', color: '#1e293b' }}>
-              <option>Frente (Topo Central)</option>
-            </select>
 
+            <div style={{ display: 'flex', gap: '0.45rem' }}>
+              <button
+                onClick={adicionarMesa}
+                style={{
+                  flex: 1,
+                  background: '#ff5722',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '0.58rem 0.7rem',
+                  borderRadius: '8px',
+                  fontWeight: '700',
+                  fontSize: '0.78rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.35rem',
+                  boxShadow: '0 2px 5px rgba(255,87,34,0.25)'
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '1.05rem' }}>add_circle</span>
+                + Mesa Redonda
+              </button>
+
+              <button
+                type="button"
+                disabled={liberandoGiants || giantsSentados.length === 0}
+                onClick={liberarTodosGiantsDasMesas}
+                title="Remove de uma só vez todos os membros GIANTS das mesas após o almoço"
+                style={{
+                  padding: '0.58rem 0.65rem',
+                  borderRadius: '8px',
+                  border: giantsSentados.length > 0 ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
+                  background: giantsSentados.length > 0 ? '#fef3c7' : '#ffffff',
+                  color: giantsSentados.length > 0 ? '#92400e' : '#94a3b8',
+                  fontWeight: '800',
+                  fontSize: '0.74rem',
+                  cursor: liberandoGiants || giantsSentados.length === 0 ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.25rem',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: '0.95rem' }}>logout</span>
+                GIANTS ({giantsSentados.length})
+              </button>
+            </div>
+          </div>
+
+          {/* Seletor Principal da Barra Lateral: Empresas vs Entrevistadores */}
+          <div style={{ display: 'flex', gap: '0.3rem', background: '#e2e8f0', padding: '0.25rem', borderRadius: '10px', flexShrink: 0 }}>
             <button
-              onClick={adicionarMesa}
+              type="button"
+              onClick={() => setAbaLateral('empresas')}
               style={{
-                width: '100%',
-                background: '#ff5722',
-                color: '#fff',
+                flex: 1,
                 border: 'none',
-                padding: '0.7rem',
-                borderRadius: '10px',
-                fontWeight: '700',
-                fontSize: '0.85rem',
+                background: abaLateral === 'empresas' ? '#ffffff' : 'transparent',
+                color: abaLateral === 'empresas' ? '#0f172a' : '#475569',
+                fontWeight: '800',
+                fontSize: '0.76rem',
+                padding: '0.45rem 0.4rem',
+                borderRadius: '8px',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '0.4rem',
-                boxShadow: '0 2px 6px rgba(255,87,34,0.3)'
+                gap: '0.3rem',
+                boxShadow: abaLateral === 'empresas' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'
               }}
             >
-              <span className="material-symbols-outlined" style={{ fontSize: '1.15rem' }}>add_circle</span>
-              Adicionar Mesa Redonda
+              <span className="material-symbols-outlined" style={{ fontSize: '0.95rem', color: '#ea580c' }}>business</span>
+              Empresas ({gruposEmpresasSalao.length})
             </button>
-
-          <button
-            type="button"
-            disabled={liberandoGiants || giantsSentados.length === 0}
-            onClick={liberarTodosGiantsDasMesas}
-            title="Remove de uma só vez todos os membros GIANTS das mesas após o almoço"
-            style={{
-              width: '100%',
-              marginTop: '0.55rem',
-              padding: '0.62rem 0.9rem',
-              borderRadius: '10px',
-              border: giantsSentados.length > 0 ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
-              background: giantsSentados.length > 0 ? '#fef3c7' : '#f8fafc',
-              color: giantsSentados.length > 0 ? '#92400e' : '#94a3b8',
-              fontWeight: '800',
-              fontSize: '0.82rem',
-              cursor: liberandoGiants || giantsSentados.length === 0 ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.4rem'
-            }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: '1.05rem' }}>logout</span>
-            {liberandoGiants
-              ? 'Liberando GIANTS...'
-              : `Liberar GIANTS das Mesas (${giantsSentados.length})`}
-          </button>
+            <button
+              type="button"
+              onClick={() => setAbaLateral('entrevistadores')}
+              style={{
+                flex: 1,
+                border: 'none',
+                background: abaLateral === 'entrevistadores' ? '#ffffff' : 'transparent',
+                color: abaLateral === 'entrevistadores' ? '#0f172a' : '#475569',
+                fontWeight: '800',
+                fontSize: '0.76rem',
+                padding: '0.45rem 0.4rem',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.3rem',
+                boxShadow: abaLateral === 'entrevistadores' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '0.95rem', color: '#2563eb' }}>mic</span>
+              Entrevistadores ({resumoEntrevistadores.alocados}/{resumoEntrevistadores.total})
+            </button>
           </div>
 
-          {/* Seção Empresas (CNPJ) com Abas */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexShrink: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ea580c' }}>
-                <span className="material-symbols-outlined" style={{ fontSize: '1.2rem' }}>business</span>
-                <span style={{ fontSize: '0.9rem', fontWeight: '800', color: '#0f172a' }}>Empresas Elegíveis</span>
+          {abaLateral === 'entrevistadores' ? (
+            /* PAINEL DE RASTREAMENTO DE ENTREVISTADORES */
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              {/* Resumo Numérico de Entrevistadores */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.4rem', marginBottom: '0.65rem', flexShrink: 0 }}>
+                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '0.45rem 0.5rem', textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.05rem', fontWeight: '900', color: '#1d4ed8' }}>{resumoEntrevistadores.alocados}</div>
+                  <div style={{ fontSize: '0.65rem', fontWeight: '700', color: '#1e40af' }}>Alocados</div>
+                </div>
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '0.45rem 0.5rem', textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.05rem', fontWeight: '900', color: '#15803d' }}>{resumoEntrevistadores.emAtendimento}</div>
+                  <div style={{ fontSize: '0.65rem', fontWeight: '700', color: '#166534' }}>Em Mesa</div>
+                </div>
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.45rem 0.5rem', textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.05rem', fontWeight: '900', color: '#475569' }}>{resumoEntrevistadores.disponiveis}</div>
+                  <div style={{ fontSize: '0.65rem', fontWeight: '700', color: '#64748b' }}>Livres</div>
+                </div>
               </div>
-              <span style={{ fontSize: '0.72rem', fontWeight: '700', color: '#64748b' }}>
-                {gruposFiltrados.length} {gruposFiltrados.length === 1 ? 'CNPJ' : 'CNPJs'}
-              </span>
-            </div>
 
-            {/* Abas */}
-            <div style={{ display: 'flex', gap: '0.25rem', background: '#f1f5f9', padding: '0.2rem', borderRadius: '8px', marginBottom: '0.75rem', flexShrink: 0 }}>
+              {/* Busca de Entrevistador ou Mesa */}
+              <div style={{ position: 'relative', marginBottom: '0.65rem', flexShrink: 0 }}>
+                <span className="material-symbols-outlined" style={{ position: 'absolute', left: '8px', top: '8px', fontSize: '1rem', color: '#94a3b8' }}>search</span>
+                <input
+                  type="text"
+                  value={buscaEntrevistadorLateral}
+                  onChange={(e) => setBuscaEntrevistadorLateral(e.target.value)}
+                  placeholder="Rastrear entrevistador, mesa ou empresa..."
+                  style={{ width: '100%', padding: '0.45rem 0.5rem 0.45rem 2rem', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.8rem', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              {/* Lista de Entrevistadores e Onde Estão */}
+              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem', paddingRight: '0.25rem' }}>
+                {entrevistadoresFiltrados.length === 0 ? (
+                  <div style={{ padding: '1.75rem 1rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.82rem' }}>
+                    Nenhum entrevistador encontrado.
+                  </div>
+                ) : (
+                  entrevistadoresFiltrados.map((ent) => {
+                    const primeiraMesa = ent.mesasAlocadas[0] || null;
+                    return (
+                      <div
+                        key={ent.id}
+                        onClick={() => {
+                          if (primeiraMesa) {
+                            focarPessoaEMesa(`ent-${primeiraMesa.mesaId}`, primeiraMesa.mesaId);
+                          }
+                        }}
+                        style={{
+                          background: ent.emAtendimento ? '#f0fdf4' : ent.alocado ? '#eff6ff' : '#f8fafc',
+                          border: '1px solid',
+                          borderColor: ent.emAtendimento ? '#86efac' : ent.alocado ? '#bfdbfe' : '#e2e8f0',
+                          borderRadius: '9px',
+                          padding: '0.65rem 0.75rem',
+                          cursor: primeiraMesa ? 'pointer' : 'default',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.35rem'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem' }}>
+                          <span style={{ fontWeight: '800', fontSize: '0.83rem', color: '#0f172a' }}>
+                            {ent.nome}
+                          </span>
+                          {ent.alocado ? (
+                            <span style={{
+                              background: ent.emAtendimento ? '#15803d' : '#1d4ed8',
+                              color: '#ffffff',
+                              fontSize: '0.68rem',
+                              fontWeight: '800',
+                              padding: '0.14rem 0.5rem',
+                              borderRadius: '999px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.2rem',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              <span className="material-symbols-outlined" style={{ fontSize: '0.78rem' }}>pin_drop</span>
+                              {ent.mesasAlocadas.map((m) => `Mesa ${m.mesaNumero}`).join(', ')}
+                            </span>
+                          ) : (
+                            <span style={{
+                              background: '#e2e8f0',
+                              color: '#475569',
+                              fontSize: '0.67rem',
+                              fontWeight: '700',
+                              padding: '0.14rem 0.48rem',
+                              borderRadius: '999px',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              Disponível
+                            </span>
+                          )}
+                        </div>
+
+                        {ent.alocado ? (
+                          <div style={{ fontSize: '0.73rem', color: '#334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.35rem' }}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {ent.mesasAlocadas.flatMap((m) => m.empresasMesa).length > 0
+                                ? `Atendendo: ${[...new Set(ent.mesasAlocadas.flatMap((m) => m.empresasMesa))].join(', ')}`
+                                : 'Aguardando empresa na mesa'}
+                            </span>
+                            <span style={{ color: '#ea580c', fontWeight: '800', fontSize: '0.7rem', flexShrink: 0 }}>
+                              Localizar →
+                            </span>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: '0.71rem', color: '#64748b' }}>
+                            Sem mesa atribuída no momento
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          ) : (
+          /* Seção Empresas (CNPJ) com Abas */
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            {/* Abas com Contadores */}
+            <div style={{ display: 'flex', gap: '0.25rem', background: '#f1f5f9', padding: '0.2rem', borderRadius: '8px', marginBottom: '0.65rem', flexShrink: 0 }}>
               {[
-                { id: 'pendentes', label: 'Sem Mesa' },
-                { id: 'sentados', label: 'Sentadas' },
-                { id: 'todos', label: 'Todas' }
+                { id: 'pendentes', label: `Sem Mesa (${qtdEmpresasSemMesa})` },
+                { id: 'sentados', label: `Sentadas (${qtdEmpresasSentadas})` },
+                { id: 'todos', label: `Todas (${gruposEmpresasSalao.length})` }
               ].map((aba) => (
                 <button
                   key={aba.id}
@@ -900,8 +1207,8 @@ export default function Lunch() {
                     background: filtroParticipantes === aba.id ? '#fff' : 'transparent',
                     color: filtroParticipantes === aba.id ? '#ea580c' : '#64748b',
                     fontWeight: '700',
-                    fontSize: '0.75rem',
-                    padding: '0.4rem 0',
+                    fontSize: '0.72rem',
+                    padding: '0.4rem 0.2rem',
                     borderRadius: '6px',
                     cursor: 'pointer',
                     boxShadow: filtroParticipantes === aba.id ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
@@ -913,7 +1220,7 @@ export default function Lunch() {
             </div>
 
             {/* Busca */}
-            <div style={{ position: 'relative', marginBottom: '0.75rem', flexShrink: 0 }}>
+            <div style={{ position: 'relative', marginBottom: '0.65rem', flexShrink: 0 }}>
               <span className="material-symbols-outlined" style={{ position: 'absolute', left: '8px', top: '8px', fontSize: '1rem', color: '#94a3b8' }}>search</span>
               <input
                 type="text"
@@ -927,8 +1234,30 @@ export default function Lunch() {
             {/* Lista de Cards Únicos por Empresa (CNPJ) */}
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.6rem', paddingRight: '0.25rem' }}>
               {gruposFiltrados.length === 0 ? (
-                <div style={{ padding: '2rem 1rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>
-                  Nenhuma empresa encontrada neste filtro.
+                <div style={{ padding: '1.75rem 1rem', textAlign: 'center', color: '#64748b', fontSize: '0.82rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.65rem' }}>
+                  <span>
+                    {filtroParticipantes === 'pendentes'
+                      ? 'Nenhuma empresa aguardando mesa no momento.'
+                      : 'Nenhuma empresa encontrada neste filtro.'}
+                  </span>
+                  {filtroParticipantes === 'pendentes' && (
+                    <button
+                      type="button"
+                      onClick={() => navigate('/companies')}
+                      style={{
+                        background: '#fff7ed',
+                        color: '#c2410c',
+                        border: '1px solid #fdba74',
+                        padding: '0.45rem 0.8rem',
+                        borderRadius: '8px',
+                        fontSize: '0.75rem',
+                        fontWeight: '800',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Validar Almoço em Empresas →
+                    </button>
+                  )}
                 </div>
               ) : (
                 gruposFiltrados.map((grupo) => {
@@ -1146,28 +1475,61 @@ export default function Lunch() {
               )}
             </div>
           </div>
+          )}
         </div>
 
         {/* Salão de Mesas com Grid Pontilhado */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
           {/* Barra Superior do Salão */}
-          <div style={{ padding: '0.85rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, background: '#fff', borderBottom: '1px solid #f1f5f9' }}>
-            <div style={{ fontSize: '0.95rem', fontWeight: '800', color: '#0f172a' }}>
-              {totalMesas} Mesas • <span style={{ color: '#059669' }}>{lugaresLivres} Lugares Livres</span>
+          <div style={{ padding: '0.75rem 1.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, background: '#fff', borderBottom: '1px solid #e2e8f0', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
+              <div style={{ fontSize: '0.92rem', fontWeight: '800', color: '#0f172a' }}>
+                {totalMesas} Mesas • <span style={{ color: '#059669' }}>{lugaresLivres} Lugares Livres</span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                {[
+                  { id: 'todas', label: `Todas (${mesas.length})` },
+                  { id: 'com_vagas', label: `Com Vagas (${qtdMesasComVagas})` },
+                  { id: 'ocupadas', label: `Com Empresa (${qtdMesasOcupadas})` },
+                  { id: 'com_entrevistador', label: `Com Consultor (${qtdMesasComEntrevistador})` }
+                ].map((f) => {
+                  const ativo = filtroMesasSalao === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setFiltroMesasSalao(f.id)}
+                      style={{
+                        background: ativo ? '#0f172a' : '#f1f5f9',
+                        color: ativo ? '#ffffff' : '#475569',
+                        border: 'none',
+                        padding: '0.32rem 0.7rem',
+                        borderRadius: '999px',
+                        fontSize: '0.74rem',
+                        fontWeight: '800',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '10px', overflow: 'hidden' }}>
                 <button
                   onClick={() => setZoom((z) => Math.max(50, z - 10))}
-                  style={{ border: 'none', background: 'transparent', padding: '0.45rem 0.75rem', cursor: 'pointer', color: '#475569', fontWeight: '800' }}
+                  style={{ border: 'none', background: 'transparent', padding: '0.4rem 0.7rem', cursor: 'pointer', color: '#475569', fontWeight: '800' }}
                 >
                   -
                 </button>
-                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: '#334155', padding: '0 0.5rem' }}>{zoom}%</span>
+                <span style={{ fontSize: '0.78rem', fontWeight: '700', color: '#334155', padding: '0 0.45rem' }}>{zoom}%</span>
                 <button
                   onClick={() => setZoom((z) => Math.min(160, z + 10))}
-                  style={{ border: 'none', background: 'transparent', padding: '0.45rem 0.75rem', cursor: 'pointer', color: '#475569', fontWeight: '800' }}
+                  style={{ border: 'none', background: 'transparent', padding: '0.4rem 0.7rem', cursor: 'pointer', color: '#475569', fontWeight: '800' }}
                 >
                   +
                 </button>
@@ -1176,8 +1538,9 @@ export default function Lunch() {
                     setZoom(100);
                     setMesaFocadaId(null);
                     setDestaquePessoaId(null);
+                    setFiltroMesasSalao('todas');
                   }}
-                  style={{ borderLeft: '1px solid #cbd5e1', borderRight: 'none', borderTop: 'none', borderBottom: 'none', background: 'transparent', padding: '0.45rem 0.75rem', cursor: 'pointer', color: '#ea580c', fontWeight: '700', fontSize: '0.8rem' }}
+                  style={{ borderLeft: '1px solid #cbd5e1', borderRight: 'none', borderTop: 'none', borderBottom: 'none', background: 'transparent', padding: '0.4rem 0.7rem', cursor: 'pointer', color: '#ea580c', fontWeight: '700', fontSize: '0.78rem' }}
                 >
                   Reset
                 </button>
@@ -1194,7 +1557,7 @@ export default function Lunch() {
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              padding: '2.5rem 2rem',
+              padding: '2rem',
               backgroundImage: 'radial-gradient(#cbd5e1 1.2px, transparent 1.2px)',
               backgroundSize: '24px 24px',
               backgroundColor: '#f8fafc'
@@ -1208,12 +1571,12 @@ export default function Lunch() {
                   color: '#fff',
                   border: '2px solid #ea580c',
                   borderRadius: '16px',
-                  padding: '1rem 3.5rem',
+                  padding: '0.9rem 3.25rem',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   boxShadow: '0 8px 20px rgba(0,0,0,0.15)',
-                  marginBottom: '4.5rem'
+                  marginBottom: '2.75rem'
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '800', fontSize: '1.05rem', letterSpacing: '0.05em' }}>
@@ -1224,12 +1587,24 @@ export default function Lunch() {
               </div>
 
               {/* Mesas */}
-              <div style={{ display: 'flex', gap: '5.5rem', justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center', padding: '1rem' }}>
-                {mesas.map((mesa) => {
+              <div style={{ display: 'flex', gap: '3.75rem', justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center', padding: '0.75rem' }}>
+                {mesasFiltradasSalao.map((mesa) => {
                   const capTotal = Number(mesa.capacidade_total || 5);
-                  const entrevistadorOcupa = mesa.tem_entrevistador ? 1 : 0;
+                  const entrevistadorOcupa = contarEntrevistadoresMesa(mesa);
                   const totalOcupadosMesa = mesa.ocupantesLista.length + entrevistadorOcupa;
+                  const escaladosMesa = Array.isArray(mesa.entrevistadores_escalados) ? mesa.entrevistadores_escalados : [];
+                  const primeiroNomeEnt = escaladosMesa[0]?.nome
+                    ? escaladosMesa[0].nome.split(' ')[0]
+                    : mesa.entrevistadorNome
+                    ? mesa.entrevistadorNome.split(' ')[0]
+                    : null;
+                  const rotuloConsultorMesa = primeiroNomeEnt
+                    ? escaladosMesa.length > 1
+                      ? `${primeiroNomeEnt} +${escaladosMesa.length - 1}`
+                      : primeiroNomeEnt
+                    : '+ Consultor';
                   const assentosLivresQtd = Math.max(0, capTotal - totalOcupadosMesa);
+                  const empresasNaMesa = [...new Set(mesa.ocupantesLista.map((o) => o.empresa).filter(Boolean))];
 
                   const isMesaFocada = mesaFocadaId === mesa.id;
 
@@ -1239,7 +1614,7 @@ export default function Lunch() {
                   ];
 
                   const totalSlots = assentosAoRedor.length;
-                  const raio = 90;
+                  const raio = 85;
 
                   return (
                     <div
@@ -1247,121 +1622,146 @@ export default function Lunch() {
                       id={`mesa-box-${mesa.id}`}
                       style={{
                         position: 'relative',
-                        width: '220px',
-                        height: '220px',
+                        width: '236px',
+                        height: '254px',
+                        paddingTop: '24px',
+                        boxSizing: 'border-box',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         transition: 'transform 0.3s ease'
                       }}
                     >
-                      {/* Entrevistador */}
-                      <div
-                        title="Clique para selecionar ou alterar o entrevistador"
+                      {/* Selo Superior do Entrevistador (sem sobreposição com assentos) */}
+                      <button
+                        type="button"
+                        onClick={() => setModalMesaAberta(mesa)}
+                        title={
+                          mesa.entrevistadorNome
+                            ? `Consultor(es): ${mesa.entrevistadorNome} — Clique para alterar`
+                            : 'Clique para escalar ou trocar o entrevistador desta mesa'
+                        }
                         style={{
                           position: 'absolute',
-                          top: '-42px',
-                          display: 'flex',
-                          flexDirection: 'column',
+                          top: '0px',
+                          left: '50%',
+                          transform: 'translateX(-50%)',
+                          background: mesa.tem_entrevistador ? '#0f172a' : '#ffffff',
+                          color: mesa.tem_entrevistador ? '#ffffff' : '#64748b',
+                          border: destaquePessoaId === `ent-${mesa.id}`
+                            ? '2px solid #ff5722'
+                            : mesa.tem_entrevistador
+                            ? '1.5px solid #0f172a'
+                            : '1px dashed #94a3b8',
+                          boxShadow: destaquePessoaId === `ent-${mesa.id}` ? '0 0 14px #ff5722' : '0 2px 6px rgba(15,23,42,0.08)',
+                          borderRadius: '999px',
+                          padding: '0.2rem 0.65rem',
+                          fontSize: '0.7rem',
+                          fontWeight: '800',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
                           alignItems: 'center',
-                          zIndex: 10,
-                          cursor: 'pointer'
+                          gap: '0.28rem',
+                          maxWidth: '175px',
+                          zIndex: 12
                         }}
-                        onClick={() => setModalMesaAberta(mesa)}
                       >
-                        <div
-                          style={{
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '50%',
-                            background: mesa.tem_entrevistador ? '#0f172a' : '#cbd5e1',
-                            border: destaquePessoaId === `ent-${mesa.id}` ? '3px solid #ff5722' : '2px solid #fff',
-                            boxShadow: destaquePessoaId === `ent-${mesa.id}` ? '0 0 14px #ff5722' : '0 2px 6px rgba(0,0,0,0.1)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: '#fff',
-                            transition: 'all 0.2s ease'
-                          }}
-                        >
-                          <span className="material-symbols-outlined" style={{ fontSize: '1rem' }}>mic</span>
-                        </div>
-                        <span style={{ fontSize: '0.7rem', fontWeight: '700', color: mesa.tem_entrevistador ? '#0f172a' : '#94a3b8', marginTop: '0.2rem', maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {mesa.entrevistadorNome ? mesa.entrevistadorNome.split(' ')[0] : `Mesa ${mesa.numero}`}
+                        <span className="material-symbols-outlined" style={{ fontSize: '0.88rem', color: mesa.tem_entrevistador ? '#fb923c' : '#94a3b8' }}>mic</span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {rotuloConsultorMesa}
                         </span>
-                      </div>
+                      </button>
 
                       {/* Mesa Redonda Central com Efeito Glow */}
                       <div
                         className={isMesaFocada ? 'mesa-glow-ativa' : ''}
                         style={{
-                          width: '124px',
-                          height: '124px',
+                          width: '126px',
+                          height: '126px',
                           borderRadius: '50%',
-                          background: '#fff',
-                          border: isMesaFocada ? '3px solid #ff5722' : '2px solid #e2e8f0',
+                          background: empresasNaMesa.length > 0 ? '#fffaf5' : '#fff',
+                          border: isMesaFocada ? '3px solid #ff5722' : empresasNaMesa.length > 0 ? '2px solid #fdba74' : '2px solid #e2e8f0',
                           boxShadow: isMesaFocada ? '0 0 25px rgba(255, 87, 34, 0.7)' : '0 4px 14px rgba(0,0,0,0.05)',
                           display: 'flex',
                           flexDirection: 'column',
                           alignItems: 'center',
                           justifyContent: 'center',
+                          padding: '0.4rem',
+                          boxSizing: 'border-box',
+                          textAlign: 'center',
                           zIndex: 5,
                           transition: 'all 0.3s ease'
                         }}
                       >
-                        <span style={{ fontSize: '0.95rem', fontWeight: '800', color: '#0f172a' }}>
+                        <span style={{ fontSize: '0.94rem', fontWeight: '800', color: '#0f172a', lineHeight: 1.15 }}>
                           Mesa {mesa.numero}
                         </span>
-                        <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#64748b', marginBottom: '0.35rem' }}>
-                          {totalOcupadosMesa}/{capTotal}
+                        <span style={{ fontSize: '0.74rem', fontWeight: '700', color: empresasNaMesa.length > 0 ? '#c2410c' : '#64748b', marginTop: '0.12rem' }}>
+                          {totalOcupadosMesa}/{capTotal} lugares
                         </span>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                          <button
-                            onClick={() => alterarCapacidade(mesa, -1)}
-                            title="Diminuir lugares"
-                            style={{ width: '22px', height: '22px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', color: '#64748b', fontWeight: 'bold' }}
-                          >
-                            -
-                          </button>
-                          <button
-                            onClick={() => alterarCapacidade(mesa, 1)}
-                            title="Aumentar lugares"
-                            style={{ width: '22px', height: '22px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', color: '#64748b', fontWeight: 'bold' }}
-                          >
-                            +
-                          </button>
-                          <button
-                            onClick={() => setModalMesaAberta(mesa)}
-                            title="Selecionar entrevistador da lista"
-                            style={{ width: '22px', height: '22px', borderRadius: '4px', border: '1px solid #cbd5e1', background: mesa.tem_entrevistador ? '#fff7ed' : '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ea580c' }}
-                          >
-                            <span className="material-symbols-outlined" style={{ fontSize: '0.85rem' }}>mic</span>
-                          </button>
-                          <button
-                            onClick={() => {
-                              abrirModalConfirmacao({
-                                tipo: 'erro',
-                                titulo: `Remover Mesa ${mesa.numero}`,
-                                mensagem: `Tem certeza que deseja excluir a Mesa ${mesa.numero} da estrutura do salão?`,
-                                textoConfirmar: 'Excluir Mesa',
-                                corConfirmar: '#dc2626',
-                                onConfirmar: async () => {
-                                  try {
-                                    await api.delete(`/mesas/${mesa.id}`);
-                                    carregarDados();
-                                  } catch (e) {
-                                    abrirModalAviso('erro', 'Não Foi Possível Excluir a Mesa', e.message);
-                                  }
-                                }
-                              });
+                        {empresasNaMesa.length > 0 && !modoEdicaoLayout && (
+                          <span
+                            title={empresasNaMesa.join(' • ')}
+                            style={{
+                              marginTop: '0.28rem',
+                              background: '#ffedd5',
+                              color: '#9a3412',
+                              fontSize: '0.64rem',
+                              fontWeight: '800',
+                              padding: '0.1rem 0.45rem',
+                              borderRadius: '999px',
+                              maxWidth: '106px',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap'
                             }}
-                            title="Excluir mesa"
-                            style={{ width: '22px', height: '22px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#dc2626' }}
                           >
-                            <span className="material-symbols-outlined" style={{ fontSize: '0.85rem' }}>delete</span>
-                          </button>
-                        </div>
+                            {empresasNaMesa.length === 1 ? empresasNaMesa[0] : `${empresasNaMesa.length} empresas`}
+                          </span>
+                        )}
+
+                        {modoEdicaoLayout && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.32rem' }}>
+                            <button
+                              onClick={() => alterarCapacidade(mesa, -1)}
+                              title="Diminuir lugares"
+                              style={{ width: '22px', height: '22px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', color: '#64748b', fontWeight: 'bold' }}
+                            >
+                              -
+                            </button>
+                            <button
+                              onClick={() => alterarCapacidade(mesa, 1)}
+                              title="Aumentar lugares"
+                              style={{ width: '22px', height: '22px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', color: '#64748b', fontWeight: 'bold' }}
+                            >
+                              +
+                            </button>
+                            <button
+                              onClick={() => {
+                                abrirModalConfirmacao({
+                                  tipo: 'erro',
+                                  titulo: `Remover Mesa ${mesa.numero}`,
+                                  mensagem: `Tem certeza que deseja excluir a Mesa ${mesa.numero} da estrutura do salão?`,
+                                  textoConfirmar: 'Excluir Mesa',
+                                  corConfirmar: '#dc2626',
+                                  onConfirmar: async () => {
+                                    try {
+                                      await api.delete(`/mesas/${mesa.id}`);
+                                      carregarDados();
+                                    } catch (e) {
+                                      abrirModalAviso('erro', 'Não Foi Possível Excluir a Mesa', e.message);
+                                    }
+                                  }
+                                });
+                              }}
+                              title="Excluir mesa"
+                              style={{ width: '22px', height: '22px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#dc2626' }}
+                            >
+                              <span className="material-symbols-outlined" style={{ fontSize: '0.85rem' }}>delete</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       {/* Assentos ao Redor */}
@@ -1549,7 +1949,9 @@ export default function Lunch() {
                     Entrevistadores da Mesa #{modalMesaAberta.numero}
                   </h3>
                   <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                    Clique para escalar 1 ou mais entrevistadores
+                    {(modalMesaAberta.entrevistadores_ids || []).length > 0
+                      ? `${(modalMesaAberta.entrevistadores_ids || []).length} consultor(es) escalado(s) nesta mesa`
+                      : 'Clique para escalar 1 ou mais entrevistadores'}
                   </span>
                 </div>
               </div>
@@ -1572,7 +1974,7 @@ export default function Lunch() {
               />
             </div>
 
-            <div style={{ maxHeight: '280px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div style={{ maxHeight: '300px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem', paddingRight: '0.2rem' }}>
               {entrevistadores
                 .filter(
                   (e) =>
@@ -1582,13 +1984,16 @@ export default function Lunch() {
                 .map((ent) => {
                   const idsMesa = modalMesaAberta.entrevistadores_ids || (modalMesaAberta.entrevistador_id ? [modalMesaAberta.entrevistador_id] : []);
                   const jaSelecionado = idsMesa.includes(ent.id);
+                  const outrasMesas = mesas
+                    .filter((m) => m.id !== modalMesaAberta.id && (m.entrevistadores_ids || []).includes(ent.id))
+                    .map((m) => `Mesa ${m.numero}`);
 
                   return (
                     <div
                       key={ent.id}
                       onClick={() => alternarEntrevistadorMesa(modalMesaAberta.id, ent.id)}
                       style={{
-                        padding: '0.65rem 0.9rem',
+                        padding: '0.65rem 0.85rem',
                         borderRadius: '10px',
                         border: '1.5px solid',
                         borderColor: jaSelecionado ? '#0284c7' : '#e2e8f0',
@@ -1596,11 +2001,12 @@ export default function Lunch() {
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center',
+                        gap: '0.65rem',
                         cursor: 'pointer',
                         transition: 'all 0.15s ease'
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minWidth: 0, flex: 1 }}>
                         <div
                           style={{
                             width: '32px',
@@ -1612,25 +2018,37 @@ export default function Lunch() {
                             alignItems: 'center',
                             justifyContent: 'center',
                             fontWeight: '700',
-                            fontSize: '0.85rem'
+                            fontSize: '0.85rem',
+                            flexShrink: 0
                           }}
                         >
                           {ent.nome.charAt(0)}
                         </div>
-                        <div>
-                          <div style={{ fontWeight: '700', fontSize: '0.85rem', color: '#0f172a' }}>{ent.nome}</div>
-                          <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{ent.email}</div>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: '700', fontSize: '0.84rem', color: '#0f172a' }}>{ent.nome}</span>
+                            {outrasMesas.length > 0 && (
+                              <span style={{ fontSize: '0.64rem', fontWeight: '800', background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '0.06rem 0.38rem', borderRadius: '999px', whiteSpace: 'nowrap' }}>
+                                Na {outrasMesas.join(', ')}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {ent.email}
+                          </div>
                         </div>
                       </div>
 
                       <div
                         style={{
-                          padding: '0.25rem 0.6rem',
-                          borderRadius: '6px',
+                          padding: '0.32rem 0.7rem',
+                          borderRadius: '7px',
                           fontSize: '0.75rem',
-                          fontWeight: '700',
+                          fontWeight: '800',
                           background: jaSelecionado ? '#0284c7' : '#f1f5f9',
-                          color: jaSelecionado ? '#fff' : '#64748b'
+                          color: jaSelecionado ? '#fff' : '#475569',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0
                         }}
                       >
                         {jaSelecionado ? '✓ Escalado' : '+ Escalar'}

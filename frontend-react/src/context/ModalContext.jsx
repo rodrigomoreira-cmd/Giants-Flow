@@ -1,6 +1,7 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 let dispararModalGlobal = null;
+let dispararToastGlobal = null;
 
 function inferirConfiguracao(mensagem, opcoes = {}, ehConfirmacao = false) {
   const texto = String(mensagem || '');
@@ -58,8 +59,26 @@ function inferirConfiguracao(mensagem, opcoes = {}, ehConfirmacao = false) {
   };
 }
 
+export function toastSistema(mensagem, tipo = 'sucesso', duracaoMs = 3200) {
+  if (typeof dispararToastGlobal === 'function') {
+    dispararToastGlobal({
+      id: Date.now() + Math.random(),
+      mensagem: String(mensagem || ''),
+      tipo,
+      duracaoMs
+    });
+  }
+}
+
 export function alertaSistema(mensagem, opcoes = {}) {
   const cfg = inferirConfiguracao(mensagem, opcoes, false);
+
+  // Sucessos rápidos podem opcionalmente usar toast se solicitado via { toast: true }
+  if (opcoes.toast && typeof dispararToastGlobal === 'function') {
+    toastSistema(cfg.mensagem, cfg.tipo, opcoes.duracaoMs || 3200);
+    return Promise.resolve();
+  }
+
   if (typeof dispararModalGlobal === 'function') {
     return new Promise((resolve) => {
       dispararModalGlobal({ ...cfg, resolve });
@@ -80,13 +99,25 @@ export function confirmarSistema(mensagem, opcoes = {}) {
 
 export function SystemModalProvider({ children }) {
   const [modalAtual, setModalAtual] = useState(null);
+  const [toasts, setToasts] = useState([]);
+
+  const removerToast = useCallback((id) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
   useEffect(() => {
     dispararModalGlobal = (dados) => setModalAtual(dados);
+    dispararToastGlobal = (toast) => {
+      setToasts((prev) => [...prev.slice(-3), toast]);
+      setTimeout(() => {
+        removerToast(toast.id);
+      }, toast.duracaoMs || 3200);
+    };
     return () => {
       dispararModalGlobal = null;
+      dispararToastGlobal = null;
     };
-  }, []);
+  }, [removerToast]);
 
   const fecharComResposta = (resposta) => {
     if (modalAtual?.resolve) {
@@ -110,6 +141,63 @@ export function SystemModalProvider({ children }) {
     <>
       {children}
 
+      {/* PILHA DE TOASTS NÃO-INTRUSIVOS (CANTO INFERIOR DIREITO) */}
+      {toasts.length > 0 && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '1.25rem',
+            right: '1.25rem',
+            zIndex: 10050,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.55rem',
+            maxWidth: '380px',
+            pointerEvents: 'none'
+          }}
+        >
+          {toasts.map((t) => {
+            const isErro = t.tipo === 'erro';
+            const isAviso = t.tipo === 'aviso';
+            return (
+              <div
+                key={t.id}
+                onClick={() => removerToast(t.id)}
+                style={{
+                  pointerEvents: 'auto',
+                  cursor: 'pointer',
+                  background: '#0f172a',
+                  color: '#ffffff',
+                  borderLeft: `4px solid ${isErro ? '#ef4444' : isAviso ? '#f59e0b' : '#22c55e'}`,
+                  borderRadius: '10px',
+                  padding: '0.75rem 1rem',
+                  boxShadow: '0 14px 30px -6px rgba(15, 23, 42, 0.35)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.65rem',
+                  animation: 'toastSlideIn 0.2s cubic-bezier(0.2, 0.8, 0.2, 1)'
+                }}
+              >
+                <span
+                  className="material-symbols-outlined"
+                  style={{
+                    fontSize: '1.25rem',
+                    color: isErro ? '#f87171' : isAviso ? '#fbbf24' : '#4ade80',
+                    flexShrink: 0
+                  }}
+                >
+                  {isErro ? 'error' : isAviso ? 'info' : 'check_circle'}
+                </span>
+                <span style={{ fontSize: '0.84rem', fontWeight: '700', lineHeight: 1.35 }}>
+                  {t.mensagem}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* MODAL CENTRAL DE ALERTA E CONFIRMAÇÃO */}
       {modalAtual && (
         <div
           onClick={() => fecharComResposta(false)}
@@ -134,7 +222,8 @@ export function SystemModalProvider({ children }) {
               maxWidth: '460px',
               overflow: 'hidden',
               boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.35)',
-              border: '1px solid #e2e8f0'
+              border: '1px solid #e2e8f0',
+              animation: 'modalScaleIn 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)'
             }}
           >
             <div

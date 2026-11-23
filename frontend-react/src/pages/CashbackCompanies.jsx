@@ -147,6 +147,28 @@ export default function CashbackCompanies() {
 
         const isPacProposta = String(produtoProposta).toUpperCase().includes('PAC');
         const saldoNaoUtilizado = Math.max(0, cashbackTotal - cashbackAbatido);
+        const saldoNaoAplicavelPac = prop && isPacProposta && cashbackAbatido <= 0 ? cashbackTotal : 0;
+        const saldoAproveitavel = Math.max(0, saldoNaoUtilizado - saldoNaoAplicavelPac);
+
+        let estagioAtual = 'Aguardando Almoço';
+        let corEstagio = { bg: '#f1f5f9', color: '#64748b', border: '#e2e8f0' };
+        const temDecisaoFutura = g.membros.some((m) => ['decisao_futura', 'follow_up'].includes(String(m.etapa_funil || '').toLowerCase()));
+        const temNaoFechou = g.membros.some((m) => ['reprovado', 'nao_fechou', 'sem_interesse'].includes(String(m.etapa_funil || '').toLowerCase()));
+        const membroMesa = g.membros.find((m) => Boolean(m.mesa_alocada));
+
+        if (temDecisaoFutura) {
+          estagioAtual = 'Decisão Futura';
+          corEstagio = { bg: '#f3e8ff', color: '#7e22ce', border: '#e9d5ff' };
+        } else if (temNaoFechou) {
+          estagioAtual = 'Não Fechou';
+          corEstagio = { bg: '#f1f5f9', color: '#475569', border: '#cbd5e1' };
+        } else if (membroMesa) {
+          estagioAtual = `Em Mesa (Mesa ${membroMesa.mesa_alocada})`;
+          corEstagio = { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' };
+        } else if (g.almocoPago || g.cortesia || g.semAlmoco) {
+          estagioAtual = 'Aguardando Mesa';
+          corEstagio = { bg: '#fff7ed', color: '#c2410c', border: '#fed7aa' };
+        }
 
         return {
           ...g,
@@ -157,7 +179,11 @@ export default function CashbackCompanies() {
           produtoProposta,
           statusProposta,
           isPacProposta,
-          saldoNaoUtilizado
+          saldoNaoUtilizado,
+          saldoNaoAplicavelPac,
+          saldoAproveitavel,
+          estagioAtual,
+          corEstagio
         };
       })
       .sort((a, b) => {
@@ -167,17 +193,43 @@ export default function CashbackCompanies() {
   }, [participantes, propostas]);
 
   const totais = useMemo(() => {
-    return empresasCashback.reduce(
+    const base = empresasCashback.reduce(
       (acc, e) => {
         if (e.cashbackTotal > 0) acc.qtdComCashback += 1;
+        if (e.cashbackAlmoco > 0) acc.qtdAlmoco += 1;
+        if (e.cashbackUpgrade > 0) acc.qtdUpgrade += 1;
+        if (e.cashbackAbatido > 0) acc.qtdAbatido += 1;
+        if (e.saldoAproveitavel > 0) acc.qtdAproveitavel += 1;
+        if (e.saldoNaoAplicavelPac > 0) acc.qtdNaoAplicavelPac += 1;
+        if (e.cortesia) acc.qtdCortesia += 1;
         acc.totalAlmoco += e.cashbackAlmoco;
         acc.totalUpgrade += e.cashbackUpgrade;
         acc.totalGeral += e.cashbackTotal;
         acc.totalAbatido += e.cashbackAbatido;
+        acc.totalAproveitavel += e.saldoAproveitavel;
+        acc.totalNaoAplicavelPac += e.saldoNaoAplicavelPac;
         return acc;
       },
-      { qtdComCashback: 0, totalAlmoco: 0, totalUpgrade: 0, totalGeral: 0, totalAbatido: 0 }
+      {
+        qtdComCashback: 0,
+        qtdAlmoco: 0,
+        qtdUpgrade: 0,
+        qtdAbatido: 0,
+        qtdAproveitavel: 0,
+        qtdNaoAplicavelPac: 0,
+        qtdCortesia: 0,
+        totalAlmoco: 0,
+        totalUpgrade: 0,
+        totalGeral: 0,
+        totalAbatido: 0,
+        totalAproveitavel: 0,
+        totalNaoAplicavelPac: 0
+      }
     );
+    return {
+      ...base,
+      totalSaldoLivre: Math.max(0, base.totalGeral - base.totalAbatido)
+    };
   }, [empresasCashback]);
 
   const listaFiltrada = useMemo(() => {
@@ -186,6 +238,8 @@ export default function CashbackCompanies() {
 
     return empresasCashback.filter((e) => {
       if (filtroTipo === 'com_cashback' && e.cashbackTotal <= 0) return false;
+      if (filtroTipo === 'aproveitavel' && e.saldoAproveitavel <= 0) return false;
+      if (filtroTipo === 'nao_aplicavel_pac' && e.saldoNaoAplicavelPac <= 0) return false;
       if (filtroTipo === 'almoco' && e.cashbackAlmoco <= 0) return false;
       if (filtroTipo === 'upgrade' && e.cashbackUpgrade <= 0) return false;
       if (filtroTipo === 'abatido' && e.cashbackAbatido <= 0) return false;
@@ -200,6 +254,21 @@ export default function CashbackCompanies() {
       return matchEmp || matchCnpj || matchSocio;
     });
   }, [empresasCashback, busca, filtroTipo]);
+
+  const totaisFiltrados = useMemo(() => {
+    return listaFiltrada.reduce(
+      (acc, e) => {
+        acc.almoco += e.cashbackAlmoco;
+        acc.upgrade += e.cashbackUpgrade;
+        acc.disponivel += e.cashbackTotal;
+        acc.abatido += e.cashbackAbatido;
+        acc.aproveitavel += e.saldoAproveitavel;
+        acc.naoAplicavelPac += e.saldoNaoAplicavelPac;
+        return acc;
+      },
+      { almoco: 0, upgrade: 0, disponivel: 0, abatido: 0, aproveitavel: 0, naoAplicavelPac: 0 }
+    );
+  }, [listaFiltrada]);
 
   const exportarCsv = () => {
     const cabecalho = [
@@ -229,7 +298,9 @@ export default function CashbackCompanies() {
       e.cashbackTotal.toFixed(2).replace('.', ','),
       `"${String(e.produtoProposta || '').replace(/"/g, '""')}"`,
       e.cashbackAbatido.toFixed(2).replace('.', ','),
-      e.statusProposta || 'Sem proposta'
+      e.isPacProposta && e.cashbackAbatido <= 0 && e.cashbackTotal > 0
+        ? `${e.statusProposta || 'proposta'} (Nao aplicavel PAC)`
+        : (e.statusProposta || 'Sem proposta')
     ]);
 
     const csv = '\uFEFF' + [cabecalho.join(';'), ...linhas.map((l) => l.join(';'))].join('\n');
@@ -257,7 +328,7 @@ export default function CashbackCompanies() {
               </span>
             )}
           </div>
-          <h1 style={{ margin: '0.35rem 0 0', fontSize: '1.55rem', fontWeight: '900', color: '#0f172a' }}>
+          <h1 style={{ margin: '0.25rem 0 0', fontSize: '1.75rem', fontWeight: '800', color: '#0f172a' }}>
             Consulta de Cashback por Empresa
           </h1>
           <p style={{ margin: '0.25rem 0 0', fontSize: '0.84rem', color: '#475569' }}>
@@ -351,8 +422,15 @@ export default function CashbackCompanies() {
           <div style={{ fontSize: '1.65rem', fontWeight: '900', color: '#15803d', marginTop: '0.25rem' }}>
             {carregando ? '...' : fmtBRL(totais.totalAbatido)}
           </div>
-          <div style={{ fontSize: '0.74rem', color: '#166534', marginTop: '0.15rem', fontWeight: '600' }}>
-            De {fmtBRL(totais.totalGeral)} disponíveis
+          <div style={{ fontSize: '0.72rem', color: '#166534', marginTop: '0.2rem', fontWeight: '600', display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
+            <span style={{ background: '#dcfce7', border: '1px solid #86efac', padding: '0.06rem 0.42rem', borderRadius: '5px', fontWeight: '800' }}>
+              Aproveitável: {fmtBRL(totais.totalAproveitavel)}
+            </span>
+            {totais.totalNaoAplicavelPac > 0 && (
+              <span style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '0.06rem 0.42rem', borderRadius: '5px', fontWeight: '700' }}>
+                PAC (não aplicável): {fmtBRL(totais.totalNaoAplicavelPac)}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -384,10 +462,12 @@ export default function CashbackCompanies() {
           {[
             { id: 'todos', label: `Todas (${empresasCashback.length})` },
             { id: 'com_cashback', label: `Com Cashback (${totais.qtdComCashback})` },
-            { id: 'almoco', label: 'Almoço Pago (R$ 1.000)' },
-            { id: 'upgrade', label: 'Upgrade 90% / 100%' },
-            { id: 'abatido', label: 'Abatido em Proposta' },
-            { id: 'cortesia', label: 'Cortesia (Isento)' }
+            { id: 'aproveitavel', label: `Saldo Aproveitável (${totais.qtdAproveitavel})` },
+            { id: 'nao_aplicavel_pac', label: `Não Aplicável - PAC (${totais.qtdNaoAplicavelPac})` },
+            { id: 'almoco', label: `Almoço Pago (${totais.qtdAlmoco})` },
+            { id: 'upgrade', label: `Upgrade 90% / 100% (${totais.qtdUpgrade})` },
+            { id: 'abatido', label: `Abatido em Proposta (${totais.qtdAbatido})` },
+            { id: 'cortesia', label: `Cortesia (${totais.qtdCortesia})` }
           ].map((tab) => {
             const ativo = filtroTipo === tab.id;
             return (
@@ -522,7 +602,7 @@ export default function CashbackCompanies() {
                             cursor: 'pointer'
                           }}
                         >
-                          {labelResumo}
+                          Origem: {labelResumo}
                         </button>
                       );
                     })()}
@@ -532,8 +612,21 @@ export default function CashbackCompanies() {
                     {fmtBRL(e.cashbackTotal)}
                   </td>
 
-                  <td style={{ padding: '0.85rem 0.75rem', textAlign: 'right', fontWeight: '800', color: e.cashbackAbatido > 0 ? '#15803d' : '#94a3b8' }}>
-                    {fmtBRL(e.cashbackAbatido)}
+                  <td style={{ padding: '0.85rem 0.75rem', textAlign: 'right' }}>
+                    <div style={{ fontWeight: '800', color: e.cashbackAbatido > 0 ? '#15803d' : '#94a3b8' }}>
+                      {fmtBRL(e.cashbackAbatido)}
+                    </div>
+                    {e.prop && e.cashbackAbatido <= 0 && e.cashbackTotal > 0 && (
+                      e.isPacProposta ? (
+                        <span style={{ display: 'inline-block', marginTop: '0.2rem', fontSize: '0.66rem', fontWeight: '700', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: '5px', padding: '0.1rem 0.4rem' }}>
+                          Não aplicável (PAC)
+                        </span>
+                      ) : (
+                        <span style={{ display: 'inline-block', marginTop: '0.2rem', fontSize: '0.66rem', fontWeight: '800', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', borderRadius: '5px', padding: '0.1rem 0.4rem' }}>
+                          ⚠ Não abatido
+                        </span>
+                      )
+                    )}
                   </td>
 
                   <td style={{ padding: '0.85rem 1rem' }}>
@@ -564,7 +657,7 @@ export default function CashbackCompanies() {
                         </span>
                         <button
                           type="button"
-                          onClick={() => navigate('/approvals')}
+                          onClick={() => navigate(`/approvals?busca=${encodeURIComponent(e.cnpj || e.empresa)}`)}
                           style={{
                             background: 'transparent',
                             border: 'none',
@@ -580,13 +673,53 @@ export default function CashbackCompanies() {
                         </button>
                       </div>
                     ) : (
-                      <span style={{ fontSize: '0.74rem', color: '#94a3b8' }}>Sem proposta emitida</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.22rem', alignItems: 'flex-start' }}>
+                        <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>Sem proposta emitida</span>
+                        <span style={{
+                          fontSize: '0.68rem',
+                          fontWeight: '800',
+                          background: e.corEstagio.bg,
+                          color: e.corEstagio.color,
+                          border: `1px solid ${e.corEstagio.border}`,
+                          padding: '0.12rem 0.45rem',
+                          borderRadius: '5px'
+                        }}>
+                          {e.estagioAtual}
+                        </span>
+                      </div>
                     )}
                   </td>
                 </tr>
               ))
             )}
           </tbody>
+          {!carregando && listaFiltrada.length > 0 && (
+            <tfoot>
+              <tr style={{ background: '#f8fafc', borderTop: '2px solid #cbd5e1', fontWeight: '800', color: '#0f172a', fontSize: '0.82rem' }}>
+                <td colSpan={2} style={{ padding: '0.85rem 1rem' }}>
+                  Totais do Filtro ({listaFiltrada.length} {listaFiltrada.length === 1 ? 'empresa' : 'empresas'})
+                </td>
+                <td style={{ padding: '0.85rem 0.75rem', textAlign: 'right', color: '#0369a1' }}>
+                  {fmtBRL(totaisFiltrados.almoco)}
+                </td>
+                <td style={{ padding: '0.85rem 0.75rem', textAlign: 'right', color: '#7c3aed' }}>
+                  {fmtBRL(totaisFiltrados.upgrade)}
+                </td>
+                <td style={{ padding: '0.85rem 0.75rem', textAlign: 'right', fontWeight: '900' }}>
+                  {fmtBRL(totaisFiltrados.disponivel)}
+                </td>
+                <td style={{ padding: '0.85rem 0.75rem', textAlign: 'right', color: '#15803d' }}>
+                  {fmtBRL(totaisFiltrados.abatido)}
+                </td>
+                <td style={{ padding: '0.85rem 1rem', fontSize: '0.74rem', color: '#047857' }}>
+                  <div>Aproveitável: {fmtBRL(totaisFiltrados.aproveitavel)}</div>
+                  {totaisFiltrados.naoAplicavelPac > 0 && (
+                    <div style={{ color: '#64748b', fontWeight: '700' }}>PAC: {fmtBRL(totaisFiltrados.naoAplicavelPac)}</div>
+                  )}
+                </td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
       {/* MODAL DE DETALHE DOS PRODUTOS ELEGÍVEIS */}

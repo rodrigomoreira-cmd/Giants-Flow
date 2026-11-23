@@ -6,6 +6,9 @@ const pool = dbModule.pool || dbModule;
 const { exigirTurmaAtiva } = require('../../database/verificarTurmaAtiva');
 const { registrarAuditoria } = require('./warroom.routes');
 
+// Garante coluna momento_aplicacao de forma idempotente
+pool.query('ALTER TABLE fichas ADD COLUMN IF NOT EXISTS momento_aplicacao VARCHAR(100);').catch(() => {});
+
 // 1. LISTAGEM DE CLIENTES / PARTICIPANTES POR TURMA
 router.get('/clientes', async (req, res) => {
   try {
@@ -36,6 +39,7 @@ router.get('/clientes', async (req, res) => {
         status,
         cargo,
         origem,
+        momento_aplicacao,
         cv_cartao,
         historico_produtos_elegiveis,
         valor_investido_pac_ae,
@@ -53,6 +57,68 @@ router.get('/clientes', async (req, res) => {
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// 1B. CADASTRO RÁPIDO DE FICHA DE APLICAÇÃO NA RECEPÇÃO
+router.post('/clientes', async (req, res) => {
+  const client = await pool.connect();
+  let emTransacao = false;
+  try {
+    const b = req.body || {};
+    const nome = String(b.nome_completo || b.nome_participante || b.nome || '').trim();
+    const telefone = String(b.telefone || b.whatsapp || '').trim();
+    if (!nome || !telefone) {
+      return res.status(400).json({ error: 'Nome completo e WhatsApp/Telefone são obrigatórios.' });
+    }
+
+    const turmaId = Number(b.turma_id || b.turmaId || 1491) || 1491;
+    await exigirTurmaAtiva({ turmaId });
+
+    const nomeCracha = String(b.nome_cracha || b.nomeCracha || '').trim() || nome.split(/\s+/)[0];
+    const empresa = String(b.empresa || '')
+      .replace(/\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/g, '')
+      .replace(/\b\d{11}\b/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim() || null;
+    const cnpjRaw = String(b.cpf_cnpj || b.cnpj || '').trim() || null;
+    const email = String(b.email || '').trim().toLowerCase() || null;
+    const origem = String(b.origem || 'ORGANICO').trim().toUpperCase();
+    const captadorId = b.captador_id || b.responsavel_ficha_id ? Number(b.captador_id || b.responsavel_ficha_id) : null;
+    const momentoAplicacao = String(b.momento_aplicacao || b.momentoAplicacao || '').trim() || null;
+
+    await client.query('BEGIN');
+    emTransacao = true;
+    await client.query("SET LOCAL app.user_role = 'SYSTEM'");
+
+    const { rows } = await client.query(
+      `INSERT INTO fichas (
+         turma_id, nome_participante, nome_cracha, empresa, cnpj, cpf_cnpj,
+         telefone, email, origem, captador_id, momento_aplicacao, status, etapa_funil
+       )
+       VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8, $9, $10, 'AGUARDANDO_TRIAGEM', 'lead')
+       RETURNING *`,
+      [turmaId, nome, nomeCracha, empresa, cnpjRaw, telefone, email, origem, captadorId, momentoAplicacao]
+    );
+
+    await registrarAuditoria(client, {
+      turmaId,
+      fichaId: rows[0]?.id,
+      empresa,
+      cnpj: cnpjRaw,
+      acao: 'NOVA_FICHA_APLICACAO',
+      detalhes: `Ficha #${rows[0]?.id} cadastrada para ${nome}${momentoAplicacao ? ' | Momento: ' + momentoAplicacao : ''}`,
+      req
+    });
+
+    await client.query('COMMIT');
+    emTransacao = false;
+    return res.status(201).json(rows[0]);
+  } catch (err) {
+    if (emTransacao) await client.query('ROLLBACK');
+    return res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -500,7 +566,7 @@ router.put('/clientes/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await exigirTurmaAtiva({ fichaId: id });
-    let { empresa, nome_completo, email, telefone, cnpj, cashback } = req.body;
+    let { empresa, nome_completo, email, telefone, cnpj, cashback, momento_aplicacao } = req.body;
 
     if (cashback !== undefined && cashback !== null) {
       cashback = Number(cashback);
@@ -548,10 +614,11 @@ router.put('/clientes/:id', async (req, res) => {
            telefone = COALESCE($4, telefone),
            cnpj = COALESCE($5, cnpj),
            cashback = COALESCE($6, cashback),
+           momento_aplicacao = COALESCE($7, momento_aplicacao),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $7
+       WHERE id = $8
        RETURNING *`,
-      [empresa, nome_completo, email, telefone, cnpj, cashback, id]
+      [empresa, nome_completo, email, telefone, cnpj, cashback, momento_aplicacao, id]
     );
 
     await client.query('COMMIT');

@@ -76,6 +76,7 @@ export default function Home() {
   const [buscaRapida, setBuscaRapida] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [atualizadoEm, setAtualizadoEm] = useState(null);
+  const [abaRadarEsquerda, setAbaRadarEsquerda] = useState('aguardando'); // 'aguardando' | 'em_mesa' | 'followup'
 
   const carregarCockpit = useCallback(async (silencioso = false) => {
     try {
@@ -181,8 +182,14 @@ export default function Home() {
 
     const empresasElegiveis = Array.from(gruposMap.values());
     const fichasPreenchidas = empresasElegiveis.filter((e) => e.almocoPago || e.cortesia);
+    const fichasConcluidasQtd = fichasPreenchidas.filter((e) => e.fechada).length;
     const aguardandoMesa = fichasPreenchidas.filter((e) => !e.fechada && e.mesaAlocada === null);
-    const emAtendimentoMesa = empresasElegiveis.filter((e) => !e.fechada && e.mesaAlocada !== null);
+    const emAtendimentoMesa = empresasElegiveis
+      .filter((e) => !e.fechada && e.mesaAlocada !== null)
+      .sort((a, b) => Number(a.mesaAlocada || 0) - Number(b.mesaAlocada || 0));
+    const decisaoFutura = empresasElegiveis.filter(
+      (e) => String(e.etapaFunil || '').toLowerCase() === 'decisao_futura'
+    );
 
     const mesasOcupadas = mesas.filter((m) => Number(m.ocupantes || 0) > 0).length;
     const assentosOcupados = mesas.reduce((acc, m) => acc + Number(m.ocupantes || 0), 0);
@@ -206,7 +213,10 @@ export default function Home() {
       giantsPresentes,
       totalEmpresasElegiveis: empresasElegiveis.length,
       fichasPreenchidasQtd: fichasPreenchidas.length,
+      fichasConcluidasQtd,
       aguardandoMesa,
+      emAtendimentoMesa,
+      decisaoFutura,
       emAtendimentoMesaQtd: emAtendimentoMesa.length,
       mesasTotal: mesas.length,
       mesasOcupadas,
@@ -249,7 +259,7 @@ export default function Home() {
     ...(!isFinanceiro
       ? [
           {
-            titulo: 'Salão de Lunch',
+            titulo: 'Salão & Mesas',
             subtitulo: 'Alocar casais/sócios nas mesas e acompanhar ocupação ao vivo',
             icone: 'table_restaurant',
             cor: '#0369a1',
@@ -601,8 +611,10 @@ export default function Home() {
               {' '}/ {resumoSalao.totalEmpresasElegiveis}
             </span>
           </div>
-          <div style={{ fontSize: '0.76rem', color: '#475569', marginTop: '0.2rem' }}>
-            Almoço pago ou cortesia (exclui GIANTS)
+          <div style={{ fontSize: '0.76rem', color: '#475569', marginTop: '0.2rem', fontWeight: '600' }}>
+            {resumoSalao.fichasPreenchidasQtd > 0
+              ? `${resumoSalao.fichasConcluidasQtd} concluída(s) • ${resumoSalao.emAtendimentoMesaQtd} em mesa`
+              : 'Almoço pago ou cortesia (exclui GIANTS)'}
           </div>
         </div>
 
@@ -684,7 +696,7 @@ export default function Home() {
         <h2 style={{ fontSize: '1rem', fontWeight: '800', color: '#0f172a', margin: '0 0 0.85rem' }}>
           Acesso Rápido por Frente de Operação
         </h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0.9rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: '0.95rem' }}>
           {atalhosRapidos.map((card) => (
             <button
               key={card.titulo}
@@ -737,11 +749,11 @@ export default function Home() {
 
       {/* 4. RADAR DE AÇÃO IMEDIATA (FILA DE MESA + ALERTAS DO FINANCEIRO / ÚLTIMAS MOVIMENTAÇÕES) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1.25rem' }}>
-        {/* COLUNA ESQUERDA: LIBERADOS NO ALMOÇO AGUARDANDO MESA */}
-        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1.3rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.9rem' }}>
+        {/* COLUNA ESQUERDA: RADAR DE SALÃO & ATENDIMENTOS */}
+        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1.3rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
             <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: '800', color: '#0f172a' }}>
-              Liberados no Almoço Aguardando Mesa ({resumoSalao.aguardandoMesa.length})
+              Radar do Salão & Atendimentos
             </h3>
             <button
               type="button"
@@ -752,56 +764,192 @@ export default function Home() {
             </button>
           </div>
 
-          {resumoSalao.aguardandoMesa.length === 0 ? (
-            <p style={{ fontSize: '0.84rem', color: '#64748b', margin: 0 }}>
-              Nenhuma empresa liberada aguardando mesa no momento.
-            </p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
-              {resumoSalao.aguardandoMesa.slice(0, 7).map((item) => (
-                <div
-                  key={item.chave}
+          {/* Abas Rápidas */}
+          <div style={{ display: 'flex', gap: '0.3rem', background: '#f1f5f9', padding: '0.22rem', borderRadius: '9px' }}>
+            {[
+              { id: 'aguardando', label: `Aguardando Mesa (${resumoSalao.aguardandoMesa.length})` },
+              { id: 'em_mesa', label: `Em Mesa (${resumoSalao.emAtendimentoMesa.length})` },
+              { id: 'followup', label: `Follow-up (${resumoSalao.decisaoFutura.length})` }
+            ].map((aba) => {
+              const ativa = abaRadarEsquerda === aba.id;
+              return (
+                <button
+                  key={aba.id}
+                  type="button"
+                  onClick={() => setAbaRadarEsquerda(aba.id)}
                   style={{
-                    border: '1px solid #f1f5f9',
-                    background: '#f8fafc',
-                    borderRadius: '9px',
-                    padding: '0.7rem 0.85rem',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: '0.65rem'
+                    flex: 1,
+                    border: 'none',
+                    background: ativa ? '#ffffff' : 'transparent',
+                    color: ativa ? '#ea580c' : '#475569',
+                    fontWeight: '800',
+                    fontSize: '0.74rem',
+                    padding: '0.42rem 0.35rem',
+                    borderRadius: '7px',
+                    cursor: 'pointer',
+                    boxShadow: ativa ? '0 1px 2px rgba(0,0,0,0.06)' : 'none'
                   }}
                 >
-                  <div>
-                    <div style={{ fontWeight: '800', fontSize: '0.88rem', color: '#0f172a' }}>{item.empresa}</div>
-                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                      {item.titular} {item.membros.length > 1 ? `(+ ${item.membros.length - 1} sócio)` : ''}
+                  {aba.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {abaRadarEsquerda === 'aguardando' && (
+            resumoSalao.aguardandoMesa.length === 0 ? (
+              <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '10px', padding: '1.5rem 1.25rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6rem', margin: 'auto 0' }}>
+                <span className="material-symbols-outlined" style={{ fontSize: '1.75rem', color: '#94a3b8' }}>event_seat</span>
+                <div style={{ fontSize: '0.85rem', fontWeight: '700', color: '#475569' }}>
+                  Nenhuma empresa liberada aguardando mesa no momento.
+                </div>
+                <div style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                  Libere o almoço de novas empresas na Base de Empresas para enviar à fila do salão.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate(ROTAS_SISTEMA.companies)}
+                  style={{ marginTop: '0.2rem', background: '#0f172a', color: '#ffffff', border: 'none', padding: '0.42rem 0.85rem', borderRadius: '7px', fontSize: '0.75rem', fontWeight: '800', cursor: 'pointer' }}
+                >
+                  Validar Almoço em Empresas →
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+                {resumoSalao.aguardandoMesa.slice(0, 7).map((item) => (
+                  <div
+                    key={item.chave}
+                    style={{
+                      border: '1px solid #f1f5f9',
+                      background: '#f8fafc',
+                      borderRadius: '9px',
+                      padding: '0.7rem 0.85rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '0.65rem'
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: '800', fontSize: '0.88rem', color: '#0f172a' }}>{item.empresa}</div>
+                      <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                        {item.titular} {item.membros.length > 1 ? `(+ ${item.membros.length - 1} sócio)` : ''}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                      <span
+                        style={{
+                          fontSize: '0.7rem',
+                          fontWeight: '800',
+                          padding: '0.18rem 0.5rem',
+                          borderRadius: '5px',
+                          background: item.almocoPago ? '#dcfce7' : '#fef3c7',
+                          color: item.almocoPago ? '#166534' : '#92400e'
+                        }}
+                      >
+                        {item.almocoPago ? 'Pago' : 'Cortesia'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => navigate(isFinanceiro ? ROTAS_SISTEMA.companies : `${ROTAS_SISTEMA.lunch}?alocarId=${item.idPrincipal}`)}
+                        style={{ background: '#0f172a', color: '#fff', border: 'none', padding: '0.32rem 0.65rem', borderRadius: '6px', fontSize: '0.74rem', fontWeight: '700', cursor: 'pointer' }}
+                      >
+                        Alocar
+                      </button>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                    <span
-                      style={{
-                        fontSize: '0.7rem',
-                        fontWeight: '800',
-                        padding: '0.18rem 0.5rem',
-                        borderRadius: '5px',
-                        background: item.almocoPago ? '#dcfce7' : '#fef3c7',
-                        color: item.almocoPago ? '#166534' : '#92400e'
-                      }}
-                    >
-                      {item.almocoPago ? 'Pago' : 'Cortesia'}
-                    </span>
+                ))}
+              </div>
+            )
+          )}
+
+          {abaRadarEsquerda === 'em_mesa' && (
+            resumoSalao.emAtendimentoMesa.length === 0 ? (
+              <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '10px', padding: '1.5rem 1.25rem', textAlign: 'center', color: '#64748b', fontSize: '0.84rem', margin: 'auto 0' }}>
+                Nenhuma empresa sentada nas mesas neste momento.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', maxHeight: '340px', overflowY: 'auto' }}>
+                {resumoSalao.emAtendimentoMesa.slice(0, 8).map((item) => (
+                  <div
+                    key={item.chave}
+                    style={{
+                      border: '1px solid #e0f2fe',
+                      background: '#f0f9ff',
+                      borderRadius: '9px',
+                      padding: '0.68rem 0.85rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '0.65rem'
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: '800', fontSize: '0.87rem', color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.empresa}
+                      </div>
+                      <div style={{ fontSize: '0.74rem', color: '#475569' }}>
+                        {item.titular} {item.membros.length > 1 ? `(+ ${item.membros.length - 1} sócio)` : ''}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexShrink: 0 }}>
+                      <span style={{ fontSize: '0.72rem', fontWeight: '800', padding: '0.2rem 0.52rem', borderRadius: '6px', background: '#0284c7', color: '#ffffff' }}>
+                        Mesa {item.mesaAlocada}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => abrirFichaEmpresa(item.idPrincipal)}
+                        style={{ background: '#ffffff', color: '#0f172a', border: '1px solid #cbd5e1', padding: '0.3rem 0.62rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '700', cursor: 'pointer' }}
+                      >
+                        Ficha
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+
+          {abaRadarEsquerda === 'followup' && (
+            resumoSalao.decisaoFutura.length === 0 ? (
+              <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '10px', padding: '1.5rem 1.25rem', textAlign: 'center', color: '#64748b', fontSize: '0.84rem', margin: 'auto 0' }}>
+                Nenhuma empresa marcada como Decisão Futura / Follow-up nesta turma.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', maxHeight: '340px', overflowY: 'auto' }}>
+                {resumoSalao.decisaoFutura.slice(0, 8).map((item) => (
+                  <div
+                    key={item.chave}
+                    style={{
+                      border: '1px solid #ede9fe',
+                      background: '#f5f3ff',
+                      borderRadius: '9px',
+                      padding: '0.68rem 0.85rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '0.65rem'
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: '800', fontSize: '0.87rem', color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.empresa}
+                      </div>
+                      <div style={{ fontSize: '0.74rem', color: '#5b21b6' }}>
+                        {item.titular} • Aguardando retomada
+                      </div>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => navigate(isFinanceiro ? ROTAS_SISTEMA.companies : ROTAS_SISTEMA.lunch)}
-                      style={{ background: '#0f172a', color: '#fff', border: 'none', padding: '0.32rem 0.65rem', borderRadius: '6px', fontSize: '0.74rem', fontWeight: '700', cursor: 'pointer' }}
+                      onClick={() => abrirFichaEmpresa(item.idPrincipal)}
+                      style={{ background: '#6d28d9', color: '#ffffff', border: 'none', padding: '0.32rem 0.68rem', borderRadius: '6px', fontSize: '0.73rem', fontWeight: '800', cursor: 'pointer', flexShrink: 0 }}
                     >
-                      Alocar
+                      Retomar →
                     </button>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )
           )}
         </div>
 

@@ -24,7 +24,7 @@ router.get('/', async (_req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   try {
     const query = `
-      SELECT id, nome_participante AS nome, nome_cracha, empresa, cpf_cnpj, telefone, email, origem, status, criado_em, historico_produtos_elegiveis, valor_investido_pac_ae, cashback_upgrade_90_pct 
+      SELECT id, nome_participante AS nome, nome_cracha, empresa, cpf_cnpj, telefone, email, origem, momento_aplicacao, status, criado_em, historico_produtos_elegiveis, valor_investido_pac_ae, cashback_upgrade_90_pct 
       FROM fichas 
       ORDER BY id DESC
     `;
@@ -40,7 +40,7 @@ router.get('/', async (_req, res) => {
 router.post('/', async (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   try {
-    const { nome: nomeRaw, nome_participante, nome_cracha, empresa, cpf_cnpj, telefone, email, origem, status } = req.body;
+    const { nome: nomeRaw, nome_participante, nome_cracha, empresa, cpf_cnpj, telefone, email, origem, momento_aplicacao, status } = req.body;
 
     const nome = nomeRaw || nome_participante;
     if (!nome || !telefone) {
@@ -48,8 +48,8 @@ router.post('/', async (req, res) => {
     }
 
     const query = `
-      INSERT INTO fichas (nome_participante, nome_cracha, empresa, cpf_cnpj, telefone, email, origem, status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      INSERT INTO fichas (nome_participante, nome_cracha, empresa, cpf_cnpj, telefone, email, origem, momento_aplicacao, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `;
     const valores = [
@@ -60,6 +60,7 @@ router.post('/', async (req, res) => {
       telefone.trim(),
       email ? email.trim().toLowerCase() : null,
       origem || 'ORGANICO',
+      momento_aplicacao ? String(momento_aplicacao).trim() : null,
       status || 'AGUARDANDO_TRIAGEM'
     ];
 

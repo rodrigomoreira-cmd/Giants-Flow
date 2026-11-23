@@ -6,6 +6,13 @@ import { alertaSistema } from '../context/ModalContext';
 
 const DRAFT_STORAGE_KEY = 'rascunho_nova_ficha_v1';
 
+const MOMENTOS_APLICACAO = [
+  { id: 'Coffee', label: '☕ Coffee', bg: '#fef3c7', color: '#92400e', border: '#fcd34d' },
+  { id: 'Almoço', label: '🍽️ Almoço', bg: '#dcfce7', color: '#166534', border: '#86efac' },
+  { id: 'Janta', label: '🌙 Janta', bg: '#e0e7ff', color: '#3730a3', border: '#a5b4fc' },
+  { id: 'Outro Momento', label: '✨ Outro Momento', bg: '#f1f5f9', color: '#334155', border: '#cbd5e1' },
+];
+
 function formatarTelefone(valor) {
   const digits = String(valor || '').replace(/\D/g, '').slice(0, 11);
   if (digits.length <= 2) return digits;
@@ -49,6 +56,7 @@ export default function Fichas() {
   // Filtros da tabela inferior
   const [buscaLista, setBuscaLista] = useState('');
   const [filtroEtapa, setFiltroEtapa] = useState('TODAS');
+  const [filtroMomento, setFiltroMomento] = useState('TODOS');
 
   const [form, setForm] = useState(() => {
     try {
@@ -63,6 +71,8 @@ export default function Fichas() {
       telefone: '',
       email: '',
       origem: 'ORGANICO',
+      momento_aplicacao: 'Coffee',
+      momento_outro_detalhe: '',
       captador_id: obterUsuarioLogadoId()
     };
   });
@@ -180,6 +190,8 @@ export default function Fichas() {
       telefone: '',
       email: '',
       origem: 'ORGANICO',
+      momento_aplicacao: prev.momento_aplicacao || 'Coffee',
+      momento_outro_detalhe: '',
       captador_id: prev.captador_id
     }));
   };
@@ -194,8 +206,14 @@ export default function Fichas() {
     try {
       setSalvando(true);
       setSucesso('');
+      const momentoFinal =
+        form.momento_aplicacao === 'Outro Momento' && form.momento_outro_detalhe?.trim()
+          ? `Outro: ${form.momento_outro_detalhe.trim()}`
+          : form.momento_aplicacao || null;
+
       const criada = await api.post('/clientes', {
         ...form,
+        momento_aplicacao: momentoFinal,
         turma_id: turmaSelecionada,
         captador_id: form.captador_id ? Number(form.captador_id) : null
       });
@@ -238,6 +256,14 @@ export default function Fichas() {
       if (filtroEtapa === 'MESA' && etapa !== 'EM_ATENDIMENTO') return false;
       if (filtroEtapa === 'ALMOCO' && !(f.almoco_pago || f.cortesia_almoco || f.membro_giants)) return false;
       if (filtroEtapa === 'FECHADO' && etapa !== 'FECHADO' && etapa !== 'CONCLUIDO') return false;
+      if (filtroMomento !== 'TODOS') {
+        const mom = String(f.momento_aplicacao || '').toLowerCase();
+        if (filtroMomento === 'OUTRO') {
+          if (!mom.startsWith('outro')) return false;
+        } else if (!mom.includes(filtroMomento.toLowerCase())) {
+          return false;
+        }
+      }
 
       if (!termo) return true;
       const alvo = [
@@ -255,7 +281,7 @@ export default function Fichas() {
         .toLowerCase();
       return alvo.includes(termo);
     });
-  }, [fichas, buscaLista, filtroEtapa]);
+  }, [fichas, buscaLista, filtroEtapa, filtroMomento]);
 
   return (
     <div style={{ padding: '2rem', width: '100%', boxSizing: 'border-box' }}>
@@ -405,6 +431,48 @@ export default function Fichas() {
             </div>
           </div>
 
+          {/* Seletor Rápido: Momento da Aplicação */}
+          <div style={{ marginBottom: '1.25rem', padding: '1rem', borderRadius: '10px', background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '700', color: '#1e293b', marginBottom: '0.6rem' }}>
+              Momento do Preenchimento da Ficha *
+            </label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center' }}>
+              {MOMENTOS_APLICACAO.map((m) => {
+                const ativo = (form.momento_aplicacao || 'Coffee') === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setForm({ ...form, momento_aplicacao: m.id })}
+                    style={{
+                      padding: '0.55rem 1rem',
+                      borderRadius: '8px',
+                      border: ativo ? '2px solid #ff5722' : `1px solid ${m.border}`,
+                      background: ativo ? '#fff7ed' : '#fff',
+                      color: ativo ? '#ea580c' : m.color,
+                      fontWeight: '700',
+                      fontSize: '0.86rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    {m.label}
+                  </button>
+                );
+              })}
+
+              {form.momento_aplicacao === 'Outro Momento' && (
+                <input
+                  type="text"
+                  value={form.momento_outro_detalhe || ''}
+                  onChange={(e) => setForm({ ...form, momento_outro_detalhe: e.target.value })}
+                  placeholder="Especifique o momento (ex: Intervalo Manhã, Networking, Palco...)"
+                  style={{ flex: '1 1 260px', padding: '0.55rem 0.85rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '0.86rem' }}
+                />
+              )}
+            </div>
+          </div>
+
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button
               type="submit"
@@ -466,6 +534,36 @@ export default function Fichas() {
         ))}
       </div>
 
+      {/* Filtro Secundário por Momento da Aplicação */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem' }}>
+        <span style={{ fontSize: '0.78rem', fontWeight: '700', color: '#64748b', marginRight: '0.25rem' }}>Momento:</span>
+        {[
+          { id: 'TODOS', label: 'Todos os Momentos' },
+          { id: 'Coffee', label: '☕ Coffee' },
+          { id: 'Almoço', label: '🍽️ Almoço' },
+          { id: 'Janta', label: '🌙 Janta' },
+          { id: 'OUTRO', label: '✨ Outro Momento' }
+        ].map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => setFiltroMomento(m.id)}
+            style={{
+              padding: '0.35rem 0.7rem',
+              borderRadius: '999px',
+              border: filtroMomento === m.id ? '1px solid #0f172a' : '1px solid #e2e8f0',
+              background: filtroMomento === m.id ? '#0f172a' : '#fff',
+              color: filtroMomento === m.id ? '#fff' : '#475569',
+              fontWeight: '600',
+              fontSize: '0.78rem',
+              cursor: 'pointer'
+            }}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+
       {/* Tabela de Fichas */}
       <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
@@ -475,6 +573,7 @@ export default function Fichas() {
               <th style={{ padding: '0.9rem 1rem', color: '#475569', fontSize: '0.82rem' }}>Nome Completo</th>
               <th style={{ padding: '0.9rem 1rem', color: '#475569', fontSize: '0.82rem' }}>Empresa / CNPJ</th>
               <th style={{ padding: '0.9rem 1rem', color: '#475569', fontSize: '0.82rem' }}>WhatsApp</th>
+              <th style={{ padding: '0.9rem 1rem', color: '#475569', fontSize: '0.82rem' }}>Momento</th>
               <th style={{ padding: '0.9rem 1rem', color: '#475569', fontSize: '0.82rem' }}>Almoço</th>
               <th style={{ padding: '0.9rem 1rem', color: '#475569', fontSize: '0.82rem' }}>Etapa Atual</th>
               <th style={{ padding: '0.9rem 1rem', color: '#475569', fontSize: '0.82rem', textAlign: 'right' }}>PDF</th>
@@ -482,9 +581,9 @@ export default function Fichas() {
           </thead>
           <tbody>
             {carregando ? (
-              <tr><td colSpan="7" style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>Carregando fichas...</td></tr>
+              <tr><td colSpan="8" style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>Carregando fichas...</td></tr>
             ) : fichasFiltradas.length === 0 ? (
-              <tr><td colSpan="7" style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>Nenhuma ficha encontrada para este filtro.</td></tr>
+              <tr><td colSpan="8" style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>Nenhuma ficha encontrada para este filtro.</td></tr>
             ) : (
               fichasFiltradas.map((f) => {
                 const fichaId = f.id || f.cliente_id;
@@ -505,6 +604,34 @@ export default function Fichas() {
                       {(f.cnpj || f.cpf_cnpj) && <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{f.cnpj || f.cpf_cnpj}</div>}
                     </td>
                     <td style={{ padding: '0.9rem 1rem', color: '#475569' }}>{f.telefone || f.whatsapp || '-'}</td>
+                    <td style={{ padding: '0.9rem 1rem' }}>
+                      {f.momento_aplicacao ? (
+                        <span style={{
+                          padding: '0.22rem 0.55rem',
+                          borderRadius: '6px',
+                          fontSize: '0.74rem',
+                          fontWeight: '700',
+                          background: String(f.momento_aplicacao).toLowerCase().includes('coffee')
+                            ? '#fef3c7'
+                            : String(f.momento_aplicacao).toLowerCase().includes('almo')
+                              ? '#dcfce7'
+                              : String(f.momento_aplicacao).toLowerCase().includes('janta')
+                                ? '#e0e7ff'
+                                : '#f1f5f9',
+                          color: String(f.momento_aplicacao).toLowerCase().includes('coffee')
+                            ? '#92400e'
+                            : String(f.momento_aplicacao).toLowerCase().includes('almo')
+                              ? '#166534'
+                              : String(f.momento_aplicacao).toLowerCase().includes('janta')
+                                ? '#3730a3'
+                                : '#334155'
+                        }}>
+                          {f.momento_aplicacao}
+                        </span>
+                      ) : (
+                        <span style={{ color: '#94a3b8', fontSize: '0.78rem' }}>-</span>
+                      )}
+                    </td>
                     <td style={{ padding: '0.9rem 1rem' }}>
                       <span style={{
                         padding: '0.2rem 0.5rem',

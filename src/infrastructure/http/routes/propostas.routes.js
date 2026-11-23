@@ -229,6 +229,7 @@ router.post('/propostas', async (req, res) => {
           .map((item) => ({
             forma: String(item.forma || 'Pix').trim(),
             valor: Number(item.valor || 0),
+            parcelasCartao: Number(item.parcelasCartao || 1),
             identificador: String(item.identificador || '').trim(),
             comprovante: sanitizarComp(item.comprovante)
           }))

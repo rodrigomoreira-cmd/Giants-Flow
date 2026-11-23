@@ -1,7 +1,7 @@
 export default function Equipe() {
   return (
     <div style={{ padding: '2rem' }}>
-      <h1 style={{ fontSize: '1.75rem', fontWeight: '800', color: '#0f172a', marginBottom: '0.5rem' }}>Equipa Operaçãonal</h1>
+      <h1 style={{ fontSize: '1.75rem', fontWeight: '800', color: '#0f172a', marginBottom: '0.5rem' }}>Equipe Operacional</h1>
       <p style={{ color: '#64748b', marginBottom: '2rem' }}>Gestão de operadores, triadores e especialistas de mesa.</p>
       
       <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>

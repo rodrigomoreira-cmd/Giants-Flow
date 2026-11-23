@@ -225,7 +225,7 @@ export default function ProposalContractPdf() {
             <tbody>
               {pagamentosEntrada.map((pg, idx) => (
                 <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '0.45rem 0.6rem', fontWeight: '700' }}>{pg.forma || 'Pix'}</td>
+                  <td style={{ padding: '0.45rem 0.6rem', fontWeight: '700' }}>{pg.forma || 'Pix'}{pg.forma === 'Cartão de Crédito' && Number(pg.parcelasCartao || 1) > 1 ? ` (${pg.parcelasCartao}x na maquininha)` : ''}</td>
                   <td style={{ padding: '0.45rem 0.6rem', fontFamily: 'monospace' }}>{pg.identificador || '-'}</td>
                   <td style={{ padding: '0.45rem 0.6rem', textAlign: 'right', fontWeight: '700' }}>{fmtBRL(pg.valor)}</td>
                 </tr>

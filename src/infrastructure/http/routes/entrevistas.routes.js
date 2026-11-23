@@ -265,7 +265,7 @@ router.post('/entrevistas/:id/reabrir', async (req, res) => {
     await client.query("SET LOCAL app.user_role = 'SYSTEM'");
 
     const { rows: baseRows } = await client.query(
-      `SELECT id, turma_id, empresa, etapa_funil, membro_giants, origem,
+      `SELECT id, turma_id, empresa, etapa_funil, status_aprovacao, membro_giants, origem,
               COALESCE(NULLIF(TRIM(cnpj), ''), NULLIF(TRIM(cpf_cnpj), '')) AS doc_cnpj
        FROM fichas WHERE id = $1 FOR UPDATE`,
       [id]
@@ -277,9 +277,13 @@ router.post('/entrevistas/:id/reabrir', async (req, res) => {
     }
 
     const base = baseRows[0];
-    const ehDecisaoFutura = String(base.etapa_funil || '').trim().toLowerCase() === 'decisao_futura';
+    const etapaAtualReabrir = String(base.etapa_funil || '').trim().toLowerCase();
+    const statusAprovReabrir = String(base.status_aprovacao || '').trim().toLowerCase();
+    const podeRetomarOperador =
+      ['decisao_futura', 'follow_up', 'ajuste_solicitado'].includes(etapaAtualReabrir) ||
+      statusAprovReabrir === 'ajuste_solicitado';
 
-    if (!isAdminUser && !ehDecisaoFutura) {
+    if (!isAdminUser && !podeRetomarOperador) {
       await client.query('ROLLBACK');
       return res.status(403).json({
         error: 'Acesso negado: apenas usuários com perfil Administrador podem reabrir uma ficha já enviada ao Financeiro ou recusada.'

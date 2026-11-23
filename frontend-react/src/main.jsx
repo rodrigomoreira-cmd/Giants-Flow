@@ -2,7 +2,8 @@
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import './index.css';
-import './responsive.css'; // <-- ESTA LINHA APLICA OS ESTILOS GLOBAIS DA SIDEBAR
+import './responsive.css';
+import './polish.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

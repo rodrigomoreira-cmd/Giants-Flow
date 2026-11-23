@@ -3,11 +3,35 @@ import { useNavigate } from 'react-router-dom';
 import { useTurma } from '../context/TurmaContext';
 import { useMenu } from '../context/MenuContext';
 import NotificationBell from './NotificationBell';
+import CommandPalette from './CommandPalette';
 
 export default function Header() {
   const navigate = useNavigate();
   const { toggleMenu } = useMenu();
   const { turmasVisiveis, turmaSelecionada, turmaAtual, turmaEncerrada, isAdmin, mudarTurma, carregandoTurmas } = useTurma();
+  const [esconderModoTv, setEsconderModoTv] = React.useState(
+    () => new URLSearchParams(window.location.search).get('tv') === '1'
+  );
+  const [paletaAberta, setPaletaAberta] = React.useState(false);
+
+  React.useEffect(() => {
+    const onKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletaAberta((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  React.useEffect(() => {
+    const onTvMode = (e) => setEsconderModoTv(Boolean(e.detail));
+    window.addEventListener('warroom-tv-mode', onTvMode);
+    return () => window.removeEventListener('warroom-tv-mode', onTvMode);
+  }, []);
+
+  if (esconderModoTv) return null;
 
   return (
     <header
@@ -106,6 +130,31 @@ export default function Header() {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <button
+          type="button"
+          onClick={() => setPaletaAberta(true)}
+          title="Busca global rápida (Ctrl + K)"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            background: '#f8fafc',
+            border: '1px solid #cbd5e1',
+            borderRadius: '8px',
+            padding: '0.38rem 0.75rem',
+            color: '#475569',
+            fontSize: '0.78rem',
+            fontWeight: '700',
+            cursor: 'pointer'
+          }}
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: '1.05rem', color: '#ff5722' }}>search</span>
+          <span>Buscar...</span>
+          <kbd style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '5px', padding: '0.05rem 0.38rem', fontSize: '0.68rem', fontWeight: '800', color: '#64748b' }}>
+            Ctrl+K
+          </kbd>
+        </button>
+
         <NotificationBell />
         {turmaAtual?.codigo && (
           <span
@@ -135,6 +184,7 @@ export default function Header() {
           Ambiente Local (PostgreSQL)
         </span>
       </div>
+      <CommandPalette aberto={paletaAberta} aoFechar={() => setPaletaAberta(false)} />
     </header>
   );
 }

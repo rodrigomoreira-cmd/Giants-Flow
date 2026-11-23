@@ -40,6 +40,8 @@ export default function InterviewEdit() {
   const [sociosLista, setSociosLista] = useState([]);
   const [novoSocioNome, setNovoSocioNome] = useState('');
   const [novoSocioTelefone, setNovoSocioTelefone] = useState('');
+  const [usarEntradaFutura, setUsarEntradaFutura] = useState(false);
+  const [usarPermuta, setUsarPermuta] = useState(false);
 
   const [ficha, setFicha] = useState({
     aplicacao_id: id,
@@ -63,7 +65,7 @@ export default function InterviewEdit() {
     valor_permuta: '',
     identificador_pagamento: '',
     parecer_financeiro: '',
-    pagamentosEntrada: [{ forma: 'Pix', valor: 10000, identificador: '' }],
+    pagamentosEntrada: [{ forma: 'Pix', valor: 10000, identificador: '', parcelasCartao: 1, comprovante: null }],
     comprovanteEntrada: null,
     cashback: 0,
     almoco_pago: false,
@@ -287,11 +289,39 @@ export default function InterviewEdit() {
 
   // Cálculos comerciais dinâmicos conforme Linha + Subproduto + Sócios Marcados
 
+  const formatarDataBR = (valor) => {
+    const s = String(valor || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const [y, m, d] = s.split('-');
+      return `${d}/${m}/${y}`;
+    }
+    return s;
+  };
+
+  const paraInputDate = (valor) => {
+    const s = String(valor || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    return '';
+  };
+
+  const formatarLinhaPagamentoLabel = (pg) => {
+    const parcStr =
+      pg.forma === 'Cartão de Crédito' && Number(pg.parcelasCartao || 1) > 1
+        ? ` (${pg.parcelasCartao}x maq.)`
+        : '';
+    return `${pg.forma || 'Pix'}${parcStr}`;
+  };
+
   const sincronizarPagamentosEntrada = (novasLinhas) => {
-    const listaSegura = novasLinhas.length > 0 ? novasLinhas : [{ forma: 'Pix', valor: 0, identificador: '' }];
+    const listaSegura =
+      novasLinhas.length > 0
+        ? novasLinhas
+        : [{ forma: 'Pix', valor: 0, identificador: '', parcelasCartao: 1, comprovante: null }];
     const soma = listaSegura.reduce((acc, item) => acc + Math.max(0, Number(item.valor) || 0), 0);
     const idsConcat = listaSegura
-      .map((item) => (item.identificador ? `${item.forma}: ${item.identificador}` : ''))
+      .map((item) => (item.identificador ? `${formatarLinhaPagamentoLabel(item)}: ${item.identificador}` : ''))
       .filter(Boolean)
       .join(' | ');
     setFicha((prev) => ({
@@ -299,8 +329,37 @@ export default function InterviewEdit() {
       pagamentosEntrada: listaSegura,
       valor_entrada: soma,
       forma_entrada: listaSegura[0]?.forma || prev.forma_entrada,
-      identificador_pagamento: idsConcat || prev.identificador_pagamento
+      identificador_pagamento: idsConcat
     }));
+  };
+
+  const aplicarValorEntradaSincronizado = (novoTotal, camposExtras = {}) => {
+    const valorNum = Math.max(0, Number(novoTotal) || 0);
+    setFicha((prev) => {
+      const atuais =
+        Array.isArray(prev.pagamentosEntrada) && prev.pagamentosEntrada.length > 0
+          ? [...prev.pagamentosEntrada]
+          : [{ forma: prev.forma_entrada || 'Pix', valor: valorNum, identificador: prev.identificador_pagamento || '', parcelasCartao: 1, comprovante: null }];
+
+      let novasLinhas;
+      if (atuais.length === 1) {
+        novasLinhas = [{ ...atuais[0], valor: valorNum }];
+      } else {
+        const somaDemais = atuais.slice(1).reduce((acc, item) => acc + Math.max(0, Number(item.valor) || 0), 0);
+        if (valorNum > somaDemais) {
+          novasLinhas = [{ ...atuais[0], valor: Math.round((valorNum - somaDemais) * 100) / 100 }, ...atuais.slice(1)];
+        } else {
+          novasLinhas = [{ ...atuais[0], valor: valorNum }];
+        }
+      }
+
+      return {
+        ...prev,
+        ...camposExtras,
+        valor_entrada: valorNum,
+        pagamentosEntrada: novasLinhas
+      };
+    });
   };
 
   const anexarComprovanteNaLinha = (indiceLinha, objComp) => {
@@ -407,6 +466,7 @@ export default function InterviewEdit() {
 
     const motivosAprovacao = [];
     if (desconto > 0) motivosAprovacao.push(`Desconto concedido: R$ ${desconto.toLocaleString('pt-BR')}`);
+    if (permuta > 0) motivosAprovacao.push(`Abatimento em Permuta: R$ ${permuta.toLocaleString('pt-BR')}`);
     if (valorParcela > 0 && entrada + 0.05 < valorParcela) {
       motivosAprovacao.push(
         `Entrada de R$ ${entrada.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} abaixo do mínimo de 1 parcela (R$ ${valorParcela.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`
@@ -438,12 +498,25 @@ export default function InterviewEdit() {
   const sociosQueEntram = sociosLista.filter((s) => s.entraNoContrato);
   const sociosQueNaoEntram = sociosLista.filter((s) => !s.entraNoContrato);
 
+  useEffect(() => {
+    if (Number(ficha.valor_entrada_complementar || 0) > 0) setUsarEntradaFutura(true);
+    if (Number(ficha.valor_permuta || 0) > 0) setUsarPermuta(true);
+  }, [ficha.valor_entrada_complementar, ficha.valor_permuta]);
+
   const camposFaltantes = [];
   if (!ficha.razao_social?.trim()) camposFaltantes.push('Razão Social / Empresa');
   if (!ficha.nome_empresario?.trim()) camposFaltantes.push('Nome do empresário titular');
   if (!ficha.forma_entrada) camposFaltantes.push('Forma de entrada');
   if (ficha.valor_entrada === undefined || ficha.valor_entrada === null) camposFaltantes.push('Valor de entrada');
   if (!ficha.resultado_comercial) camposFaltantes.push('Resultado comercial');
+  if (['Fechou GIANTS', 'Fechou PAC', 'Downsell PAC', 'Fechou AE'].includes(ficha.resultado_comercial)) {
+    if (Number(ficha.valor_entrada_complementar || 0) > 0 && !String(ficha.data_entrada_complementar || '').trim()) {
+      camposFaltantes.push('Data da entrada futura');
+    }
+    if (Number(ficha.valor_permuta || 0) > 0 && !String(ficha.resultado_obs || '').trim()) {
+      camposFaltantes.push('Descrição da permuta nas observações');
+    }
+  }
 
   const podeSubmeter = camposFaltantes.length === 0;
 
@@ -525,7 +598,7 @@ export default function InterviewEdit() {
           valor_entrada: calc.entrada,
           forma_entrada: ficha.forma_entrada,
           valor_entrada_complementar: calc.entradaComplementar,
-          data_entrada_complementar: ficha.data_entrada_complementar || '',
+          data_entrada_complementar: formatarDataBR(ficha.data_entrada_complementar) || '',
           valor_permuta: calc.permuta,
           identificador_pagamento: ficha.identificador_pagamento || '',
           pagamentosEntrada: ficha.pagamentosEntrada || [],
@@ -671,34 +744,33 @@ export default function InterviewEdit() {
       const nomeSub = primeiroSub ? primeiroSub.nome : fallbackSub[op.cat] || ficha.produto_nome;
       const totalPlano = primeiroSub ? Number(primeiroSub.parcelas_padrao || 12) : 12;
 
-      setFicha((prev) => {
-        if (op.cat === 'PAC') {
-          const basePAC = obterValorBaseProduto('PAC', nomeSub);
-          const liquidoPAC = Math.max(0, basePAC - Math.max(0, Number(prev.desconto) || 0));
-          const entrada1Parcela = calcularParcelaEntradaPAC(liquidoPAC, totalPlano);
-          return {
-            ...prev,
-            resultado_comercial: op.valor,
-            categoria_produto: 'PAC',
-            produto_nome: nomeSub,
-            cashback: 0,
-            valor_entrada: entrada1Parcela,
-            parcelas: totalPlano > 1 ? totalPlano - 1 : 1
-          };
-        }
-
-        const novoCashback =
-          Number(prev.cashback_almoco_cnpj || 0) +
-          (op.cat === 'GIANTS' ? Number(prev.cashback_upgrade_cnpj || 0) : 0);
-        return {
-          ...prev,
+      if (op.cat === 'PAC') {
+        const basePAC = obterValorBaseProduto('PAC', nomeSub);
+        const liquidoPAC = Math.max(0, basePAC - Math.max(0, Number(ficha.desconto) || 0));
+        const entrada1Parcela = calcularParcelaEntradaPAC(liquidoPAC, totalPlano);
+        aplicarValorEntradaSincronizado(entrada1Parcela, {
           resultado_comercial: op.valor,
-          categoria_produto: op.cat,
+          categoria_produto: 'PAC',
           produto_nome: nomeSub,
-          parcelas: totalPlano,
-          valor_entrada: calcularParcelaEntradaPAC(Math.max(0, obterValorBaseProduto(op.cat, nomeSub) - novoCashback - Math.max(0, Number(prev.desconto) || 0)), totalPlano > 1 ? totalPlano + 1 : 1),
-          cashback: novoCashback
-        };
+          cashback: 0,
+          parcelas: totalPlano > 1 ? totalPlano - 1 : 1
+        });
+        return;
+      }
+
+      const novoCashback =
+        Number(ficha.cashback_almoco_cnpj || 0) +
+        (op.cat === 'GIANTS' ? Number(ficha.cashback_upgrade_cnpj || 0) : 0);
+      const entradaSugerida = calcularParcelaEntradaPAC(
+        Math.max(0, obterValorBaseProduto(op.cat, nomeSub) - novoCashback - Math.max(0, Number(ficha.desconto) || 0)),
+        totalPlano > 1 ? totalPlano + 1 : 1
+      );
+      aplicarValorEntradaSincronizado(entradaSugerida, {
+        resultado_comercial: op.valor,
+        categoria_produto: op.cat,
+        produto_nome: nomeSub,
+        parcelas: totalPlano,
+        cashback: novoCashback
       });
     } else {
       atualizarCampo('resultado_comercial', op.valor);
@@ -1167,12 +1239,11 @@ export default function InterviewEdit() {
                               type="button"
                               disabled={isFechada}
                               onClick={() =>
-                                !isFechada && setFicha((prev) => ({
-                                  ...prev,
+                                !isFechada &&
+                                aplicarValorEntradaSincronizado(entParcela, {
                                   cashback: 0,
-                                  valor_entrada: entParcela,
                                   parcelas: totalPlano > 1 ? totalPlano - 1 : 1
-                                }))
+                                })
                               }
                               style={{
                                 padding: '0.28rem 0.65rem',
@@ -1202,7 +1273,7 @@ export default function InterviewEdit() {
                             <button
                               type="button"
                               disabled={isFechada}
-                              onClick={() => !isFechada && atualizarCampo('valor_entrada', ent1Parc)}
+                              onClick={() => !isFechada && aplicarValorEntradaSincronizado(ent1Parc)}
                               style={{
                                 padding: '0.25rem 0.6rem',
                                 borderRadius: '6px',
@@ -1223,7 +1294,7 @@ export default function InterviewEdit() {
                               key={vEnt}
                               type="button"
                               disabled={isFechada}
-                              onClick={() => !isFechada && atualizarCampo('valor_entrada', vEnt)}
+                              onClick={() => !isFechada && aplicarValorEntradaSincronizado(vEnt)}
                               style={{
                                 padding: '0.25rem 0.55rem',
                                 borderRadius: '6px',
@@ -1262,7 +1333,8 @@ export default function InterviewEdit() {
                       )}
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '0.95rem' }}>
+                    {/* LINHA 1: PRODUTO E PLANO COM LARGURA COMPLETA */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0.95rem', marginBottom: '0.95rem' }}>
                       <div>
                         <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>Linha de Produto *</label>
                         <select
@@ -1281,33 +1353,32 @@ export default function InterviewEdit() {
                             const nomeSub = primeiroSub ? primeiroSub.nome : fallbackSub[novaCat];
                             const totalPlano = primeiroSub ? Number(primeiroSub.parcelas_padrao || 12) : 12;
 
-                            setFicha((prev) => {
-                              if (novaCat === 'PAC') {
-                                const basePAC = obterValorBaseProduto('PAC', nomeSub);
-                                const liquidoPAC = Math.max(0, basePAC - Math.max(0, Number(prev.desconto) || 0));
-                                return {
-                                  ...prev,
-                                  categoria_produto: 'PAC',
-                                  produto_nome: nomeSub,
-                                  cashback: 0,
-                                  valor_entrada: calcularParcelaEntradaPAC(liquidoPAC, totalPlano),
-                                  parcelas: totalPlano > 1 ? totalPlano - 1 : 1,
-                                  resultado_comercial: mapaResultado.PAC
-                                };
-                              }
+                            if (novaCat === 'PAC') {
+                              const basePAC = obterValorBaseProduto('PAC', nomeSub);
+                              const liquidoPAC = Math.max(0, basePAC - Math.max(0, Number(ficha.desconto) || 0));
+                              aplicarValorEntradaSincronizado(calcularParcelaEntradaPAC(liquidoPAC, totalPlano), {
+                                categoria_produto: 'PAC',
+                                produto_nome: nomeSub,
+                                cashback: 0,
+                                parcelas: totalPlano > 1 ? totalPlano - 1 : 1,
+                                resultado_comercial: mapaResultado.PAC
+                              });
+                              return;
+                            }
 
-                              const novoCashback =
-                                Number(prev.cashback_almoco_cnpj || 0) +
-                                (novaCat === 'GIANTS' ? Number(prev.cashback_upgrade_cnpj || 0) : 0);
-                              return {
-                                ...prev,
-                                categoria_produto: novaCat,
-                                  produto_nome: nomeSub,
-                                  parcelas: totalPlano,
-                                  valor_entrada: calcularParcelaEntradaPAC(Math.max(0, obterValorBaseProduto(novaCat, nomeSub) - novoCashback - Math.max(0, Number(prev.desconto) || 0)), totalPlano > 1 ? totalPlano + 1 : 1),
-                                cashback: novoCashback,
-                                resultado_comercial: mapaResultado[novaCat] || prev.resultado_comercial
-                              };
+                            const novoCashback =
+                              Number(ficha.cashback_almoco_cnpj || 0) +
+                              (novaCat === 'GIANTS' ? Number(ficha.cashback_upgrade_cnpj || 0) : 0);
+                            const entPadrao = calcularParcelaEntradaPAC(
+                              Math.max(0, obterValorBaseProduto(novaCat, nomeSub) - novoCashback - Math.max(0, Number(ficha.desconto) || 0)),
+                              totalPlano > 1 ? totalPlano + 1 : 1
+                            );
+                            aplicarValorEntradaSincronizado(entPadrao, {
+                              categoria_produto: novaCat,
+                              produto_nome: nomeSub,
+                              parcelas: totalPlano,
+                              cashback: novoCashback,
+                              resultado_comercial: mapaResultado[novaCat] || ficha.resultado_comercial
                             });
                           }}
                           style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: '700', boxSizing: 'border-box' }}
@@ -1327,24 +1398,22 @@ export default function InterviewEdit() {
                             const objSub = catalogoProdutos.find((p) => p.nome === novoSub);
                             const totalPlano = objSub ? Number(objSub.parcelas_padrao || 12) : 12;
 
-                            setFicha((prev) => {
-                              if (String(prev.categoria_produto || '').toUpperCase() === 'PAC') {
-                                const basePAC = obterValorBaseProduto('PAC', novoSub);
-                                const liquidoPAC = Math.max(0, basePAC - Math.max(0, Number(prev.desconto) || 0));
-                                return {
-                                  ...prev,
-                                  produto_nome: novoSub,
-                                  cashback: 0,
-                                  valor_entrada: calcularParcelaEntradaPAC(liquidoPAC, totalPlano),
-                                  parcelas: totalPlano > 1 ? totalPlano - 1 : 1
-                                };
-                              }
-                              return {
-                                ...prev,
+                            if (String(ficha.categoria_produto || '').toUpperCase() === 'PAC') {
+                              const basePAC = obterValorBaseProduto('PAC', novoSub);
+                              const liquidoPAC = Math.max(0, basePAC - Math.max(0, Number(ficha.desconto) || 0));
+                              aplicarValorEntradaSincronizado(calcularParcelaEntradaPAC(liquidoPAC, totalPlano), {
                                 produto_nome: novoSub,
-                                parcelas: objSub ? Number(objSub.parcelas_padrao || prev.parcelas) : prev.parcelas
-                              };
-                            });
+                                cashback: 0,
+                                parcelas: totalPlano > 1 ? totalPlano - 1 : 1
+                              });
+                              return;
+                            }
+
+                            setFicha((prev) => ({
+                              ...prev,
+                              produto_nome: novoSub,
+                              parcelas: objSub ? Number(objSub.parcelas_padrao || prev.parcelas) : prev.parcelas
+                            }));
                           }}
                           style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontWeight: '600', boxSizing: 'border-box' }}
                         >
@@ -1360,250 +1429,187 @@ export default function InterviewEdit() {
                           )}
                         </select>
                       </div>
+                    </div>
 
-                      <div
-                        onPaste={(e) => {
-                          const item = Array.from(e.clipboardData?.items || []).find((it) => it.type.startsWith('image/'));
-                          if (item) {
-                            e.preventDefault();
-                            processarArquivoComprovante(item.getAsFile());
-                          }
-                        }}
-                        style={{ gridColumn: '1 / -1', background: '#f8fafc', border: '1.5px solid #cbd5e1', borderRadius: '10px', padding: '0.9rem' }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                          <div>
-                            <span style={{ fontSize: '0.82rem', fontWeight: '800', color: '#0f172a' }}>
-                              Composição da Entrada 1 (Multi-Meio) — Total: {fmtBRL(ficha.valor_entrada)}
-                            </span>
-                            <span style={{ display: 'block', fontSize: '0.72rem', color: '#64748b' }}>
-                              Divida entre Pix, Cartões ou Link se necessário e anexe (ou cole com Ctrl+V) o comprovante
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              sincronizarPagamentosEntrada([
-                                ...(ficha.pagamentosEntrada || [{ forma: ficha.forma_entrada, valor: ficha.valor_entrada, identificador: '' }]),
-                                { forma: 'Cartão de Crédito', valor: 0, identificador: '' }
-                              ])
-                            }
-                            style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', borderRadius: '7px', padding: '0.35rem 0.7rem', fontSize: '0.75rem', fontWeight: '800', cursor: 'pointer' }}
-                          >
-                            + Adicionar Meio de Pagamento
-                          </button>
+                    {/* BLOCO PAGAMENTO DA ENTRADA (HOJE NA MESA) */}
+                    <div
+                      onPaste={(e) => {
+                        const item = Array.from(e.clipboardData?.items || []).find((it) => it.type.startsWith('image/'));
+                        if (item) {
+                          e.preventDefault();
+                          processarArquivoComprovante(item.getAsFile());
+                        }
+                      }}
+                      style={{ background: '#f8fafc', border: '1.5px solid #cbd5e1', borderRadius: '10px', padding: '0.9rem', marginBottom: '0.95rem' }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <div>
+                          <span style={{ fontSize: '0.82rem', fontWeight: '800', color: '#0f172a' }}>
+                            Pagamento da Entrada (Hoje na Mesa) — Total: {fmtBRL(ficha.valor_entrada)}
+                          </span>
+                          <span style={{ display: 'block', fontSize: '0.72rem', color: '#64748b' }}>
+                            Valor pago agora na mesa. Se o cliente dividir entre Pix e Cartão hoje, adicione outro meio e anexe o comprovante de cada um.
+                          </span>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            sincronizarPagamentosEntrada([
+                              ...(ficha.pagamentosEntrada || [{ forma: ficha.forma_entrada, valor: ficha.valor_entrada, identificador: '', parcelasCartao: 1, comprovante: null }]),
+                              { forma: 'Cartão de Crédito', valor: 0, identificador: '', parcelasCartao: 1, comprovante: null }
+                            ])
+                          }
+                          style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', borderRadius: '7px', padding: '0.35rem 0.7rem', fontSize: '0.75rem', fontWeight: '800', cursor: 'pointer' }}
+                        >
+                          + Dividir em outro meio (hoje)
+                        </button>
+                      </div>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-                          {(ficha.pagamentosEntrada || [{ forma: ficha.forma_entrada, valor: ficha.valor_entrada, identificador: '', comprovante: null }]).map((pg, idxPg) => (
-                            <div
-                              key={idxPg}
-                              onPaste={(e) => {
-                                const item = Array.from(e.clipboardData?.items || []).find((it) => it.type.startsWith('image/'));
-                                if (item) {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  processarArquivoComprovante(item.getAsFile(), idxPg);
-                                }
-                              }}
-                              style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '9px', padding: '0.65rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
-                            >
-                              <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr 1.2fr auto', gap: '0.5rem', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                        {(ficha.pagamentosEntrada || [{ forma: ficha.forma_entrada, valor: ficha.valor_entrada, identificador: '', parcelasCartao: 1, comprovante: null }]).map((pg, idxPg) => (
+                          <div
+                            key={idxPg}
+                            onPaste={(e) => {
+                              const item = Array.from(e.clipboardData?.items || []).find((it) => it.type.startsWith('image/'));
+                              if (item) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                processarArquivoComprovante(item.getAsFile(), idxPg);
+                              }
+                            }}
+                            style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '9px', padding: '0.65rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
+                          >
+                            <div style={{ display: 'grid', gridTemplateColumns: pg.forma === 'Cartão de Crédito' ? '1.05fr 0.62fr 0.85fr 1.15fr auto' : '1.15fr 0.9fr 1.25fr auto', gap: '0.5rem', alignItems: 'center' }}>
+                              <select
+                                value={pg.forma}
+                                onChange={(e) => {
+                                  const copia = [...(ficha.pagamentosEntrada || [])];
+                                  copia[idxPg] = { ...copia[idxPg], forma: e.target.value, parcelasCartao: e.target.value === 'Cartão de Crédito' ? (copia[idxPg].parcelasCartao || 1) : 1 };
+                                  sincronizarPagamentosEntrada(copia);
+                                }}
+                                style={{ width: '100%', padding: '0.52rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '0.82rem', fontWeight: '600' }}
+                              >
+                                <option value="Pix">Pix</option>
+                                <option value="Cartão de Crédito">Cartão de Crédito</option>
+                                <option value="Cartão de Débito">Cartão de Débito</option>
+                                <option value="Link de Pagamento">Link de Pagamento</option>
+                                <option value="Cheque">Cheque</option>
+                              </select>
+
+                              {pg.forma === 'Cartão de Crédito' && (
                                 <select
-                                  value={pg.forma}
+                                  title="Parcelas na maquininha"
+                                  value={pg.parcelasCartao || 1}
                                   onChange={(e) => {
                                     const copia = [...(ficha.pagamentosEntrada || [])];
-                                    copia[idxPg] = { ...copia[idxPg], forma: e.target.value };
+                                    copia[idxPg] = { ...copia[idxPg], parcelasCartao: Number(e.target.value) };
                                     sincronizarPagamentosEntrada(copia);
                                   }}
-                                  style={{ width: '100%', padding: '0.52rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '0.82rem', fontWeight: '600' }}
+                                  style={{ width: '100%', padding: '0.52rem 0.4rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#f8fafc', fontSize: '0.8rem', fontWeight: '700' }}
                                 >
-                                  <option value="Pix">Pix</option>
-                                  <option value="Cartão de Crédito">Cartão de Crédito</option>
-                                  <option value="Cartão de Débito">Cartão de Débito</option>
-                                  <option value="Link de Pagamento">Link de Pagamento</option>
-                                  <option value="Cheque">Cheque</option>
+                                  {[1, 2, 3, 4, 5, 6, 10, 12].map((nMaq) => (
+                                    <option key={nMaq} value={nMaq}>{nMaq}x maq.</option>
+                                  ))}
                                 </select>
+                              )}
 
-                                <input
-                                  type="number"
-                                  min="0"
-                                  placeholder="Valor (R$)"
-                                  value={pg.valor}
-                                  onChange={(e) => {
-                                    const copia = [...(ficha.pagamentosEntrada || [])];
-                                    copia[idxPg] = { ...copia[idxPg], valor: Number(e.target.value) };
+                              <input
+                                type="number"
+                                min="0"
+                                placeholder="Valor (R$)"
+                                value={pg.valor}
+                                onChange={(e) => {
+                                  const copia = [...(ficha.pagamentosEntrada || [])];
+                                  copia[idxPg] = { ...copia[idxPg], valor: Number(e.target.value) };
+                                  sincronizarPagamentosEntrada(copia);
+                                }}
+                                style={{ width: '100%', padding: '0.52rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontWeight: '700', fontSize: '0.82rem' }}
+                              />
+
+                              <input
+                                type="text"
+                                placeholder="CV / NSU / ID Pix..."
+                                value={pg.identificador || ''}
+                                onChange={(e) => {
+                                  const copia = [...(ficha.pagamentosEntrada || [])];
+                                  copia[idxPg] = { ...copia[idxPg], identificador: e.target.value };
+                                  sincronizarPagamentosEntrada(copia);
+                                }}
+                                style={{ width: '100%', padding: '0.52rem', borderRadius: '8px', border: '1px solid #bae6fd', background: '#f0f9ff', boxSizing: 'border-box', fontSize: '0.8rem' }}
+                              />
+
+                              {(ficha.pagamentosEntrada || []).length > 1 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const copia = (ficha.pagamentosEntrada || []).filter((_, i) => i !== idxPg);
                                     sincronizarPagamentosEntrada(copia);
                                   }}
-                                  style={{ width: '100%', padding: '0.52rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontWeight: '700', fontSize: '0.82rem' }}
-                                />
+                                  title="Remover esta forma de pagamento"
+                                  style={{ background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', padding: '0.45rem 0.6rem', fontWeight: '800', cursor: 'pointer' }}
+                                >
+                                  ✕
+                                </button>
+                              ) : <span />}
+                            </div>
 
+                            {/* Comprovante individual desta forma de pagamento */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', paddingTop: '0.4rem', borderTop: '1px dashed #e2e8f0' }}>
+                              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0.3rem 0.65rem', fontSize: '0.74rem', fontWeight: '700', color: '#334155', cursor: 'pointer' }}>
+                                <span className="material-symbols-outlined" style={{ fontSize: '0.95rem', color: '#0284c7' }}>attach_file</span>
+                                {pg.comprovante ? `Trocar Comprovante (${pg.forma})` : `Anexar Comprovante — ${pg.forma} (Foto/PDF ou Ctrl+V aqui)`}
                                 <input
-                                  type="text"
-                                  placeholder="CV / NSU / ID Pix..."
-                                  value={pg.identificador || ''}
+                                  type="file"
+                                  accept="image/*,application/pdf"
                                   onChange={(e) => {
-                                    const copia = [...(ficha.pagamentosEntrada || [])];
-                                    copia[idxPg] = { ...copia[idxPg], identificador: e.target.value };
-                                    sincronizarPagamentosEntrada(copia);
+                                    processarArquivoComprovante(e.target.files?.[0], idxPg);
+                                    e.target.value = '';
                                   }}
-                                  style={{ width: '100%', padding: '0.52rem', borderRadius: '8px', border: '1px solid #bae6fd', background: '#f0f9ff', boxSizing: 'border-box', fontSize: '0.8rem' }}
+                                  style={{ display: 'none' }}
                                 />
+                              </label>
 
-                                {(ficha.pagamentosEntrada || []).length > 1 ? (
+                              {pg.comprovante ? (
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', background: '#dcfce7', color: '#166534', border: '1px solid #86efac', borderRadius: '6px', padding: '0.25rem 0.6rem', fontSize: '0.73rem', fontWeight: '800' }}>
+                                  <span>✔ {pg.comprovante.nome}</span>
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      const copia = (ficha.pagamentosEntrada || []).filter((_, i) => i !== idxPg);
-                                      sincronizarPagamentosEntrada(copia);
-                                    }}
-                                    title="Remover esta forma de pagamento"
-                                    style={{ background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', padding: '0.45rem 0.6rem', fontWeight: '800', cursor: 'pointer' }}
+                                    onClick={() => anexarComprovanteNaLinha(idxPg, null)}
+                                    title="Remover comprovante desta linha"
+                                    style={{ background: 'transparent', border: 'none', color: '#b91c1c', fontWeight: '900', cursor: 'pointer' }}
                                   >
                                     ✕
                                   </button>
-                                ) : <span />}
-                              </div>
-
-                              {/* Comprovante individual desta forma de pagamento */}
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', paddingTop: '0.4rem', borderTop: '1px dashed #e2e8f0' }}>
-                                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0.3rem 0.65rem', fontSize: '0.74rem', fontWeight: '700', color: '#334155', cursor: 'pointer' }}>
-                                  <span className="material-symbols-outlined" style={{ fontSize: '0.95rem', color: '#0284c7' }}>attach_file</span>
-                                  {pg.comprovante ? `Trocar Comprovante (${pg.forma})` : `Anexar Comprovante — ${pg.forma} (Foto/PDF ou Ctrl+V aqui)`}
-                                  <input
-                                    type="file"
-                                    accept="image/*,application/pdf"
-                                    onChange={(e) => {
-                                      processarArquivoComprovante(e.target.files?.[0], idxPg);
-                                      e.target.value = '';
-                                    }}
-                                    style={{ display: 'none' }}
-                                  />
-                                </label>
-
-                                {pg.comprovante ? (
-                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', background: '#dcfce7', color: '#166534', border: '1px solid #86efac', borderRadius: '6px', padding: '0.25rem 0.6rem', fontSize: '0.73rem', fontWeight: '800' }}>
-                                    <span>✔ {pg.comprovante.nome}</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => anexarComprovanteNaLinha(idxPg, null)}
-                                      title="Remover comprovante desta linha"
-                                      style={{ background: 'transparent', border: 'none', color: '#b91c1c', fontWeight: '900', cursor: 'pointer' }}
-                                    >
-                                      ✕
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <span style={{ fontSize: '0.71rem', color: '#94a3b8' }}>Clique nesta linha e use Ctrl+V ou anexe o arquivo</span>
-                                )}
-                              </div>
+                                </div>
+                              ) : (
+                                <span style={{ fontSize: '0.71rem', color: '#94a3b8' }}>Clique nesta linha e use Ctrl+V ou anexe o arquivo</span>
+                              )}
                             </div>
-                          ))}
-                        </div>
+                          </div>
+                        ))}
                       </div>
+                    </div>
 
+                    {/* PARCELAMENTO DO SALDO, DESCONTO E CASHBACK */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: '0.95rem', marginBottom: '0.95rem' }}>
                       <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>2ª Entrada / Complementar (R$)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          placeholder="Ex: 30000"
-                          value={ficha.valor_entrada_complementar}
-                          onChange={(e) => atualizarCampo('valor_entrada_complementar', e.target.value === '' ? '' : Number(e.target.value))}
-                          style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-                        />
-                      </div>
-
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>Data da 2ª Entrada</label>
-                        <input
-                          type="text"
-                          placeholder="Ex: 20/11/2026"
-                          value={ficha.data_entrada_complementar}
-                          onChange={(e) => atualizarCampo('data_entrada_complementar', e.target.value)}
-                          style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-                        />
-                      </div>
-
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#7e22ce', marginBottom: '0.3rem' }}>Valor em Permuta (R$)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          placeholder="Ex: 90000"
-                          value={ficha.valor_permuta}
-                          onChange={(e) => atualizarCampo('valor_permuta', e.target.value === '' ? '' : Number(e.target.value))}
-                          style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #d8b4fe', background: '#faf5ff', boxSizing: 'border-box' }}
-                        />
-                      </div>
-
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#0369a1', marginBottom: '0.3rem' }}>Identificador (CV / Link / NSU)</label>
-                        <input
-                          type="text"
-                          placeholder="Ex: CV 849201, ID Pix..."
-                          value={ficha.identificador_pagamento}
-                          onChange={(e) => atualizarCampo('identificador_pagamento', e.target.value)}
-                          style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #bae6fd', background: '#f0f9ff', boxSizing: 'border-box' }}
-                        />
-                      </div>
-
-                      {ficha.categoria_produto !== 'PAC' && (
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#047857', marginBottom: '0.3rem' }}>Cashback Abatido (R$)</label>
-                          <input
-                            type="number"
-                            value={ficha.cashback}
-                            onChange={(e) => atualizarCampo('cashback', Number(e.target.value))}
-                            style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #86efac', background: '#f0fdf4', boxSizing: 'border-box', fontWeight: '700' }}
-                          />
-                        </div>
-                      )}
-
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>Desconto Comercial (R$)</label>
-                        <input
-                          type="number"
-                          value={ficha.desconto}
-                          onChange={(e) => {
-                            const novoDesc = Math.max(0, Number(e.target.value) || 0);
-                            setFicha((prev) => {
-                              if (String(prev.categoria_produto || '').toUpperCase() === 'PAC') {
-                                const basePAC = obterValorBaseProduto('PAC', prev.produto_nome);
-                                const liquidoPAC = Math.max(0, basePAC - novoDesc);
-                                const totalPlano = Number(prev.parcelas || 11) + 1;
-                                return {
-                                  ...prev,
-                                  desconto: novoDesc,
-                                  cashback: 0,
-                                  valor_entrada: calcularParcelaEntradaPAC(liquidoPAC, totalPlano)
-                                };
-                              }
-                              return { ...prev, desconto: novoDesc };
-                            });
-                          }}
-                          style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-                        />
-                      </div>
-
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>Parcelas do Restante</label>
+                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>Parcelas do Restante *</label>
                         <input
                           type="number"
                           min="1"
                           max="24"
                           value={ficha.parcelas}
                           onChange={(e) => atualizarCampo('parcelas', Number(e.target.value))}
-                          style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                          style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontWeight: '700' }}
                         />
                       </div>
 
                       <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>Forma do Restante</label>
+                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>Forma do Restante *</label>
                         <select
                           value={ficha.forma_restante}
                           onChange={(e) => atualizarCampo('forma_restante', e.target.value)}
-                          style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', boxSizing: 'border-box' }}
+                          style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', boxSizing: 'border-box', fontWeight: '600' }}
                         >
                           <option value="Pix">Pix</option>
                           <option value="Cartão de Crédito">Cartão de Crédito</option>
@@ -1611,6 +1617,198 @@ export default function InterviewEdit() {
                           <option value="Boleto">Boleto (Requer Aprovação)</option>
                         </select>
                       </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>Desconto Comercial (R$)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={ficha.desconto}
+                          onChange={(e) => {
+                            const novoDesc = Math.max(0, Number(e.target.value) || 0);
+                            if (String(ficha.categoria_produto || '').toUpperCase() === 'PAC') {
+                              const basePAC = obterValorBaseProduto('PAC', ficha.produto_nome);
+                              const liquidoPAC = Math.max(0, basePAC - novoDesc);
+                              const totalPlano = Number(ficha.parcelas || 11) + 1;
+                              aplicarValorEntradaSincronizado(calcularParcelaEntradaPAC(liquidoPAC, totalPlano), {
+                                desconto: novoDesc,
+                                cashback: 0
+                              });
+                              return;
+                            }
+                            atualizarCampo('desconto', novoDesc);
+                          }}
+                          style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+                        />
+                      </div>
+
+                      {ficha.categoria_produto !== 'PAC' && (() => {
+                        const creditoOficial =
+                          Number(ficha.cashback_almoco_cnpj || 0) +
+                          (String(ficha.categoria_produto || '').toUpperCase() === 'GIANTS'
+                            ? Number(ficha.cashback_upgrade_cnpj || 0)
+                            : 0);
+                        const travadoOficial =
+                          creditoOficial > 0 &&
+                          Number(ficha.cashback_upgrade_cnpj || 0) !== 0.01 &&
+                          !isAdmin;
+
+                        return (
+                          <div>
+                            <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', fontWeight: '700', color: '#047857', marginBottom: '0.3rem' }}>
+                              <span>Cashback Abatido (R$)</span>
+                              {travadoOficial && (
+                                <span style={{ fontSize: '0.66rem', background: '#dcfce7', color: '#166534', padding: '0.08rem 0.35rem', borderRadius: '4px' }}>
+                                  Oficial CNPJ
+                                </span>
+                              )}
+                            </label>
+                            <input
+                              type="number"
+                              readOnly={travadoOficial}
+                              value={ficha.cashback}
+                              onChange={(e) => !travadoOficial && atualizarCampo('cashback', Math.max(0, Number(e.target.value) || 0))}
+                              style={{
+                                width: '100%',
+                                padding: '0.6rem',
+                                borderRadius: '8px',
+                                border: '1px solid #86efac',
+                                background: travadoOficial ? '#ecfdf5' : '#f0fdf4',
+                                color: '#065f46',
+                                boxSizing: 'border-box',
+                                fontWeight: '700',
+                                cursor: travadoOficial ? 'not-allowed' : 'text'
+                              }}
+                            />
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* OPÇÕES EXTRAS RECOLHIDAS (ENTRADA EM DATA FUTURA / PERMUTA) */}
+                    <div style={{ borderTop: '1px dashed #e2e8f0', paddingTop: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.74rem', fontWeight: '800', color: '#64748b' }}>Condições especiais:</span>
+
+                        <label
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            padding: '0.35rem 0.75rem',
+                            borderRadius: '999px',
+                            border: usarEntradaFutura ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                            background: usarEntradaFutura ? '#e0f2fe' : '#f8fafc',
+                            color: usarEntradaFutura ? '#0369a1' : '#334155',
+                            fontSize: '0.76rem',
+                            fontWeight: '700',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={usarEntradaFutura}
+                            onChange={(e) => {
+                              const marcado = e.target.checked;
+                              setUsarEntradaFutura(marcado);
+                              if (!marcado) {
+                                setFicha((prev) => ({
+                                  ...prev,
+                                  valor_entrada_complementar: '',
+                                  data_entrada_complementar: ''
+                                }));
+                              }
+                            }}
+                          />
+                          Entrada complementar em data futura
+                        </label>
+
+                        <label
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            padding: '0.35rem 0.75rem',
+                            borderRadius: '999px',
+                            border: usarPermuta ? '1.5px solid #7e22ce' : '1px solid #cbd5e1',
+                            background: usarPermuta ? '#f3e8ff' : '#f8fafc',
+                            color: usarPermuta ? '#6b21a8' : '#334155',
+                            fontSize: '0.76rem',
+                            fontWeight: '700',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={usarPermuta}
+                            onChange={(e) => {
+                              const marcado = e.target.checked;
+                              setUsarPermuta(marcado);
+                              if (!marcado) {
+                                atualizarCampo('valor_permuta', '');
+                              }
+                            }}
+                          />
+                          Abater parte em Permuta
+                        </label>
+                      </div>
+
+                      {usarEntradaFutura && (
+                        <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '9px', padding: '0.75rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.8rem' }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: '700', color: '#0369a1', marginBottom: '0.25rem' }}>
+                              Valor da Entrada Futura (R$) *
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              placeholder="Ex: 30000"
+                              value={ficha.valor_entrada_complementar}
+                              onChange={(e) => {
+                                const v = e.target.value === '' ? '' : Number(e.target.value);
+                                setFicha((prev) => ({
+                                  ...prev,
+                                  valor_entrada_complementar: v,
+                                  data_entrada_complementar: Number(v) > 0 ? prev.data_entrada_complementar : ''
+                                }));
+                              }}
+                              style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #7dd3fc', background: '#ffffff', boxSizing: 'border-box', fontWeight: '700' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: '700', color: '#0369a1', marginBottom: '0.25rem' }}>
+                              Data do Pagamento Futuro *
+                            </label>
+                            <input
+                              type="date"
+                              value={paraInputDate(ficha.data_entrada_complementar)}
+                              onChange={(e) => atualizarCampo('data_entrada_complementar', e.target.value)}
+                              style={{ width: '100%', padding: '0.52rem', borderRadius: '8px', border: '1px solid #7dd3fc', background: '#ffffff', boxSizing: 'border-box' }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {usarPermuta && (
+                        <div style={{ background: '#faf5ff', border: '1px solid #d8b4fe', borderRadius: '9px', padding: '0.75rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.8rem', alignItems: 'center' }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: '700', color: '#6b21a8', marginBottom: '0.25rem' }}>
+                              Valor Abatido em Permuta (R$) *
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              placeholder="Ex: 90000"
+                              value={ficha.valor_permuta}
+                              onChange={(e) => atualizarCampo('valor_permuta', e.target.value === '' ? '' : Number(e.target.value))}
+                              style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #c084fc', background: '#ffffff', boxSizing: 'border-box', fontWeight: '700' }}
+                            />
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: '#6b21a8', lineHeight: 1.4 }}>
+                            <strong>Atenção:</strong> Contratos com permuta passam pela <strong>Liberação do Gestor Comercial</strong>. Descreva o bem ou serviço ofertado no campo de observações abaixo.
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1649,14 +1847,22 @@ export default function InterviewEdit() {
                     </div>
                   )}
 
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#475569', marginBottom: '0.3rem' }}>
-                    {gerouFechamentoComercial ? 'Observações Comerciais / Condições Especiais (Opcional)' : 'Observação de Encerramento / Próximos Passos'}
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: Number(ficha.valor_permuta || 0) > 0 ? '#6b21a8' : '#475569', marginBottom: '0.3rem' }}>
+                    {gerouFechamentoComercial
+                      ? Number(ficha.valor_permuta || 0) > 0
+                        ? 'Descrição da Permuta & Observações Comerciais *'
+                        : 'Observações Comerciais / Condições Especiais (Opcional)'
+                      : 'Observação de Encerramento / Próximos Passos'}
                   </label>
                   <textarea
                     rows="2"
                     value={ficha.resultado_obs}
                     onChange={(e) => atualizarCampo('resultado_obs', e.target.value)}
-                    placeholder={gerouFechamentoComercial ? 'Ex: Combinado envio do contrato até amanhã...' : 'Detalhes rápidos para encerrar e liberar a mesa...'}
+                    placeholder={
+                      gerouFechamentoComercial
+                        ? 'Ex: Detalhes da permuta, acordo de vencimento da entrada futura ou observação para o Financeiro...'
+                        : 'Detalhes rápidos para encerrar e liberar a mesa...'
+                    }
                     style={{ width: '100%', padding: '0.6rem 0.75rem', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '0.85rem' }}
                   />
                 </div>
@@ -1737,13 +1943,27 @@ export default function InterviewEdit() {
                     <strong>- {fmtBRL(calc.permuta)}</strong>
                   </div>
                 )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: '0.5rem', marginTop: '0.2rem' }}>
-                  <span style={{ fontWeight: '700', color: '#334155' }}>Entrada 1 ({ficha.forma_entrada}):</span>
-                  <strong style={{ color: '#059669' }}>{fmtBRL(calc.entrada)}</strong>
+                <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '0.5rem', marginTop: '0.2rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: '700', color: '#334155' }}>
+                      Entrada 1 {(ficha.pagamentosEntrada || []).length > 1 ? `(${ficha.pagamentosEntrada.length} meios)` : `(${formatarLinhaPagamentoLabel((ficha.pagamentosEntrada || [])[0] || { forma: ficha.forma_entrada })})`}:
+                    </span>
+                    <strong style={{ color: '#059669' }}>{fmtBRL(calc.entrada)}</strong>
+                  </div>
+                  {Array.isArray(ficha.pagamentosEntrada) && ficha.pagamentosEntrada.length > 1 && (
+                    <div style={{ marginTop: '0.25rem', paddingLeft: '0.5rem', borderLeft: '2px solid #86efac', display: 'flex', flexDirection: 'column', gap: '0.18rem' }}>
+                      {ficha.pagamentosEntrada.map((pg, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', color: '#475569' }}>
+                          <span>• {formatarLinhaPagamentoLabel(pg)} {pg.comprovante ? '📎' : ''}</span>
+                          <strong style={{ color: '#0f172a' }}>{fmtBRL(pg.valor)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 {Number(calc.entradaComplementar || 0) > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0369a1' }}>
-                    <span>Entrada 2 {ficha.data_entrada_complementar ? '(' + ficha.data_entrada_complementar + ')' : ''}:</span>
+                    <span>Entrada 2 {ficha.data_entrada_complementar ? '(' + formatarDataBR(ficha.data_entrada_complementar) + ')' : ''}:</span>
                     <strong>{fmtBRL(calc.entradaComplementar)}</strong>
                   </div>
                 )}
@@ -1756,6 +1976,22 @@ export default function InterviewEdit() {
                     {calc.parcelas}x de {fmtBRL(calc.valorParcela)} ({ficha.forma_restante})
                   </div>
                 </div>
+
+                {/* Alertas Preventivos antes da finalização */}
+                {!isFechada && calc.precisaAprovacao && (
+                  <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '8px', padding: '0.55rem 0.7rem', marginTop: '0.3rem', fontSize: '0.73rem', color: '#92400e' }}>
+                    <div style={{ fontWeight: '800', marginBottom: '0.2rem' }}>⚠️ Passará por Liberação Comercial:</div>
+                    {calc.motivosAprovacao.map((m, idxM) => (
+                      <div key={idxM}>• {m}</div>
+                    ))}
+                  </div>
+                )}
+
+                {!isFechada && (ficha.pagamentosEntrada || []).some((p) => Number(p.valor || 0) > 0 && !String(p.identificador || '').trim() && !p.comprovante) && (
+                  <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '0.5rem 0.7rem', marginTop: '0.2rem', fontSize: '0.72rem', color: '#1e40af', fontWeight: '600' }}>
+                    💡 Dica: Há meio de pagamento sem CV/ID ou comprovante anexado. Preencher evita devolução pelo Financeiro.
+                  </div>
+                )}
               </div>
             ) : (
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.75rem', fontSize: '0.78rem', color: '#64748b' }}>
@@ -1964,13 +2200,32 @@ export default function InterviewEdit() {
                         <strong>- {fmtBRL(calc.permuta)}</strong>
                       </div>
                     )}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #e2e8f0', paddingTop: '0.4rem', marginTop: '0.15rem' }}>
-                      <span style={{ fontWeight: '700', color: '#334155' }}>Condição Acordada:</span>
-                      <strong style={{ color: '#ff5722', textAlign: 'right' }}>
-                        Entr. {fmtBRL(calc.entrada)} ({ficha.forma_entrada})
-                        {Number(calc.entradaComplementar || 0) > 0 ? ' + ' + fmtBRL(calc.entradaComplementar) : ''}
-                        {' '}• {calc.parcelas}x {fmtBRL(calc.valorParcela)} ({ficha.forma_restante})
-                      </strong>
+                    <div style={{ borderTop: '1px dashed #e2e8f0', paddingTop: '0.45rem', marginTop: '0.15rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ fontWeight: '700', color: '#334155' }}>Entrada 1 Acordada:</span>
+                        <strong style={{ color: '#059669' }}>{fmtBRL(calc.entrada)}</strong>
+                      </div>
+                      {Array.isArray(ficha.pagamentosEntrada) && ficha.pagamentosEntrada.length > 0 && (
+                        <div style={{ marginTop: '0.2rem', paddingLeft: '0.5rem', borderLeft: '2px solid #cbd5e1', display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                          {ficha.pagamentosEntrada.map((pg, i) => (
+                            <div key={i} style={{ fontSize: '0.75rem', color: '#475569' }}>
+                              • <strong>{formatarLinhaPagamentoLabel(pg)}</strong>: {fmtBRL(pg.valor)} {pg.identificador ? `(${pg.identificador})` : ''} {pg.comprovante ? '✔ Comprovante' : ''}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {Number(calc.entradaComplementar || 0) > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: '#0369a1', marginTop: '0.2rem' }}>
+                          <span>Entrada 2 {ficha.data_entrada_complementar ? `(${formatarDataBR(ficha.data_entrada_complementar)})` : ''}:</span>
+                          <strong>{fmtBRL(calc.entradaComplementar)}</strong>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.25rem' }}>
+                        <span style={{ fontWeight: '700', color: '#334155' }}>Saldo Parcelado:</span>
+                        <strong style={{ color: '#ff5722' }}>
+                          {calc.parcelas}x de {fmtBRL(calc.valorParcela)} ({ficha.forma_restante})
+                        </strong>
+                      </div>
                     </div>
                     {ficha.identificador_pagamento && (
                       <div style={{ fontSize: '0.76rem', color: '#0369a1', marginTop: '0.15rem' }}>
