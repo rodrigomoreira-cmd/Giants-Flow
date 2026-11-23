@@ -203,6 +203,7 @@ router.post('/entrevistas/resultado', async (req, res) => {
     const { rows: atualizadas } = await client.query(
       `UPDATE fichas
        SET etapa_funil = $1::varchar,
+           momento_aplicacao = COALESCE(NULLIF(TRIM($8::text), ''), momento_aplicacao),
            mesa_alocada = NULL,
            assento_alocado = NULL,
            ficha_fechada = true,
@@ -219,7 +220,7 @@ router.post('/entrevistas/resultado', async (req, res) => {
             )
           )
        RETURNING *`,
-      [novaEtapa, userInfo.id, Number(id), base.turma_id, cnpjLimpo, empNorm, sociosIdsExtra]
+      [novaEtapa, userInfo.id, Number(id), base.turma_id, cnpjLimpo, empNorm, sociosIdsExtra, String(req.body?.momentoAplicacao || req.body?.momento_aplicacao || '').trim()]
     );
 
     if (novaEtapa === 'decisao_futura' || novaEtapa === 'reprovado') {
@@ -279,6 +280,7 @@ router.post('/entrevistas/:id/reabrir', async (req, res) => {
     const base = baseRows[0];
     const etapaAtualReabrir = String(base.etapa_funil || '').trim().toLowerCase();
     const statusAprovReabrir = String(base.status_aprovacao || '').trim().toLowerCase();
+    const ehDecisaoFutura = ['decisao_futura', 'follow_up'].includes(etapaAtualReabrir);
     const podeRetomarOperador =
       ['decisao_futura', 'follow_up', 'ajuste_solicitado'].includes(etapaAtualReabrir) ||
       statusAprovReabrir === 'ajuste_solicitado';

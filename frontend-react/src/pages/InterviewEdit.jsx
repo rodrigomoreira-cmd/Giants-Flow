@@ -53,6 +53,8 @@ export default function InterviewEdit() {
     telefone: '',
     email: '',
     periodo_entrevista: 'Almoço',
+    momento_aplicacao: '',
+    momento_outro_detalhe: '',
 
     // Etapa 2 - Negociação
     categoria_produto: 'GIANTS',
@@ -181,6 +183,13 @@ export default function InterviewEdit() {
             cashback: cashbackAlmocoCnpj + cashbackUpgradeCnpj,
             socios: qtdEntrando,
             parecer_financeiro: clienteEncontrado.parecer_financeiro || '',
+            momento_aplicacao: clienteEncontrado.momento_aplicacao || '',
+            momento_outro_detalhe:
+              clienteEncontrado.momento_aplicacao && !['Coffee', 'Almoço', 'Janta'].includes(clienteEncontrado.momento_aplicacao)
+                ? clienteEncontrado.momento_aplicacao
+                : '',
+            periodo_entrevista:
+              clienteEncontrado.momento_aplicacao === 'Janta' ? 'Jantar' : 'Almoço',
             ...(clienteEncontrado.dados_proposta && typeof clienteEncontrado.dados_proposta === 'object'
               ? {
                   categoria_produto: clienteEncontrado.dados_proposta.categoriaProduto || 'GIANTS',
@@ -615,7 +624,11 @@ export default function InterviewEdit() {
       await api.post('/entrevistas/resultado', {
         aplicacaoId: appTargetId,
         turmaId: ficha.turma_id || 1491,
-        turno: ficha.periodo_entrevista === 'Almoço' ? 'almoco' : 'jantar',
+        turno: (ficha.momento_aplicacao || ficha.periodo_entrevista) === 'Janta' || ficha.periodo_entrevista === 'Jantar' ? 'jantar' : 'almoco',
+        momentoAplicacao:
+          ficha.momento_aplicacao === 'Outro Momento'
+            ? (ficha.momento_outro_detalhe?.trim() || 'Outro Momento')
+            : (ficha.momento_aplicacao || ficha.periodo_entrevista || ''),
         resultado: ficha.resultado_comercial,
         sociosIds: sociosLista.map((s) => Number(s.id)).filter((n) => Number.isInteger(n) && n > 0),
         observacao: `[${ficha.resultado_comercial}] Empresa: ${ficha.razao_social} | Sócios no contrato (${sociosQueEntram.length}): ${resumoSocios} | ${ficha.resultado_obs || ''} | Resumo: ${ficha.resumo_entrevista || 'N/A'}`
@@ -904,28 +917,64 @@ export default function InterviewEdit() {
                 <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '1.35rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                     <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '800', color: '#0f172a' }}>
-                      Dados da Empresa & Turno
+                      Dados da Empresa & Momento da Aplicação
                     </h3>
-                    <div style={{ display: 'flex', gap: '0.4rem' }}>
-                      {['Almoço', 'Jantar'].map((turnoOp) => (
-                        <button
-                          key={turnoOp}
-                          type="button"
-                          onClick={() => atualizarCampo('periodo_entrevista', turnoOp)}
-                          style={{
-                            padding: '0.35rem 0.8rem',
-                            borderRadius: '999px',
-                            border: ficha.periodo_entrevista === turnoOp ? '1.5px solid #ff5722' : '1px solid #cbd5e1',
-                            background: ficha.periodo_entrevista === turnoOp ? '#fff7ed' : '#f8fafc',
-                            color: ficha.periodo_entrevista === turnoOp ? '#c2410c' : '#475569',
-                            fontWeight: '700',
-                            fontSize: '0.78rem',
-                            cursor: 'pointer'
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.45rem' }}>
+                      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        {[
+                          { val: 'Coffee', label: '☕ Coffee' },
+                          { val: 'Almoço', label: '🍽️ Almoço' },
+                          { val: 'Janta', label: '🌙 Janta' },
+                          { val: 'Outro Momento', label: '✨ Outro Momento' }
+                        ].map((op) => {
+                          const isOutro = op.val === 'Outro Momento';
+                          const ativo = isOutro
+                            ? ficha.momento_aplicacao === 'Outro Momento' ||
+                              (Boolean(ficha.momento_aplicacao) && !['Coffee', 'Almoço', 'Janta'].includes(ficha.momento_aplicacao))
+                            : ficha.momento_aplicacao === op.val;
+                          return (
+                            <button
+                              key={op.val}
+                              type="button"
+                              onClick={() => {
+                                atualizarCampo('momento_aplicacao', op.val);
+                                atualizarCampo('periodo_entrevista', op.val === 'Janta' ? 'Jantar' : 'Almoço');
+                              }}
+                              style={{
+                                padding: '0.35rem 0.8rem',
+                                borderRadius: '999px',
+                                border: ativo ? '1.5px solid #ff5722' : '1px solid #cbd5e1',
+                                background: ativo ? '#fff7ed' : '#f8fafc',
+                                color: ativo ? '#c2410c' : '#475569',
+                                fontWeight: '700',
+                                fontSize: '0.78rem',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {op.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {(ficha.momento_aplicacao === 'Outro Momento' ||
+                        (Boolean(ficha.momento_aplicacao) && !['Coffee', 'Almoço', 'Janta'].includes(ficha.momento_aplicacao))) && (
+                        <input
+                          type="text"
+                          placeholder="Qual momento? (ex: Happy Hour, Café VIP...)"
+                          value={ficha.momento_outro_detalhe || ''}
+                          onChange={(e) => {
+                            atualizarCampo('momento_outro_detalhe', e.target.value);
+                            atualizarCampo('momento_aplicacao', 'Outro Momento');
                           }}
-                        >
-                          {turnoOp === 'Almoço' ? '☀️ Almoço' : '🌙 Jantar'}
-                        </button>
-                      ))}
+                          style={{
+                            padding: '0.35rem 0.7rem',
+                            borderRadius: '8px',
+                            border: '1px solid #cbd5e1',
+                            fontSize: '0.8rem',
+                            minWidth: '240px'
+                          }}
+                        />
+                      )}
                     </div>
                   </div>
 

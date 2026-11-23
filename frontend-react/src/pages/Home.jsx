@@ -208,8 +208,57 @@ export default function Home() {
       .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
       .slice(0, 7);
 
+    // Contagem de preenchimento de fichas por Momento da Aplicação (por empresa/CNPJ)
+    const contagemMomentos = {
+      Coffee: 0,
+      'Almoço': 0,
+      Janta: 0,
+      'Outro Momento': 0
+    };
+    let semMomentoQtd = 0;
+
+    for (const g of empresasElegiveis) {
+      const membroComMomento = g.membros.find((m) => String(m.momento_aplicacao || '').trim() !== '');
+      const rawMom = membroComMomento ? String(membroComMomento.momento_aplicacao || '').trim() : '';
+      if (!rawMom) {
+        semMomentoQtd += 1;
+      } else if (rawMom === 'Coffee') {
+        contagemMomentos.Coffee += 1;
+      } else if (rawMom === 'Almoço' || rawMom === 'Almoco') {
+        contagemMomentos['Almoço'] += 1;
+      } else if (rawMom === 'Janta' || rawMom === 'Jantar') {
+        contagemMomentos.Janta += 1;
+      } else {
+        contagemMomentos['Outro Momento'] += 1;
+      }
+    }
+
+    const totalClassificadasMomento = Object.values(contagemMomentos).reduce((acc, v) => acc + v, 0);
+    const maiorQtdMomento = Math.max(...Object.values(contagemMomentos), 0);
+
+    const rankingMomentos = [
+      { chave: 'Coffee', titulo: 'Coffee', icone: '☕', cor: '#b45309', bg: '#fef3c7', barra: '#f59e0b' },
+      { chave: 'Almoço', titulo: 'Almoço', icone: '🍽️', cor: '#c2410c', bg: '#ffedd5', barra: '#ff5722' },
+      { chave: 'Janta', titulo: 'Janta', icone: '🌙', cor: '#4338ca', bg: '#e0e7ff', barra: '#6366f1' },
+      { chave: 'Outro Momento', titulo: 'Outro Momento', icone: '✨', cor: '#0f766e', bg: '#ccfbf1', barra: '#14b8a6' }
+    ]
+      .map((cat) => {
+        const qtd = contagemMomentos[cat.chave] || 0;
+        const pct = totalClassificadasMomento > 0 ? Math.round((qtd / totalClassificadasMomento) * 100) : 0;
+        return {
+          ...cat,
+          qtd,
+          pct,
+          lider: maiorQtdMomento > 0 && qtd === maiorQtdMomento
+        };
+      })
+      .sort((a, b) => b.qtd - a.qtd);
+
     return {
       totalAlunosLinhas: clientes.length,
+      rankingMomentos,
+      totalClassificadasMomento,
+      semMomentoQtd,
       giantsPresentes,
       totalEmpresasElegiveis: empresasElegiveis.length,
       fichasPreenchidasQtd: fichasPreenchidas.length,
@@ -688,6 +737,70 @@ export default function Home() {
               ? `⚠ ${resumoSalao.propAlertas.length} proposta(s) recusada/com ressalva`
               : 'Nenhuma pendência crítica de crédito'}
           </div>
+        </div>
+      </div>
+
+      {/* PAINEL: PREENCHIMENTO DE FICHAS POR MOMENTO DA APLICAÇÃO */}
+      <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '1.25rem 1.35rem', marginBottom: '1.5rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: '800', color: '#0f172a' }}>
+              Preenchimento de Fichas por Momento da Aplicação
+            </h2>
+            <p style={{ margin: '0.2rem 0 0', fontSize: '0.78rem', color: '#64748b' }}>
+              Ranking em tempo real de captação por momento ({resumoSalao.totalClassificadasMomento} classificadas{resumoSalao.semMomentoQtd > 0 ? ` • ${resumoSalao.semMomentoQtd} sem momento definido` : ''})
+            </p>
+          </div>
+          {resumoSalao.totalClassificadasMomento > 0 && resumoSalao.rankingMomentos[0]?.qtd > 0 && (
+            <span style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fdba74', padding: '0.32rem 0.8rem', borderRadius: '999px', fontSize: '0.76rem', fontWeight: '800' }}>
+              🏆 Líder: {resumoSalao.rankingMomentos[0].icone} {resumoSalao.rankingMomentos[0].titulo} ({resumoSalao.rankingMomentos[0].qtd} {resumoSalao.rankingMomentos[0].qtd === 1 ? 'ficha' : 'fichas'})
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '0.9rem' }}>
+          {resumoSalao.rankingMomentos.map((item) => (
+            <div
+              key={item.chave}
+              style={{
+                padding: '0.95rem 1.1rem',
+                borderRadius: '11px',
+                border: item.lider ? `2px solid ${item.barra}` : '1px solid #e2e8f0',
+                background: item.lider ? '#fffaf5' : '#f8fafc'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontWeight: '800', fontSize: '0.9rem', color: '#0f172a' }}>
+                  <span>{item.icone}</span>
+                  <span>{item.titulo}</span>
+                </span>
+                {item.lider && (
+                  <span style={{ background: item.bg, color: item.cor, fontSize: '0.66rem', fontWeight: '800', padding: '0.14rem 0.45rem', borderRadius: '999px' }}>
+                    MAIOR VOLUME
+                  </span>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.45rem', marginBottom: '0.5rem' }}>
+                <span style={{ fontSize: '1.55rem', fontWeight: '900', color: '#0f172a' }}>{item.qtd}</span>
+                <span style={{ fontSize: '0.78rem', fontWeight: '700', color: '#64748b' }}>
+                  {item.qtd === 1 ? 'ficha' : 'fichas'} ({item.pct}%)
+                </span>
+              </div>
+
+              <div style={{ width: '100%', height: '7px', background: '#e2e8f0', borderRadius: '999px', overflow: 'hidden' }}>
+                <div
+                  style={{
+                    width: `${item.pct}%`,
+                    height: '100%',
+                    background: item.barra,
+                    borderRadius: '999px',
+                    transition: 'width 0.3s ease'
+                  }}
+                />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
